@@ -203,5 +203,11 @@ config MTD_NAND_DISKONCHIP_BBTWRITE
 	help
 	  The simulator may simulate verious NAND flash chips for the
 	  MTD nand layer.
- 
+
+ config MTD_NAND_RTK
+        bool "Realtek NAND Flash Driver"
+	depends on MTD_NAND	
+        help
+          This is Nand flash driver for Realtek.
+
 endmenu

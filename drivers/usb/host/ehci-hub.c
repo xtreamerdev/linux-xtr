@@ -183,6 +183,12 @@ static int check_reset_complete (
 
 	/* if reset finished and it's still not enabled -- handoff */
 	if (!(port_status & PORT_PE)) {
+		// hack for memorette usb device, which port_status will be 0x1100 when plug in/out to fast
+		if (!(port_status & (3<<10))) {
+			printk("#######[cfyeh-debug] %s(%d) hack for memorette usb device port_status 0x%x\n", __func__, __LINE__, port_status);
+			ehci->reset_done [index] = 0;
+			return port_status;
+		}
 
 		/* with integrated TT, there's nobody to hand it to! */
 		if (ehci_is_TDI(ehci)) {
@@ -487,24 +493,41 @@ static int ehci_hub_control (
 	if (status & ~0xffff)	/* only if wPortChange is interesting */
 #endif
 		dbg_port (ehci, "GetStatus", wIndex + 1, temp);
+		//if(temp != readl (&ehci->regs->port_status [wIndex])) {
+		if(!(temp & PORT_CONNECT) && (readl (&ehci->regs->port_status [wIndex]) & PORT_CONNECT)) {
+			printk("#######[cfyeh-debug] %s(%d) readl (&ehci->regs->port_status [%d]) != temp\n", __func__, __LINE__, wIndex);
+			dbg_port (ehci, "GetStatus", wIndex + 1, readl (&ehci->regs->port_status [wIndex]));
+			writel (temp | PORT_OWNER,
+				&ehci->regs->port_status [wIndex]);
+		}
+
+		// hack for memorette usb device, which port_status will be 0x1100 when plug in/out to fast
+		if ((temp & PORT_RESET) && !(temp & PORT_CONNECT)) {
+			printk("#######[cfyeh-debug] %s(%d) hack for memorette usb device port_status 0x%x\n", __func__, __LINE__, temp);
+			writel (temp & ~PORT_POWER,
+				&ehci->regs->port_status [wIndex]);
+			msleep(100);
+			writel (temp | PORT_POWER,
+				&ehci->regs->port_status [wIndex]);
+		}
+
 		// we "know" this alignment is good, caller used kmalloc()...
 		*((__le32 *) buf) = cpu_to_le32 (status);
 #ifdef CONFIG_REALTEK_VENUS_USB_1261 //cfyeh+ for LS device 2005/12/07
-		if(LS_device==1)
+		if(is_venus_cpu())
 		{
-			LS_device=0;
-		}
-		else
-		{
-			//cfyeh+ 2005/12/07
-			//for trigger GPIO4 high
-			//writel(1<<4, 0xb801b108);
-			//for test low speed device
-			//to write 0xb8013810 bit[11:10]=00
-			writel(readl((void __iomem *)0xb8013810) & ~(u32)(0x3<<10), (void __iomem *)0xb8013810);
-			//for trigger GPIO4 low
-			//writel(0x0, 0xb801b108);
-			//cfyeh- 2005/12/07
+			if(LS_device==1)
+			{
+				LS_device=0;
+			}
+			else
+			{
+				//cfyeh+ 2005/12/07
+				//for test low speed device
+				//to write VENUS_USB_HOST_SELF_LOOP_BACK bit[11:10]=00
+				outl(inl(VENUS_USB_HOST_SELF_LOOP_BACK) & ~(u32)(0x3<<10), VENUS_USB_HOST_SELF_LOOP_BACK);
+				//cfyeh- 2005/12/07
+			}
 		}
 #endif /* CONFIG_REALTEK_VENUS_USB_1261 */   //cfyeh+ 2005/12/07
 		break;
@@ -556,16 +579,15 @@ static int ehci_hub_control (
 					wIndex + 1);
 				temp |= PORT_OWNER;
 #ifdef CONFIG_REALTEK_VENUS_USB_1261 //cfyeh+ for LS device 2005/12/07
-				LS_device = 1;
-				//cfyeh+ 2005/12/07
-				//for trigger GPIO4 high
-				//writel(1<<4, 0xb801b108);
-				//for test low speed device
-				//to write 0xb8013810 bit[11:10]=01
-				writel((readl((void __iomem *)0xb8013810) & ~(u32)(0x3<<10))| (0x1 <<10), (void __iomem *)0xb8013810);
-				//for trigger GPIO4 low
-				//writel(0x0, 0xb801b108);
-				//cfyeh- 2005/12/07
+				if(is_venus_cpu())
+				{
+					LS_device = 1;
+					//cfyeh+ 2005/12/07
+					//for test low speed device
+					//to write VENUS_USB_HOST_SELF_LOOP_BACK bit[11:10]=01
+					outl((inl(VENUS_USB_HOST_SELF_LOOP_BACK) & ~(u32)(0x3<<10))| (0x1 <<10), VENUS_USB_HOST_SELF_LOOP_BACK);
+					//cfyeh- 2005/12/07
+				}
 #endif /* CONFIG_REALTEK_VENUS_USB_1261 */  //cfyeh+ 2005/12/07
 			} else {
 				ehci_vdbg (ehci, "port %d reset\n", wIndex + 1);

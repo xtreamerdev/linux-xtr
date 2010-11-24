@@ -207,6 +207,12 @@
 #undef VERBOSE
 #undef DUMP_MSGS
 
+/*
+#define DEBUG			1
+#define VERBOSE			1
+#define DUMP_MSGS		1
+*/
+
 #include <linux/config.h>
 
 #include <asm/system.h>
@@ -258,12 +264,18 @@ MODULE_DESCRIPTION(DRIVER_DESC);
 MODULE_AUTHOR("Alan Stern");
 MODULE_LICENSE("Dual BSD/GPL");
 
+
+#if defined(CONFIG_USB_OTG_REALTEK)
+#define DRIVER_VENDOR_ID	0x0525	// Realtek
+#define DRIVER_PRODUCT_ID	0x1265  // Linux-USB File-backed Storage Gadget
+#else
 /* Thanks to NetChip Technologies for donating this product ID.
  *
  * DO NOT REUSE THESE IDs with any other driver!!  Ever!!
- * Instead:  allocate your own, using normal USB-IF procedures. */
+ * Instead:  allocate your own, using normal USB-IF procedures. */ 
 #define DRIVER_VENDOR_ID	0x0525	// NetChip
 #define DRIVER_PRODUCT_ID	0xa4a5	// Linux-USB File-backed Storage Gadget
+#endif
 
 
 /*
@@ -280,6 +292,7 @@ MODULE_LICENSE("Dual BSD/GPL");
 #define yprintk(l,level,fmt,args...) \
 	dev_printk(level , &(l)->dev , fmt , ## args)
 
+/*
 #ifdef DEBUG
 #define DBG(fsg,fmt,args...) \
 	xprintk(fsg , KERN_DEBUG , fmt , ## args)
@@ -296,7 +309,30 @@ MODULE_LICENSE("Dual BSD/GPL");
 	do { } while (0)
 #undef VERBOSE
 #undef DUMP_MSGS
+#endif // DEBUG
+*/
+
+// #define DEBUG   1
+// #define VERBOSE 1
+
+#ifdef DEBUG
+#define DBG(fsg,fmt,args...) \
+	printk(fmt , ## args)
+#define LDBG(lun,fmt,args...) \
+	printk(fmt , ## args)
+#define MDBG(fmt,args...) \
+	printk(KERN_DEBUG DRIVER_NAME ": " fmt , ## args)
+#else
+#define DBG(fsg,fmt,args...) \
+	do { } while (0)
+#define LDBG(lun,fmt,args...) \
+	do { } while (0)
+#define MDBG(fmt,args...) \
+	do { } while (0)
+#undef VERBOSE
+#undef DUMP_MSGS
 #endif /* DEBUG */
+
 
 #ifdef VERBOSE
 #define VDBG	DBG
@@ -359,11 +395,11 @@ static struct {
 } mod_data = {					// Default values
 	.transport_parm		= "BBB",
 	.protocol_parm		= "SCSI",
-	.removable		= 0,
+	.removable		= 1,// 0,
 	.vendor			= DRIVER_VENDOR_ID,
 	.product		= DRIVER_PRODUCT_ID,
 	.release		= 0xffff,	// Use controller chip type
-	.buflen			= 16384,
+	.buflen			= 32768,
 	.can_stall		= 1,
 	};
 
@@ -379,6 +415,15 @@ MODULE_PARM_DESC(luns, "number of LUNs");
 
 module_param_named(removable, mod_data.removable, bool, S_IRUGO);
 MODULE_PARM_DESC(removable, "true to simulate removable media");
+
+#if defined(CONFIG_USB_OTG_REALTEK_REMOTE_WAKEUP)
+/*
+ * if it's nonzero, autoresume says how many seconds to wait
+ * before trying to wake up the host after suspend.
+ */
+static unsigned autoresume = 0;
+module_param (autoresume, uint, 0);
+#endif
 
 
 /* In the non-TEST version, only the module parameters listed above
@@ -574,7 +619,7 @@ static inline struct lun *dev_to_lun(struct device *dev)
 #define DELAYED_STATUS	(EP0_BUFSIZE + 999)	// An impossibly large value
 
 /* Number of buffers we will use.  2 is enough for double-buffering */
-#define NUM_BUFFERS	2
+#define NUM_BUFFERS	 (2)
 
 enum fsg_buffer_state {
 	BUF_STATE_EMPTY = 0,
@@ -597,13 +642,14 @@ struct fsg_buffhd {
 	volatile int			inreq_busy;
 	struct usb_request		*outreq;
 	volatile int			outreq_busy;
+		
 };
 
 enum fsg_state {
 	FSG_STATE_COMMAND_PHASE = -10,		// This one isn't used anywhere
 	FSG_STATE_DATA_PHASE,
 	FSG_STATE_STATUS_PHASE,
-
+	
 	FSG_STATE_IDLE = 0,
 	FSG_STATE_ABORT_BULK_OUT,
 	FSG_STATE_RESET,
@@ -612,6 +658,12 @@ enum fsg_state {
 	FSG_STATE_DISCONNECT,
 	FSG_STATE_EXIT,
 	FSG_STATE_TERMINATED
+};
+
+/* cyhuang (2008/5/2) : Patch for MST. */
+enum fsg_mst_state {
+	FSG_MST_STATE_CBW_COMMAND_OK = 0,
+	FSG_MST_STATE_CBW_COMMAND_ERROR = 1
 };
 
 enum data_direction {
@@ -694,6 +746,12 @@ struct fsg_dev {
 	struct lun		*luns;
 	struct lun		*curlun;
 	struct completion	lun_released;
+	
+#if defined(CONFIG_USB_OTG_REALTEK_REMOTE_WAKEUP)	
+	struct timer_list	resume;
+#endif	
+	enum fsg_mst_state mst_state;
+
 };
 
 typedef void (*fsg_routine_t)(struct fsg_dev *);
@@ -722,6 +780,9 @@ static struct usb_gadget_driver		fsg_driver;
 static void	close_backing_file(struct lun *curlun);
 static void	close_all_backing_files(struct fsg_dev *fsg);
 
+#if defined(CONFIG_USB_OTG_REALTEK_REMOTE_WAKEUP)
+static void fsg_autoresume (unsigned long _dev);
+#endif
 
 /*-------------------------------------------------------------------------*/
 
@@ -1348,7 +1409,6 @@ static int class_setup_req(struct fsg_dev *fsg,
 	return value;
 }
 
-
 /*-------------------------------------------------------------------------*/
 
 /* Ep0 standard request handlers.  These always run in_irq. */
@@ -1468,7 +1528,19 @@ static int standard_setup_req(struct fsg_dev *fsg,
 		*(u8 *) req->buf = 0;
 		value = min(w_length, (u16) 1);
 		break;
-
+	/* cyhuang (2008/5/2) : 
+	 * 						Patch for MST. 
+	 * 						We need to know clear feature request after clear feature. 
+	 */	
+	case USB_REQ_CLEAR_FEATURE :	
+		if (fsg->mst_state == FSG_MST_STATE_CBW_COMMAND_ERROR) {
+			send_status(fsg);
+			fsg->mst_state = FSG_MST_STATE_CBW_COMMAND_OK;
+			printk("FSG_STATE_CBW_COMMAND_ERROR\n");
+		}	
+		
+		value = DELAYED_STATUS;
+		break;
 	default:
 		VDBG(fsg,
 			"unknown control req %02x.%02x v%04x i%04x l%u\n",
@@ -1499,8 +1571,13 @@ static int fsg_setup(struct usb_gadget *gadget,
 	/* Respond with data/status or defer until later? */
 	if (rc >= 0 && rc != DELAYED_STATUS) {
 		fsg->ep0req->length = rc;
+/* cyhuang (2008/3/14) : We don't need to send any zero length packet. */
+#if defined(CONFIG_USB_OTG_REALTEK)		
+		fsg->ep0req->zero = 0;
+#else		
 		fsg->ep0req->zero = (rc < ctrl->wLength &&
 				(rc % gadget->ep0->maxpacket) == 0);
+#endif				
 		fsg->ep0req_name = (ctrl->bRequestType & USB_DIR_IN ?
 				"ep0-in" : "ep0-out");
 		rc = ep0_queue(fsg);
@@ -1613,10 +1690,12 @@ static int do_read(struct fsg_dev *fsg)
 		amount = min((unsigned int) amount_left, mod_data.buflen);
 		amount = min((loff_t) amount,
 				curlun->file_length - file_offset);
+#ifndef CONFIG_USB_FILE_STORAGE_DIRECT_IO_MODE
 		partial_page = file_offset & (PAGE_CACHE_SIZE - 1);
 		if (partial_page > 0)
 			amount = min(amount, (unsigned int) PAGE_CACHE_SIZE -
 					partial_page);
+#endif /* ! CONFIG_USB_FILE_STORAGE_DIRECT_IO_MODE */
 
 		/* Wait for the next buffer to become available */
 		bh = fsg->next_buffhd_to_fill;
@@ -1750,10 +1829,12 @@ static int do_write(struct fsg_dev *fsg)
 			amount = min(amount_left_to_req, mod_data.buflen);
 			amount = min((loff_t) amount, curlun->file_length -
 					usb_offset);
+#ifndef CONFIG_USB_FILE_STORAGE_DIRECT_IO_MODE
 			partial_page = usb_offset & (PAGE_CACHE_SIZE - 1);
 			if (partial_page > 0)
 				amount = min(amount,
 	(unsigned int) PAGE_CACHE_SIZE - partial_page);
+#endif /* ! CONFIG_USB_FILE_STORAGE_DIRECT_IO_MODE */
 
 			if (amount == 0) {
 				get_some_more = 0;
@@ -1814,6 +1895,7 @@ static int do_write(struct fsg_dev *fsg)
 
 			/* Perform the write */
 			file_offset_tmp = file_offset;
+
 			nwritten = vfs_write(curlun->filp,
 					(char __user *) bh->buf,
 					amount, &file_offset_tmp);
@@ -2397,7 +2479,6 @@ static int throw_away_data(struct fsg_dev *fsg)
 	return 0;
 }
 
-
 static int finish_reply(struct fsg_dev *fsg)
 {
 	struct fsg_buffhd	*bh = fsg->next_buffhd_to_fill;
@@ -2406,20 +2487,21 @@ static int finish_reply(struct fsg_dev *fsg)
 	switch (fsg->data_dir) {
 	case DATA_DIR_NONE:
 		break;			// Nothing to send
+		
 
 	/* If we don't know whether the host wants to read or write,
 	 * this must be CB or CBI with an unknown command.  We mustn't
 	 * try to send or receive any data.  So stall both bulk pipes
 	 * if we can and wait for a reset. */
 	case DATA_DIR_UNKNOWN:
-		if (mod_data.can_stall) {
+		if (mod_data.can_stall) {			
 			fsg_set_halt(fsg, fsg->bulk_out);
 			rc = halt_bulk_in_endpoint(fsg);
 		}
 		break;
 
 	/* All but the last buffer of data must have already been sent */
-	case DATA_DIR_TO_HOST:
+	case DATA_DIR_TO_HOST:		
 		if (fsg->data_size == 0)
 			;		// Nothing to send
 
@@ -2442,9 +2524,15 @@ static int finish_reply(struct fsg_dev *fsg)
 					fsg->residue == fsg->data_size &&
 	(!fsg->curlun || fsg->curlun->sense_data != SS_NO_SENSE)) {
 				bh->state = BUF_STATE_EMPTY;
+								
 				rc = halt_bulk_in_endpoint(fsg);
 			} else {
+/* cyhuang (2008/3/18) : We don't need to send any zero length packet. */
+#if defined(CONFIG_USB_OTG_REALTEK)		
+				bh->inreq->zero = 0;
+#else				
 				bh->inreq->zero = 1;
+#endif				
 				start_transfer(fsg, fsg->bulk_in, bh->inreq,
 						&bh->inreq_busy, &bh->state);
 				fsg->next_buffhd_to_fill = bh->next;
@@ -2456,10 +2544,16 @@ static int finish_reply(struct fsg_dev *fsg)
 		 * stall, pad out the remaining data with 0's. */
 		else {
 			if (mod_data.can_stall) {
+/* cyhuang (2008/3/14) : We don't need to send any zero length packet. */
+#if defined(CONFIG_USB_OTG_REALTEK)		
+				bh->inreq->zero = 0;
+#else				
 				bh->inreq->zero = 1;
+#endif				
 				start_transfer(fsg, fsg->bulk_in, bh->inreq,
 						&bh->inreq_busy, &bh->state);
 				fsg->next_buffhd_to_fill = bh->next;
+				
 				rc = halt_bulk_in_endpoint(fsg);
 			} else
 				rc = pad_with_zeros(fsg);
@@ -2468,12 +2562,12 @@ static int finish_reply(struct fsg_dev *fsg)
 
 	/* We have processed all we want from the data the host has sent.
 	 * There may still be outstanding bulk-out requests. */
-	case DATA_DIR_FROM_HOST:
+	case DATA_DIR_FROM_HOST:	
 		if (fsg->residue == 0)
 			;		// Nothing to receive
 
 		/* Did the host stop sending unexpectedly early? */
-		else if (fsg->short_packet_received) {
+		else if (fsg->short_packet_received) {			
 			raise_exception(fsg, FSG_STATE_ABORT_BULK_OUT);
 			rc = -EINTR;
 		}
@@ -2494,8 +2588,9 @@ static int finish_reply(struct fsg_dev *fsg)
 
 		/* We can't stall.  Read in the excess data and throw it
 		 * all away. */
-		else
+		else {			
 			rc = throw_away_data(fsg);
+		}	
 		break;
 	}
 	return rc;
@@ -2512,10 +2607,15 @@ static int send_status(struct fsg_dev *fsg)
 
 	/* Wait for the next buffer to become available */
 	bh = fsg->next_buffhd_to_fill;
-	while (bh->state != BUF_STATE_EMPTY) {
-		if ((rc = sleep_thread(fsg)) != 0)
-			return rc;
-	}
+
+	/* cyhuang (2008/5/2) : Patch for MST. */
+    if (fsg->mst_state != FSG_MST_STATE_CBW_COMMAND_ERROR)
+    {
+        while (bh->state != BUF_STATE_EMPTY) {
+            if ((rc = sleep_thread(fsg)) != 0)
+                return rc;
+        }
+    }
 
 	if (curlun) {
 		sd = curlun->sense_data;
@@ -2537,6 +2637,10 @@ static int send_status(struct fsg_dev *fsg)
 				SK(sd), ASC(sd), ASCQ(sd), sdinfo);
 	}
 
+	 /* cyhuang (2008/5/2) : Patch for MST. */
+    if (fsg->mst_state == FSG_MST_STATE_CBW_COMMAND_ERROR)
+        status = USB_STATUS_FAIL;
+	
 	if (transport_is_bbb()) {
 		struct bulk_cs_wrap	*csw = (struct bulk_cs_wrap *) bh->buf;
 
@@ -2961,8 +3065,13 @@ static int received_cbw(struct fsg_dev *fsg, struct fsg_buffhd *bh)
 		 * clear the endpoint halts at the next reset. */
 		if (!mod_data.can_stall)
 			set_bit(CLEAR_BULK_HALTS, &fsg->atomic_bitflags);
+			
+        fsg->mst_state = FSG_MST_STATE_CBW_COMMAND_ERROR;
+
+		printk("invalid CBW\n");
 		fsg_set_halt(fsg, fsg->bulk_out);
 		halt_bulk_in_endpoint(fsg);
+
 		return -EINVAL;
 	}
 
@@ -2990,11 +3099,73 @@ static int received_cbw(struct fsg_dev *fsg, struct fsg_buffhd *bh)
 	else
 		fsg->data_dir = DATA_DIR_FROM_HOST;
 	fsg->data_size = le32_to_cpu(cbw->DataTransferLength);
+	
 	if (fsg->data_size == 0)
 		fsg->data_dir = DATA_DIR_NONE;
+	
 	fsg->lun = cbw->Lun;
 	fsg->tag = cbw->Tag;
 	return 0;
+}
+
+static void fsg_bulk_in_token_recv(struct usb_ep *ep)
+{
+/*
+	struct fsg_dev	*fsg = (struct fsg_dev *) ep->driver_data;
+	struct fsg_buffhd	*bh;	
+	// Check Bulk Out bh's state.
+	bh = fsg->next_buffhd_to_fill;
+	
+	if (bh->outreq_busy) 
+		if (mod_data.can_stall) {
+			fsg_set_halt(fsg, fsg->bulk_out);
+			halt_bulk_in_endpoint(fsg);
+			printk("%s : Halt all endpoints\n",__func__);
+		}
+*/
+	printk("%s\n",__func__);
+
+}
+
+/*
+static struct usb_request      *debug_inreq;
+static volatile int            debug_inreq_busy;
+static volatile enum fsg_buffer_state  debug_state;
+
+static void fsg_bulk_in_complete(struct usb_ep *ep, struct usb_request *req)
+{
+	 printk("%s\n",__func__);
+}
+*/
+
+static void fsg_bulk_in_ep_queue(struct fsg_dev *fsg)
+{
+//	struct fsg_buffhd   *bh;
+
+	dwc_gadget_register_ep_recv_callback(fsg->bulk_in,fsg_bulk_in_token_recv);
+/*
+	bh = fsg->next_buffhd_to_drain;
+
+	if (!debug_inreq)
+		 alloc_request(fsg, fsg->bulk_in, &debug_inreq);
+
+	debug_inreq->zero = 0;
+	debug_inreq->length = 0;
+	debug_inreq->buf = bh->buf;
+	debug_inreq->dma = bh->dma;
+	debug_inreq->context = NULL;
+	debug_inreq->complete = fsg_bulk_in_complete;
+
+	start_transfer(fsg, fsg->bulk_in, debug_inreq,
+                &debug_inreq_busy, &debug_state);
+*/
+}
+
+static void fsg_bulk_in_ep_dequeue(struct fsg_dev *fsg)
+{
+	// usb_ep_dequeue(fsg->bulk_in, debug_inreq);
+    dwc_gadget_unregister_ep_recv_callback(fsg->bulk_in);
+
 }
 
 
@@ -3016,7 +3187,8 @@ static int get_next_command(struct fsg_dev *fsg)
 		set_bulk_out_req_length(fsg, bh, USB_BULK_CB_WRAP_LEN);
 		start_transfer(fsg, fsg->bulk_out, bh->outreq,
 				&bh->outreq_busy, &bh->state);
-
+				
+		// fsg_bulk_in_ep_queue(fsg);
 		/* We will drain the buffer in software, which means we
 		 * can reuse it for the next filling.  No need to advance
 		 * next_buffhd_to_fill. */
@@ -3025,9 +3197,14 @@ static int get_next_command(struct fsg_dev *fsg)
 		while (bh->state != BUF_STATE_FULL) {
 			if ((rc = sleep_thread(fsg)) != 0)
 				return rc;
-			}
+		
+		}
+	
+		// fsg_bulk_in_ep_dequeue(fsg);
+		
 		rc = received_cbw(fsg, bh);
 		bh->state = BUF_STATE_EMPTY;
+
 
 	} else {		// USB_PR_CB or USB_PR_CBI
 
@@ -3349,8 +3526,9 @@ static void handle_exception(struct fsg_dev *fsg)
 		rc = do_set_interface(fsg, 0);
 		if (fsg->ep0_req_tag != exception_req_tag)
 			break;
-		if (rc != 0)			// STALL on errors
+		if (rc != 0) {			// STALL on errors
 			fsg_set_halt(fsg, fsg->ep0);
+		}	
 		else				// Complete the status stage
 			ep0_queue(fsg);
 		break;
@@ -3359,8 +3537,9 @@ static void handle_exception(struct fsg_dev *fsg)
 		rc = do_set_config(fsg, new_config);
 		if (fsg->ep0_req_tag != exception_req_tag)
 			break;
-		if (rc != 0)			// STALL on errors
+		if (rc != 0) {			// STALL on errors
 			fsg_set_halt(fsg, fsg->ep0);
+		}	
 		else				// Complete the status stage
 			ep0_queue(fsg);
 		break;
@@ -3419,6 +3598,7 @@ static int fsg_main_thread(void *fsg_)
 			continue;
 		}
 
+
 		if (get_next_command(fsg))
 			continue;
 
@@ -3476,12 +3656,25 @@ static int open_backing_file(struct lun *curlun, const char *filename)
 	/* R/W if we can, R/O if we must */
 	ro = curlun->ro;
 	if (!ro) {
-		filp = filp_open(filename, O_RDWR | O_LARGEFILE, 0);
+#ifdef CONFIG_USB_FILE_STORAGE_DIRECT_IO_MODE
+		filp = filp_open(filename, O_DIRECT | O_RDWR | O_LARGEFILE, 0);
 		if (-EROFS == PTR_ERR(filp))
-			ro = 1;
+#endif /* CONFIG_USB_FILE_STORAGE_DIRECT_IO_MODE */
+		{
+			filp = filp_open(filename, O_RDWR | O_LARGEFILE, 0);
+			if (-EROFS == PTR_ERR(filp))
+				ro = 1;
+		}
 	}
-	if (ro)
-		filp = filp_open(filename, O_RDONLY | O_LARGEFILE, 0);
+	if (ro) {
+#ifdef CONFIG_USB_FILE_STORAGE_DIRECT_IO_MODE
+		filp = filp_open(filename, O_DIRECT | O_RDONLY | O_LARGEFILE, 0);
+		if (-EROFS == PTR_ERR(filp))
+#endif /* CONFIG_USB_FILE_STORAGE_DIRECT_IO_MODE */
+		{
+			filp = filp_open(filename, O_RDWR | O_LARGEFILE, 0);
+		}
+	}
 	if (IS_ERR(filp)) {
 		LINFO(curlun, "unable to open backing file: %s\n", filename);
 		return PTR_ERR(filp);
@@ -3648,8 +3841,8 @@ static ssize_t store_file(struct device *dev, const char *buf, size_t count)
 
 
 /* The write permissions and store_xxx pointers are set in fsg_bind() */
-static DEVICE_ATTR(ro, 0444, show_ro, NULL);
-static DEVICE_ATTR(file, 0444, show_file, NULL);
+static DEVICE_ATTR(ro, 0444 , show_ro, NULL);
+static DEVICE_ATTR(file, 0444 , show_file, NULL);
 
 
 /*-------------------------------------------------------------------------*/
@@ -3709,6 +3902,10 @@ static void fsg_unbind(struct usb_gadget *gadget)
 					req->dma, EP0_BUFSIZE);
 		usb_ep_free_request(fsg->ep0, req);
 	}
+
+#if defined(CONFIG_USB_OTG_REALTEK_REMOTE_WAKEUP)
+	del_timer_sync (&fsg->resume);
+#endif	
 
 	set_gadget_data(gadget, NULL);
 }
@@ -3836,7 +4033,7 @@ static int __init fsg_bind(struct usb_gadget *gadget)
 	if ((rc = check_parameters(fsg)) != 0)
 		goto out;
 
-	if (mod_data.removable) {	// Enable the store_xxx attributes
+	if (mod_data.removable) {	// Enable the store_xxx attributes		
 		dev_attr_ro.attr.mode = dev_attr_file.attr.mode = 0644;
 		dev_attr_ro.store = store_ro;
 		dev_attr_file.store = store_file;
@@ -3851,6 +4048,11 @@ static int __init fsg_bind(struct usb_gadget *gadget)
 		rc = -EINVAL;
 		goto out;
 	}
+
+// cyhuang (2008/3/31) : Set device mode ony.
+#if defined(CONFIG_USB_OTG_REALTEK)
+	gadget->is_otg = 0;
+#endif
 
 	/* Create the LUNs, open their backing files, and register the
 	 * LUN devices in sysfs. */
@@ -3935,6 +4137,18 @@ static int __init fsg_bind(struct usb_gadget *gadget)
 	hs_bulk_out_desc.bEndpointAddress = fs_bulk_out_desc.bEndpointAddress;
 	hs_intr_in_desc.bEndpointAddress = fs_intr_in_desc.bEndpointAddress;
 #endif
+
+#if defined(CONFIG_USB_OTG_REALTEK_REMOTE_WAKEUP)
+	init_timer (&fsg->resume);
+	fsg->resume.function = fsg_autoresume;
+	fsg->resume.data = (unsigned long) fsg;
+	
+	if (autoresume) {
+		config_desc.bmAttributes |= USB_CONFIG_ATT_WAKEUP;
+		printk("RTD OTG : autoresume = %d ms\n",autoresume);
+	}
+	
+#endif	
 
 	if (gadget->is_otg) {
 		otg_desc.bmAttributes |= USB_OTG_HNP,
@@ -4038,7 +4252,22 @@ static void fsg_suspend(struct usb_gadget *gadget)
 {
 	struct fsg_dev		*fsg = get_gadget_data(gadget);
 
+#if defined(CONFIG_USB_OTG_REALTEK_REMOTE_WAKEUP)
+	if (gadget->speed == USB_SPEED_UNKNOWN)
+		return;
+	
+	if (autoresume) {
+		// mod_timer (&fsg->resume, jiffies + (HZ * autoresume));
+		mod_timer (&fsg->resume, jiffies + autoresume);
+		// DBG (dev, "suspend, wakeup in %d mseconds\n", autoresume * 10);
+		printk( "suspend, wakeup in %d mseconds\n", autoresume * 10);
+	}
+	else {
+		DBG(fsg, "suspend\n");
+	}
+#else
 	DBG(fsg, "suspend\n");
+#endif	
 	set_bit(SUSPENDED, &fsg->atomic_bitflags);
 }
 
@@ -4048,8 +4277,27 @@ static void fsg_resume(struct usb_gadget *gadget)
 
 	DBG(fsg, "resume\n");
 	clear_bit(SUSPENDED, &fsg->atomic_bitflags);
+#if defined(CONFIG_USB_OTG_REALTEK_REMOTE_WAKEUP)	
+	del_timer (&fsg->resume);
+#endif	
 }
 
+#if defined(CONFIG_USB_OTG_REALTEK_REMOTE_WAKEUP)
+static void fsg_autoresume (unsigned long _dev)
+{
+	struct fsg_dev	*dev = (struct fsg_dev *) _dev;
+	int		status;
+
+	/* normally the host would be woken up for something
+	 * more significant than just a timer firing...
+	 */
+	if (dev->gadget->speed != USB_SPEED_UNKNOWN) {
+		status = usb_gadget_wakeup (dev->gadget);
+		// DBG (dev, "wakeup --> %d\n", status);
+		printk("wakeup --> %d\n", status);
+	}
+}
+#endif
 
 /*-------------------------------------------------------------------------*/
 

@@ -432,11 +432,20 @@ uart_change_speed(struct uart_state *state, struct termios *old_termios)
 	port->ops->set_termios(port, termios, old_termios);
 }
 
+extern void lock_emit_log_char(char c);
+
 static inline void
 __uart_put_char(struct uart_port *port, struct circ_buf *circ, unsigned char c)
 {
 	unsigned long flags;
 
+#ifdef CONFIG_SHARED_PRINTK
+// Only handle port1
+	if(port->membase == (void*)0xb801b200) {
+		lock_emit_log_char(c);
+		return;
+	}
+#endif
 	if (!circ->buf)
 		return;
 
@@ -468,7 +477,15 @@ uart_write(struct tty_struct *tty, const unsigned char * buf, int count)
 	struct circ_buf *circ = &state->info->xmit;
 	unsigned long flags;
 	int c, ret = 0;
+#ifdef CONFIG_SHARED_PRINTK
+	int i;
 
+	if(port->membase == (void*)0xb801b200) {
+		for(i=0;i<count;i++)
+			lock_emit_log_char(buf[i]);
+		return count;
+	}
+#endif
 	if (!circ->buf)
 		return 0;
 

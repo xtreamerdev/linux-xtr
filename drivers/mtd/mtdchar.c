@@ -23,11 +23,19 @@ static void mtd_notify_add(struct mtd_info* mtd)
 	if (!mtd)
 		return;
 
-	devfs_mk_cdev(MKDEV(MTD_CHAR_MAJOR, mtd->index*2),
-		      S_IFCHR | S_IRUGO | S_IWUGO, "mtd/%d", mtd->index);
+	if(mtd->name && !strcmp(mtd->name, "disc")) {
+		devfs_mk_cdev(MKDEV(MTD_CHAR_MAJOR, mtd->index*2),
+			      S_IFCHR | S_IRUGO | S_IWUGO, "mtd/disc");
 		
-	devfs_mk_cdev(MKDEV(MTD_CHAR_MAJOR, mtd->index*2+1),
-		      S_IFCHR | S_IRUGO, "mtd/%dro", mtd->index);
+		devfs_mk_cdev(MKDEV(MTD_CHAR_MAJOR, mtd->index*2+1),
+			      S_IFCHR | S_IRUGO, "mtd/discro");
+	} else {
+		devfs_mk_cdev(MKDEV(MTD_CHAR_MAJOR, mtd->index*2),
+			      S_IFCHR | S_IRUGO | S_IWUGO, "mtd/%d", mtd->index);
+		
+		devfs_mk_cdev(MKDEV(MTD_CHAR_MAJOR, mtd->index*2+1),
+			      S_IFCHR | S_IRUGO, "mtd/%dro", mtd->index);
+	}
 }
 
 static void mtd_notify_remove(struct mtd_info* mtd)
@@ -518,6 +526,193 @@ static int mtd_ioctl(struct inode *inode, struct file *file,
 		break;
 	}
 
+	//===============Ken: 20081003================
+	case MEMWRITEDATAOOB:
+	{
+		struct mtd_data_oob DataOobLocal;
+		void *databuf, *oobbuf;
+		ssize_t retlen;
+		
+		if(!(file->f_mode & 2))
+			return -EPERM;
+
+		if (copy_from_user(&DataOobLocal, argp, sizeof(struct mtd_data_oob)))
+			return -EFAULT;
+		
+		if (DataOobLocal.rtk_data.length > 0x4096 || DataOobLocal.rtk_oob.length > 0x4096)
+			return -EINVAL;
+
+		if (!mtd->write_ecc)
+			ret = -EOPNOTSUPP;
+		else{
+			ret = access_ok(VERIFY_READ, DataOobLocal.rtk_data.ptr,
+					DataOobLocal.rtk_data.length) ? 0 : EFAULT;
+			if (ret)
+				return ret;
+			
+			ret = access_ok(VERIFY_READ, DataOobLocal.rtk_oob.ptr,
+					DataOobLocal.rtk_oob.length) ? 0 : EFAULT;
+			if (ret)
+				return ret;						
+		}
+		
+		databuf = kmalloc(DataOobLocal.rtk_data.length, GFP_KERNEL);
+		if (!databuf)
+			return -ENOMEM;
+
+		oobbuf = kmalloc(DataOobLocal.rtk_oob.length, GFP_KERNEL);
+		if (!oobbuf)
+			return -ENOMEM;
+					
+		if (copy_from_user(databuf, DataOobLocal.rtk_data.ptr, DataOobLocal.rtk_data.length)) {
+			kfree(databuf);
+			return -EFAULT;
+		}
+
+		if (copy_from_user(oobbuf, DataOobLocal.rtk_oob.ptr, DataOobLocal.rtk_oob.length)) {
+			kfree(oobbuf);
+			return -EFAULT;
+		}
+		
+		ret = (mtd->write_ecc)(mtd, DataOobLocal.rtk_data.start, DataOobLocal.rtk_data.length, 
+				&retlen, databuf, oobbuf, NULL);
+			
+		if (copy_to_user(argp + sizeof(uint32_t), &retlen, sizeof(uint32_t)))
+			ret = -EFAULT;
+
+		kfree(databuf);
+		kfree(oobbuf);
+		break;
+	}
+	
+	case MEMREADDATAOOB:
+	{
+		struct mtd_data_oob DataOobLocal;
+		void *databuf, *oobbuf;
+		ssize_t retlen;
+		
+		if (copy_from_user(&DataOobLocal, argp, sizeof(struct mtd_data_oob)))
+			return -EFAULT;
+		
+		if (DataOobLocal.rtk_data.length > 0x4096 || DataOobLocal.rtk_oob.length > 0x4096)
+			return -EINVAL;
+
+		if (!mtd->read_ecc)
+			ret = -EOPNOTSUPP;
+		else{
+			ret = access_ok(VERIFY_WRITE, DataOobLocal.rtk_data.ptr,
+					DataOobLocal.rtk_data.length) ? 0 : -EFAULT;
+			if (ret)
+				return ret;
+			
+			ret = access_ok(VERIFY_WRITE, DataOobLocal.rtk_oob.ptr,
+					DataOobLocal.rtk_oob.length) ? 0 : -EFAULT;
+			if (ret)
+				return ret;						
+		}
+
+		databuf = kmalloc(DataOobLocal.rtk_data.length, GFP_KERNEL);
+		if (!databuf)
+			return -ENOMEM;
+
+		oobbuf = kmalloc(DataOobLocal.rtk_oob.length, GFP_KERNEL);
+		if (!oobbuf)
+			return -ENOMEM;
+		
+		ret = (mtd->read_ecc)(mtd, DataOobLocal.rtk_data.start, DataOobLocal.rtk_data.length,
+				&retlen, databuf, oobbuf, NULL);
+
+		if ( copy_to_user(DataOobLocal.rtk_oob.ptr, oobbuf, DataOobLocal.rtk_oob.length) )
+			ret = -EFAULT;
+			
+		if (put_user(retlen, (uint32_t __user *)argp))
+			ret = -EFAULT;
+		else if (retlen && copy_to_user(DataOobLocal.rtk_data.ptr, databuf, retlen))
+			ret = -EFAULT;
+			
+		kfree(databuf);
+		kfree(oobbuf);
+		break;
+	}
+	
+	/* Ken: 20090210 */
+	case MEMRELOADBBT:
+	{
+		if (mtd->reload_bbt)
+			ret = (mtd->reload_bbt)(mtd);
+		else{
+			printk("Warning: do not set reload bbt function.\n");
+			ret = -EOPNOTSUPP;
+		}
+		break;
+	}
+
+	/* CMYu:20090409*/
+	case RTKMEMERASE:
+	{
+		struct erase_info *erase;
+		struct erase_info_user *erase_u;
+		
+		if(!(file->f_mode & 2))
+			return -EPERM;
+
+		erase_u = kmalloc(sizeof(struct erase_info_user),GFP_KERNEL);
+		if (!erase_u)
+			ret = -ENOMEM;
+					
+		erase = kmalloc(sizeof(struct erase_info),GFP_KERNEL);
+		if (!erase)
+			ret = -ENOMEM;
+		else {
+			wait_queue_head_t waitq;
+			DECLARE_WAITQUEUE(wait, current);
+
+			init_waitqueue_head(&waitq);
+
+			memset (erase,0,sizeof(struct erase_info));
+			memset (erase_u,0,sizeof(struct erase_info_user));
+			
+			if (copy_from_user(erase_u, argp,
+				    sizeof(struct erase_info_user))) {
+				kfree(erase);
+				kfree(erase_u);
+				return -EFAULT;
+			}
+			
+			erase->mtd = mtd;
+			erase->callback = mtdchar_erase_callback;
+			erase->priv = (unsigned long)&waitq;
+			erase->addr = erase_u->start;
+			erase->len = erase_u->length;
+			
+			/*
+			  FIXME: Allow INTERRUPTIBLE. Which means
+			  not having the wait_queue head on the stack.
+			  
+			  If the wq_head is on the stack, and we
+			  leave because we got interrupted, then the
+			  wq_head is no longer there when the
+			  callback routine tries to wake us up.
+			*/
+			ret = mtd->erase(mtd, erase);
+			if (!ret) {
+				set_current_state(TASK_UNINTERRUPTIBLE);
+				add_wait_queue(&waitq, &wait);
+				if (erase->state != MTD_ERASE_DONE &&
+				    erase->state != MTD_ERASE_FAILED)
+					schedule();
+				remove_wait_queue(&waitq, &wait);
+				set_current_state(TASK_RUNNING);
+
+				ret = (erase->state == MTD_ERASE_FAILED)?-EIO:0;
+			}
+			kfree(erase);
+			kfree(erase_u);
+		}
+		break;
+	}
+	
+				
 	default:
 		ret = -ENOTTY;
 	}

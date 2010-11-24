@@ -414,7 +414,7 @@ static DEVICE_ATTR(rescan, S_IWUSR, NULL, store_rescan_field);
 static DECLARE_MUTEX(scsi_detect_port_mutex);
 
 static ssize_t
-store_force_check_change_field (struct device *dev, struct device_attribute *attr, const char *buf, size_t count) 
+store_check_change_force_field (struct device *dev, struct device_attribute *attr, const char *buf, size_t count) 
 {
 	struct scsi_device *sdev = container_of(dev, struct scsi_device, sdev_gendev);
 
@@ -422,14 +422,14 @@ store_force_check_change_field (struct device *dev, struct device_attribute *att
 		return count;
 
 	down(&scsi_detect_port_mutex);
-	scsi_force_check_device_change(dev);
+	scsi_device_check_change_force(dev);
 	up(&scsi_detect_port_mutex);
 	
 	return count;
 }
 
 static ssize_t
-show_force_check_change_field(struct device *dev, struct device_attribute *attr, char *buf)
+show_check_change_force_field(struct device *dev, struct device_attribute *attr, char *buf)
 {
 	ssize_t ret = 0;
 	struct scsi_device *sdev = container_of(dev, struct scsi_device, sdev_gendev);
@@ -454,7 +454,7 @@ show_force_check_change_field(struct device *dev, struct device_attribute *attr,
 }
 
 static DEVICE_ATTR(check_change_force, S_IRUGO | S_IWUSR,
-		show_force_check_change_field , store_force_check_change_field);
+		show_check_change_force_field , store_check_change_force_field);
 
 
 static ssize_t
@@ -590,6 +590,26 @@ show_queue_type_field(struct device *dev, struct device_attribute *attr, char *b
 static DEVICE_ATTR(queue_type, S_IRUGO, show_queue_type_field, NULL);
 
 static ssize_t
+show_bus_type_field(struct device *dev, struct device_attribute *attr, char *buf)
+{
+	struct scsi_device *sdev = to_scsi_device(dev);
+
+	return snprintf(buf, 20, "%s\n", sdev->host->bus_type);
+}
+
+static DEVICE_ATTR(bus_type, S_IRUGO, show_bus_type_field, NULL);
+
+static ssize_t
+show_port_structure_field(struct device *dev, struct device_attribute *attr, char *buf)
+{
+	struct scsi_device *sdev = to_scsi_device(dev);
+
+	return snprintf(buf, 20, "%s\n", sdev->host->port_structure);
+}
+
+static DEVICE_ATTR(port_structure, S_IRUGO, show_port_structure_field, NULL);
+
+static ssize_t
 show_iostat_counterbits(struct device *dev, struct device_attribute *attr, char *buf)
 {
 	return snprintf(buf, 20, "%d\n", (int)sizeof(atomic_t) * 8);
@@ -617,6 +637,8 @@ static struct device_attribute *scsi_sysfs_sdev_attrs[] = {
 	&dev_attr_device_blocked,
 	&dev_attr_queue_depth,
 	&dev_attr_queue_type,
+	&dev_attr_bus_type,
+	&dev_attr_port_structure,
 	&dev_attr_type,
 	&dev_attr_scsi_level,
 	&dev_attr_vendor,
@@ -816,11 +838,13 @@ void __scsi_remove_device(struct scsi_device *sdev)
 	struct device *dev = &sdev->sdev_gendev;
 
 	if (scsi_device_set_state(sdev, SDEV_CANCEL) != 0)
-		return
+		return;
 
 	class_device_unregister(&sdev->sdev_classdev);
 	transport_remove_device(dev);
 	device_del(dev);
+        printk("%s(%d)\n",__func__,__LINE__);
+	//dump_stack();
 	scsi_device_set_state(sdev, SDEV_DEL);
 	if (sdev->host->hostt->slave_destroy)
 		sdev->host->hostt->slave_destroy(sdev);
@@ -835,7 +859,8 @@ void __scsi_remove_device(struct scsi_device *sdev)
 void scsi_remove_device(struct scsi_device *sdev)
 {
 	struct Scsi_Host *shost = sdev->host;
-	
+        printk("%s(%d)\n",__func__,__LINE__);
+	//dump_stack();
 	down(&shost->scan_mutex);
 	
 	// hack by cfeyh

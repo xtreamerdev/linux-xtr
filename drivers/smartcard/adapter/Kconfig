@@ -1,0 +1,11 @@
+# drivers/Kconfig
+
+comment"Smart Card Interface"
+	depends on SMARTCARD
+
+config MARS_SMARTCARD_IFD
+	tristate "MARS Smart Card Interface"
+	depends on SMARTCARD && REALTEK_VENUS
+	default n
+	help
+	  If you want to use smart card on Mars board, say Y.

@@ -57,6 +57,7 @@
 
 #include "scsi_logging.h"
 #include "sr.h"
+#include "debug.h"
 
 
 #define SR_DISKS	256
@@ -102,19 +103,19 @@ static int sr_media_change(struct cdrom_device_info *, int);
 static int sr_packet(struct cdrom_device_info *, struct packet_command *);
 
 static struct cdrom_device_ops sr_dops = {
-	.open			= sr_open,
-	.release	 	= sr_release,
+	.open				= sr_open,
+	.release	 		= sr_release,
 	.drive_status	 	= sr_drive_status,
 	.media_changed		= sr_media_change,
-	.tray_move		= sr_tray_move,
-	.lock_door		= sr_lock_door,
+	.tray_move			= sr_tray_move,
+	.lock_door			= sr_lock_door,
 	.select_speed		= sr_select_speed,
 	.get_last_session	= sr_get_last_session,
-	.get_mcn		= sr_get_mcn,
-	.reset			= sr_reset,
+	.get_mcn			= sr_get_mcn,
+	.reset				= sr_reset,
 	.audio_ioctl		= sr_audio_ioctl,
-	.dev_ioctl		= sr_dev_ioctl,
-	.capability		= SR_CAPABILITIES,
+	.dev_ioctl			= sr_dev_ioctl,
+	.capability			= SR_CAPABILITIES,
 	.generic_packet		= sr_packet,
 };
 
@@ -122,6 +123,7 @@ static void sr_kref_release(struct kref *kref);
 
 static inline struct scsi_cd *scsi_cd(struct gendisk *disk)
 {
+	scsicd("scsi_cd\n");
 	return container_of(disk->private_data, struct scsi_cd, driver);
 }
 
@@ -132,6 +134,7 @@ static inline struct scsi_cd *scsi_cd(struct gendisk *disk)
 static inline struct scsi_cd *scsi_cd_get(struct gendisk *disk)
 {
 	struct scsi_cd *cd = NULL;
+	scsicd("scsi_cd_get\n");
 
 	down(&sr_ref_sem);
 	if (disk->private_data == NULL)
@@ -153,6 +156,7 @@ static inline struct scsi_cd *scsi_cd_get(struct gendisk *disk)
 static inline void scsi_cd_put(struct scsi_cd *cd)
 {
 	struct scsi_device *sdev = cd->device;
+	scsicd("scsi_cd_put\n");
 
 	down(&sr_ref_sem);
 	kref_put(&cd->kref, sr_kref_release);
@@ -174,6 +178,7 @@ int sr_media_change(struct cdrom_device_info *cdi, int slot)
 {
 	struct scsi_cd *cd = cdi->handle;
 	int retval;
+	scsicd("sr_media_change\n");
 
 	if (CDSL_CURRENT != slot) {
 		/* no changer support */
@@ -203,7 +208,7 @@ int sr_media_change(struct cdrom_device_info *cdi, int slot)
 	}
 	return retval;
 }
- 
+
 /*
  * rw_intr is the interrupt routine for the device driver.
  *
@@ -218,6 +223,8 @@ static void rw_intr(struct scsi_cmnd * SCpnt)
 	int block_sectors = 0;
 	long error_sector;
 	struct scsi_cd *cd = scsi_cd(SCpnt->request->rq_disk);
+
+	scsicd("rw_intr\n");
 
 #ifdef DEBUG
 	printk("sr.c done: %x\n", result);
@@ -297,6 +304,7 @@ static int sr_init_command(struct scsi_cmnd * SCpnt)
 {
 	int block=0, this_count, s_size, timeout = SR_TIMEOUT;
 	struct scsi_cd *cd = scsi_cd(SCpnt->request->rq_disk);
+	scsicd("sr_init_command\n");
 
 	SCSI_LOG_HLQUEUE(1, printk("Doing sr request, dev = %s, block = %d\n",
 				cd->disk->disk_name, block));
@@ -348,7 +356,7 @@ static int sr_init_command(struct scsi_cmnd * SCpnt)
 
 	/*
 	 * we do lazy blocksize switching (when reading XA sectors,
-	 * see CDROMREADMODE2 ioctl) 
+	 * see CDROMREADMODE2 ioctl)
 	 */
 	s_size = cd->device->sector_size;
 	if (s_size > 2048) {
@@ -456,6 +464,7 @@ static int sr_block_open(struct inode *inode, struct file *file)
 	struct gendisk *disk = inode->i_bdev->bd_disk;
 	struct scsi_cd *cd = scsi_cd(inode->i_bdev->bd_disk);
 	int ret = 0;
+	scsicd("sr_block_open\n");
 
 	if(!(cd = scsi_cd_get(disk)))
 		return -ENXIO;
@@ -473,7 +482,7 @@ static int sr_block_release(struct inode *inode, struct file *file)
 	ret = cdrom_release(&cd->cdi, file);
 	if(ret)
 		return ret;
-	
+
 	scsi_cd_put(cd);
 
 	return 0;
@@ -484,6 +493,7 @@ static int sr_block_ioctl(struct inode *inode, struct file *file, unsigned cmd,
 {
 	struct scsi_cd *cd = scsi_cd(inode->i_bdev->bd_disk);
 	struct scsi_device *sdev = cd->device;
+	scsicd("sr_block_ioctl\n");
 
         /*
          * Send SCSI addressing ioctls directly to mid level, send other
@@ -500,6 +510,7 @@ static int sr_block_ioctl(struct inode *inode, struct file *file, unsigned cmd,
 static int sr_block_media_changed(struct gendisk *disk)
 {
 	struct scsi_cd *cd = scsi_cd(disk);
+	scsicd("sr_block_media_changed\n");
 	return cdrom_media_changed(&cd->cdi);
 }
 
@@ -510,7 +521,7 @@ static struct block_device_operations sr_bdops =
 	.release	= sr_block_release,
 	.ioctl		= sr_block_ioctl,
 	.media_changed	= sr_block_media_changed,
-	/* 
+	/*
 	 * No compat_ioctl for now because sr_block_ioctl never
 	 * seems to pass arbitary ioctls down to host drivers.
 	 */
@@ -522,6 +533,7 @@ static int sr_open(struct cdrom_device_info *cdi, int purpose)
 	struct scsi_device *sdev = cd->device;
 	int retval;
 
+	scsicd("sr_open\n");
 	/*
 	 * If the device is in error recovery, wait until it is done.
 	 * If the device is offline, then disallow any access to it.
@@ -533,13 +545,14 @@ static int sr_open(struct cdrom_device_info *cdi, int purpose)
 	return 0;
 
 error_out:
-	return retval;	
+	return retval;
 }
 
 static void sr_release(struct cdrom_device_info *cdi)
 {
 	struct scsi_cd *cd = cdi->handle;
 
+	scsicd("sr_release\n");
 	if (cd->device->sector_size > 2048)
 		sr_set_blocklength(cd, 2048);
 
@@ -551,6 +564,8 @@ static int sr_probe(struct device *dev)
 	struct gendisk *disk;
 	struct scsi_cd *cd;
 	int minor, error;
+
+	scsicd("sr_probe\n");
 
 	error = -ENODEV;
 	if (sdev->type != TYPE_ROM && sdev->type != TYPE_WORM)
@@ -644,6 +659,8 @@ static void get_sectorsize(struct scsi_cd *cd)
 	int sector_size;
 	struct scsi_request *SRpnt = NULL;
 	request_queue_t *queue;
+
+	scsicd("get_sectorsize\n");
 
 	buffer = kmalloc(512, GFP_KERNEL | GFP_DMA);
 	if (!buffer)
@@ -756,6 +773,7 @@ static void get_capabilities(struct scsi_cd *cd)
 		""
 	};
 
+	scsicd("get_capabilities\n");
 	/* allocate a request for the TEST_UNIT_READY */
 	SRpnt = scsi_allocate_request(cd->device, GFP_KERNEL);
 	if (!SRpnt) {
@@ -790,7 +808,7 @@ static void get_capabilities(struct scsi_cd *cd)
 
 		the_result = SRpnt->sr_result;
 		retries++;
-	} while (retries < 5 && 
+	} while (retries < 5 &&
 		 (!scsi_status_is_good(the_result) ||
 		  ((driver_byte(the_result) & DRIVER_SENSE) &&
 		   SRpnt->sr_sense_buffer[2] == UNIT_ATTENTION)));
@@ -831,7 +849,7 @@ static void get_capabilities(struct scsi_cd *cd)
 	if ((buffer[n + 2] & 0x8) == 0)
 		/* not a DVD drive */
 		cd->cdi.mask |= CDC_DVD;
-	if ((buffer[n + 3] & 0x20) == 0) 
+	if ((buffer[n + 3] & 0x20) == 0)
 		/* can't write DVD-RAM media */
 		cd->cdi.mask |= CDC_DVD_RAM;
 	if ((buffer[n + 3] & 0x10) == 0)
@@ -871,11 +889,12 @@ static void get_capabilities(struct scsi_cd *cd)
 
 /*
  * sr_packet() is the entry point for the generic commands generated
- * by the Uniform CD-ROM layer. 
+ * by the Uniform CD-ROM layer.
  */
 static int sr_packet(struct cdrom_device_info *cdi,
 		struct packet_command *cgc)
 {
+	scsicd("sr_packet\n");
 	if (cgc->timeout <= 0)
 		cgc->timeout = IOCTL_TIMEOUT;
 
@@ -898,6 +917,7 @@ static void sr_kref_release(struct kref *kref)
 	struct scsi_cd *cd = container_of(kref, struct scsi_cd, kref);
 	struct gendisk *disk = cd->disk;
 
+	scsicd("sr_kref_release\n");
 	spin_lock(&sr_index_lock);
 	clear_bit(disk->first_minor, sr_index_bits);
 	spin_unlock(&sr_index_lock);
@@ -915,6 +935,7 @@ static int sr_remove(struct device *dev)
 {
 	struct scsi_cd *cd = dev_get_drvdata(dev);
 
+	scsicd("sr_remove\n");
 	del_gendisk(cd->disk);
 
 	down(&sr_ref_sem);
@@ -927,7 +948,7 @@ static int sr_remove(struct device *dev)
 static int __init init_sr(void)
 {
 	int rc;
-
+	scsicd("init_sr\n");
 	rc = register_blkdev(SCSI_CDROM_MAJOR, "sr");
 	if (rc)
 		return rc;

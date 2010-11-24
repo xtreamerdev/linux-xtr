@@ -24,6 +24,14 @@
 #endif
 
 #include <linux/mtd/mtd.h>
+#include <linux/device.h>
+
+
+
+static const char  mtdd_name [] = "mtdd";
+static struct device_driver mtdd_driver;
+static struct platform_device *mtdd_devs;
+
 
 /* These are exported solely for the purpose of mtd_blkdevs.c. You 
    should not use them for _anything_ else */
@@ -384,15 +392,25 @@ done:
 
 static int __init init_mtd(void)
 {
+int ret;
+
 #ifdef CONFIG_PROC_FS
 	if ((proc_mtd = create_proc_entry( "mtd", 0, NULL )))
 		proc_mtd->read_proc = mtd_read_proc;
 #endif
 
 #ifdef CONFIG_PM
-	mtd_pm_dev = pm_register(PM_UNKNOWN_DEV, 0, mtd_pm_callback);
+       mtd_pm_dev = pm_register(PM_UNKNOWN_DEV, 0, mtd_pm_callback);
 #endif
-	return 0;
+        mtdd_devs = platform_device_register_simple((char *)mtdd_name,-1, NULL, 0);
+
+        if (IS_ERR(mtdd_devs)) {
+                ret = PTR_ERR(mtdd_devs);
+                return ret;
+        }
+
+        return driver_register (&mtdd_driver);
+
 }
 
 static void __exit cleanup_mtd(void)
@@ -409,6 +427,63 @@ static void __exit cleanup_mtd(void)
 		remove_proc_entry( "mtd", NULL);
 #endif
 }
+
+
+
+static int mtdd_suspend (struct dev *p_dev, pm_message_t state)
+{
+	int ret = 0, i;
+
+	if (down_trylock(&mtd_table_mutex))
+		return -EAGAIN;
+		for (i = 0; ret == 0 && i < MAX_MTD_DEVICES; i++) 
+                {
+			if (mtd_table[i] && mtd_table[i]->suspend)
+				ret = mtd_table[i]->suspend(mtd_table[i]);
+		}
+
+	up(&mtd_table_mutex);
+	return ret;
+}
+
+
+static int mtdd_resume (struct dev *p_dev)
+{
+  
+	printk("mtdd resume\n");
+	int ret = 0, i;
+	if (down_trylock(&mtd_table_mutex))
+		return -EAGAIN;
+	i = MAX_MTD_DEVICES-1;
+
+	for ( ; i >= 0; i--) {
+			if (mtd_table[i] && mtd_table[i]->resume)
+				mtd_table[i]->resume(mtd_table[i]);
+		}
+
+	up(&mtd_table_mutex);
+
+	return ret;
+}
+
+
+
+
+
+
+
+
+
+static struct device_driver mtdd_driver = {
+      .name   = (char *)mtdd_name,
+		.bus    =       &platform_bus_type,
+#ifdef CONFIG_PM
+      .resume       = mtdd_resume,
+		.suspend      = mtdd_suspend,
+#endif
+};
+
+
 
 module_init(init_mtd);
 module_exit(cleanup_mtd);

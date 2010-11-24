@@ -1096,15 +1096,15 @@ static ide_startstop_t reset_pollfunc (ide_drive_t *drive)
 		printk("%s: reset: ", hwif->name);
 		if ((tmp = hwif->INB(IDE_ERROR_REG)) == 1) {
 			// Added by Frank(96/08/02)
-			if (hwif->reset_poll(drive)) {
+			//if (hwif->reset_poll(drive)) {
 				printk(KERN_ERR "%s: host reset_poll failure for %s.\n",
 					hwif->name, drive->name);
 				drive->failures++;
 				hwgroup->polling = 0;
 				return ide_stopped;
-			}//************************
-			printk("success\n");
-			drive->failures = 0;
+			//}//************************
+			//printk("success\n");
+			//drive->failures = 0;
 		} else {
 			drive->failures++;
 			printk("master: ");

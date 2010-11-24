@@ -29,6 +29,7 @@
 #include <linux/kobject_uevent.h> // for send a hotplug signal for over-current
 #include <asm/io.h>	// for inl / outl
 #include <venus.h>	// for VENUS_USB_EHCI_USBINTR / VENUS_USB_HOST_WRAPPER ...
+#include <mars.h>
 
 #include "usb.h"
 #include "hcd.h"
@@ -516,6 +517,14 @@ static int hub_hub_status(struct usb_hub *hub,
 // hack by cfyeh : for disable port 2-4 power on hub which is on the root port
 #ifdef USB_HACK_DISABLE_PORT_POWER
 static int usb_disable_port_power = 0;
+int usb_disable_port_power_status = 0;
+int usb_first_class_hub_power_off_at_port_two_to_four(void)
+{
+	return (platform_info.board_id == C03_pvr_board
+			|| platform_info.board_id == C03_pvr2_board
+			|| platform_info.board_id == C04_pvr_board
+			|| platform_info.board_id == C04_pvr2_board);
+}
 #endif /* USB_HACK_DISABLE_PORT_POWER */
 
 static int hub_configure(struct usb_hub *hub,
@@ -527,10 +536,6 @@ static int hub_configure(struct usb_hub *hub,
 	unsigned int pipe;
 	int maxp, ret;
 	char *message;
-
-#ifdef USB_HACK_DISABLE_PORT_POWER
-	int usb_disable_port_power_status = 0;
-#endif /* USB_HACK_DISABLE_PORT_POWER */
 
 	hub->buffer = usb_buffer_alloc(hdev, sizeof(*hub->buffer), GFP_KERNEL,
 			&hub->buffer_dma);
@@ -737,15 +742,10 @@ static int hub_configure(struct usb_hub *hub,
 #ifdef USB_HACK_DISABLE_PORT_POWER
 	// if there is a bulit-in hub on board,
 	// do below code to disable port 2-4
+	usb_disable_port_power_status = 0;
 	if(usb_disable_port_power == 0)
 	{
-		if(platform_info.board_id == realtek_avhdd2_demo_board
-				|| platform_info.board_id == C02_avhdd_board
-				|| platform_info.board_id == C03_pvr_board
-				|| platform_info.board_id == C03_pvr2_board
-				|| platform_info.board_id == C04_pvr_board
-				|| platform_info.board_id == C04_pvr2_board
-				|| platform_info.board_id == C05_pvrbox_board)
+		if(usb_first_class_hub_power_off_at_port_two_to_four() == 1)
 		{
 			// if the hub has parent
 			if(hub->hdev->parent != NULL)
@@ -791,7 +791,9 @@ fail:
 
 static unsigned highspeed_hubs;
 
-extern unsigned int usb_bHubOverTier;
+#ifdef USB_TO_NOTIFY_TIER
+extern int usb_bHubOverTier;
+#endif /* USB_TO_NOTIFY_TIER */
 
 static void hub_disconnect(struct usb_interface *intf)
 {
@@ -869,7 +871,7 @@ descriptor_error:
 	if(hdev->tier > 6)
 	{
 		hdev->tier++; // it seems be that hdev->tier = 8
-		atomic_inc(&usb_bHubOverTier);
+		atomic_inc((void *)&usb_bHubOverTier);
 		kobject_hotplug(&hdev->dev.kobj, KOBJ_TIER);
 		printk("###### [cfyeh] %s(%d) over 7 tier in USB spec!!!\n", __func__, __LINE__);
 		return -ENODEV;
@@ -1125,7 +1127,7 @@ void usb_disconnect(struct usb_device **pdev)
 #ifdef USB_TO_NOTIFY_TIER
 	// only it will be true when hub is at tier 7 (udev->tier = 8)
 	if(udev->tier > 7)
-		atomic_dec(&usb_bHubOverTier);
+		atomic_dec((void *)&usb_bHubOverTier);
 #endif /* USB_TO_NOTIFY_TIER */
 
 	dev_info (&udev->dev, "USB disconnect, address %d\n", udev->devnum);
@@ -1439,6 +1441,22 @@ static int hub_port_wait_reset(struct usb_hub *hub, int port1,
 		/* bomb out completely if something weird happened */
 		if ((portchange & USB_PORT_STAT_C_CONNECTION))
 			return -EINVAL;
+
+#ifdef USB_MARS_HOST_LS_HACK
+		if (is_mars_cpu())
+		{
+			if (portstatus & USB_PORT_STAT_LOW_SPEED)
+			{
+				if((udev->parent) && (udev->parent->parent == 0))
+					USBPHY_SetReg_Default_33_LS(port1, 0x2);
+			}
+			else
+			{
+				if((udev->parent) && (udev->parent->parent == 0))
+					USBPHY_SetReg_Default_33_LS(port1, 0x0);
+			}
+		}
+#endif /* USB_MARS_HOST_LS_HACK */
 
 		/* if we`ve finished resetting, then break out of the loop */
 		if (!(portstatus & USB_PORT_STAT_RESET) &&
@@ -1873,7 +1891,7 @@ hub_port_resume(struct usb_hub *hub, int port1, struct usb_device *udev)
 #endif /* CONFIG_REALTEK_VENUS_USB */
 
 #ifdef CONFIG_REALTEK_VENUS_USB
-	//set suspend_r(0xb801x800, bit 6) to '1', default '0'
+	//set VENUS_USB_HOST_WRAPPER(bit 6) to '1', default '0'
 	unsigned int tmp;
         tmp = inl(VENUS_USB_HOST_WRAPPER);
         tmp |= 0x1 << 6;
@@ -2366,6 +2384,8 @@ hub_port_init (struct usb_hub *hub, struct usb_device *udev, int port1,
 			 */
 			for (j = 0; j < 3; ++j) {
 				buf->bMaxPacketSize0 = 0;
+				if(j > 0)
+					msleep(100);// for iMate 32GB SSD device
 				r = usb_control_msg(udev, usb_rcvaddr0pipe(),
 					USB_REQ_GET_DESCRIPTOR, USB_DIR_IN,
 					USB_DT_DEVICE << 8, 0,
@@ -2761,8 +2781,13 @@ done:
 	hub_port_disable(hub, port1, 1);
 }
 
-static unsigned int prev_kobj_address = NULL;
+static unsigned int prev_kobj_address = 0;
 static int over_current_port_number = -1;
+
+#ifdef USB_MARS_OTG_TEST_MODE_JK
+int usb_mars_otg_test_mode_jk = 0;
+extern void USBPHY_SetReg_Default_3A(void);
+#endif
 
 static void hub_events(void)
 {
@@ -2865,6 +2890,38 @@ static void hub_events(void)
 			if (ret < 0)
 				continue;
 
+#ifdef USB_MARS_OTG_OVERCURRENT_DETECT
+			if(is_mars_cpu) // for mars
+			{
+				if(inl(MARS_USB_HOST_IPNEWINPUT_2PORT) & (1 << 31)) // port one over current flag
+				{
+					// otg connect
+					if((inl(MARS_USB_HOST_OTG) & 0x1) == 0x0) // otg disable
+						outl(0x1, MARS_USB_HOST_OTG); // enable otg
+				}
+				else
+				{
+					if((inl(MARS_USB_HOST_OTG) & 0x1) == 0x1) // otg enable
+						outl(0x0, MARS_USB_HOST_OTG); // disable otg
+				}
+			}
+#endif /* USB_MARS_OTG_OVERCURRENT_DETECT */
+
+#ifdef USB_MARS_EHCI_CONNECTION_STATE_POLLING
+			if(is_mars_cpu()) // for mars
+			{
+				// VENUS_SB2_CHIP_INFO: bit[31,16]
+				// 0xa0 => A version
+				// 0xb0 => B version
+				if((inl(VENUS_SB2_CHIP_INFO) >> 16) == 0xa0)
+				if (portchange & USB_PORT_STAT_CONNECTION) {
+					// printk("hub->activating = 0x%x, portstatus = 0x%x , portchange = 0x%x\n",hub->activating, portstatus , portchange);
+					outl(0x4000a081, VENUS_USB_HOST_USBIP_INPUT);
+					outl(0x40002000, MARS_USB_HOST_USBIPINPUT_2PORT);
+				}
+			}
+#endif /* USB_MARS_EHCI_CONNECTION_STATE_POLLING */
+
 			if (hub->activating && !hdev->children[i-1] &&
 					(portstatus &
 						USB_PORT_STAT_CONNECTION))
@@ -2921,6 +2978,36 @@ static void hub_events(void)
 			}
 			
 			if (portchange & USB_PORT_STAT_C_OVERCURRENT) {
+#ifdef USB_MARS_OTG_TEST_MODE_JK
+				if(is_mars_cpu())// for mars
+				{
+					if(usb_mars_otg_test_mode_jk == 1)
+					{
+						usb_mars_otg_test_mode_jk = 0;
+						USBPHY_SetReg_Default_39();
+						USBPHY_SetReg_Default_3A();
+					}
+				}
+				else if(is_venus_cpu() || is_neptune_cpu())
+				{
+					dev_err (hub_dev,
+						"over-current change on port %d\n",
+						i);
+
+					// test to send a hotplug signal for over-current
+					if (prev_kobj_address != (unsigned int)&hub_dev->kobj &&
+							over_current_port_number != i)
+					{
+						kobject_hotplug(&hub_dev->kobj, KOBJ_OVERCUR);
+						prev_kobj_address = (unsigned int)&hub_dev->kobj;
+						over_current_port_number = i;
+					}
+
+					clear_port_feature(hdev, i,
+						USB_PORT_FEAT_C_OVER_CURRENT);
+					hub_power_on(hub);
+				}
+#else
 				dev_err (hub_dev,
 					"over-current change on port %d\n",
 					i);
@@ -2937,6 +3024,7 @@ static void hub_events(void)
 				clear_port_feature(hdev, i,
 					USB_PORT_FEAT_C_OVER_CURRENT);
 				hub_power_on(hub);
+#endif /* USB_MARS_OTG_TEST_MODE_JK */
 			}
 
 			if (portchange & USB_PORT_STAT_C_RESET) {
@@ -2956,7 +3044,7 @@ static void hub_events(void)
 						over_current_port_number == i)
 				{
 					over_current_port_number = -1;
-					prev_kobj_address = NULL;
+					prev_kobj_address = 0;
 				}
 			}
 		} /* end for i */
@@ -3108,7 +3196,7 @@ static int config_descriptors_changed(struct usb_device *udev)
 	}
 #ifdef USB_512B_ALIGNMENT
 	if(len > USB_512B_ALIGNMENT_SIZE)
-		buf = kmalloc (USB_512B_ALIGNMENT_SIZE * 2, SLAB_KERNEL);
+		buf = kmalloc (len, SLAB_KERNEL);
 	else
 		buf = kmalloc (USB_512B_ALIGNMENT_SIZE, SLAB_KERNEL);
 #else

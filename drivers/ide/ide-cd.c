@@ -321,6 +321,7 @@
 #include <asm/byteorder.h>
 #include <asm/uaccess.h>
 #include <asm/unaligned.h>
+#include <platform.h>
 
 #include "ide-cd.h"
 #include "debug.h"
@@ -3636,6 +3637,9 @@ static void __exit ide_cdrom_exit(void)
 static int ide_cdrom_init(void)
 {
 	idecdinfo("ide_cdrom_init\n");
+	if(is_mars_cpu())
+		return 0;
+
 	return driver_register(&ide_cdrom_driver.gen_driver);
 }
 

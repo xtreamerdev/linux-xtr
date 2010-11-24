@@ -11,12 +11,13 @@
  *
  */
 #include <linux/module.h>
-#include <linux/mtd/nand.h>
+//#include <linux/mtd/nand.h> //Ken, org
+#include <linux/mtd/rtk_nand.h>
+
 /*
 *	Chip ID list
 *	
-*	Name. ID code, pagesize, chipsize in MegaByte, eraseblock size,
-*	options
+*	{Name, device ID code, pagesize, chipsize in MegaByte, eraseblock size, options}
 * 
 * 	Pagesize; 0, 256, 512
 *	0 	get this information from the extended chip ID

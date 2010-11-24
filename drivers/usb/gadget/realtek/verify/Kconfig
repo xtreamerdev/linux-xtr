@@ -1,0 +1,9 @@
+
+
+config USB_OTG_REALTEK_DEVICE_VERIFY_DRIVER
+	tristate "Realtek USB OTG Device Verify Driver"
+	depends on USB_OTG_REALTEK	
+	help
+		Realtek USB OTG device verify driver for H/W verification.
+		
+		Select this only if your want Realtek USB OTG device verify driver support.

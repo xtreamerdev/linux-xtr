@@ -2139,7 +2139,9 @@ struct request *blk_rq_map_user(request_queue_t *q, int rw, void __user *ubuf,
 	 * direct dma. else, set up kernel bounce buffers
 	 */
 	uaddr = (unsigned long) ubuf;
-	if (!(uaddr & queue_dma_alignment(q)) && !(len & queue_dma_alignment(q)))
+	//david0506: for AUDIO CD reading subchannel
+	//if (!(uaddr & queue_dma_alignment(q)) && !(len & queue_dma_alignment(q)))
+	if (!(uaddr & queue_dma_alignment(q)) && !(len & queue_dma_alignment(q)) && len !=2368)
 		bio = bio_map_user(q, NULL, uaddr, len, rw == READ);
 	else
 		bio = bio_copy_user(q, uaddr, len, rw == READ);

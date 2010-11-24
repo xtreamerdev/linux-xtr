@@ -138,8 +138,12 @@ MODULE_PARM_DESC (multicast_filter_limit, "8139cp: maximum number of filtered mu
 	  (CP)->tx_hqtail - (CP)->tx_hqhead - 1)
 
 #define PKT_BUF_SZ		2048 //1536	/* Size of each temporary Rx buffer.*/
-#define RX_OFFSET		2
-#define CP_INTERNAL_PHY		1  //cyhuang reserved
+	
+#define RX_OFFSET               rx_offset
+
+
+#define CP_INTERNAL_PHY		1  
+	
 #if 0 //cyhuang reserved
 /* The following settings are log_2(bytes)-4:  0 == 16 bytes .. 6==1024, 7==end of packet. */
 #define RX_FIFO_THRESH		5	/* Rx buffer level before first PCI xfer.  */
@@ -223,7 +227,8 @@ enum {
 	RxRingSize=0x01F6,
 	RxCPO=0x01F8,
 	RxPSA=0x01FA,
-	RXPLEN=0x0103,
+	RxCPA=0x1FC,
+	RXPLEN=0x200,
 	//LASTRXCDO=0x1402,
 	RXPFDP=0x0204,
 	RXPAGECNT=0x0208,
@@ -353,15 +358,19 @@ typedef enum
 }MIIAR_MASK;
 
 
-static  const u32 cp_norx_intr_mask =  LINK_CHG | TX_OK | TX_ERR | TX_EMPTY ;
-static  const u32 cp_rx_intr_mask = RX_OK | RX_ERR | RX_EMPTY | RX_FIFOOVR ;
+static  const u32 cp_norx_intr_mask =  TX_OK | TX_ERR | TX_EMPTY ;
+static  const u32 cp_rx_intr_mask = RX_OK | RX_ERR | RX_EMPTY | RX_FIFOOVR | LINK_CHG;
 static  const u32 cp_intr_mask = LINK_CHG | TX_OK | TX_ERR | TX_EMPTY | RX_OK | RX_ERR | RX_EMPTY | RX_FIFOOVR ;
 
 /* hcy added */
 #define CP_OFF 0 
 #define CP_ON  1
 #define CP_UNDER_INIT 2
-static int cp_status = CP_ON ;
+volatile static int cp_status = CP_OFF;
+
+static int next_tick = 3 * HZ;
+
+static int rx_offset ;
 
 #if 0
 static const unsigned int cp_rx_config =       //cyhuang reserved
@@ -448,6 +457,13 @@ struct cp_private {
 	unsigned int		wol_enabled : 1; /* Is Wake-on-LAN enabled? */
                                                  //cyhuang reserved
 	struct mii_if_info	mii_if;
+
+        pid_t thr_pid;
+	wait_queue_head_t thr_wait;
+	struct completion thr_exited;
+	int time_to_die;
+
+	
 };
 
 #define cpr8(reg)	readb(cp->regs + (reg))
@@ -476,7 +492,7 @@ static void cp_clean_rings (struct cp_private *cp);
 static void cp_stop_hw (struct cp_private *cp);
 static void cp_start_hw (struct cp_private *cp);
 static void cp_show_regs_datum (struct net_device *dev);
-
+static int cp_hotplug(struct net_device *dev);
 //static void cp_tx_timeout (struct net_device *dev); //add
 
 
@@ -647,6 +663,11 @@ drop_frag:
 static inline unsigned int cp_rx_csum_ok (u32 status)
 {
 	unsigned int protocol = (status >> 16) & 0x3;
+
+	/* if no protocol , we dont sw check either */
+	if (!protocol)
+		return 1;
+		
 	
 	if (likely((protocol == RxProtoTCP) && (!(status & TCPFail))))
 		return 1;
@@ -654,6 +675,9 @@ static inline unsigned int cp_rx_csum_ok (u32 status)
 		return 1;
 	else if ((protocol == RxProtoIP) && (!(status & IPFail)))
 		return 1;
+
+	//printk("ERR !!! etn cp_rx_csum error protocol=0x%x , status=0x%x!!!\n",
+	//		                        protocol, status);
 	return 0;
 }
 
@@ -676,7 +700,11 @@ static int cp_rx_poll (struct net_device *dev, int *budget)
 	    return 0;	
 	}    
 #endif	
-
+	if (cpr16(ISR) & (LINK_CHG)) {	
+	        //printk(" set cp_linkchg_flg \n");//cy test	
+		//cp_linkchg_flg = 1 ;
+        }
+	
         if (cpr16(ISR) & (RX_FIFOOVR ))
         {   
                            
@@ -770,7 +798,7 @@ rx_status_loop:
 		/* cyhuang 2007/07/05 added below */
                 if (unlikely(((skb->tail + len) >skb->end) || 
 			(((u32)skb->head & 0xff) !=0)	||
-		        (((u32)skb->tail & 0xff) !=0x12)    )) {
+		        (((u32)skb->tail & 0xff) !=(0x10 + RX_OFFSET)))) {
 			printk("old_skb = 0x%x\n", (u32)skb);
 			printk("old_skb->head = 0x%x\n", (u32)skb->head);
 			printk("old_skb->tail = 0x%x\n", (u32)skb->tail);
@@ -791,8 +819,8 @@ rx_status_loop:
 		if (!new_skb) {
 		        
 			cp->net_stats.rx_dropped++;     //see re8670.c to check
-			printk("BUG , cant get skb from dev_alloc_skb\n");//cy test
-			BUG();
+			printk("!!!!!BUG , cant get skb from dev_alloc_skb\n");//cy test
+			//BUG();
 			goto rx_next;
 		}
                 if ((u32)new_skb->data &0x3)            //cyhuang add
@@ -802,10 +830,10 @@ rx_status_loop:
 		new_skb->dev = cp->dev;
 
 		/* Handle checksum offloading for incoming packets. */
-		//if (cp_rx_csum_ok(status))
+		if (cp_rx_csum_ok(status))
 			skb->ip_summed = CHECKSUM_UNNECESSARY;
-		//else 
-		//	skb->ip_summed = CHECKSUM_NONE;
+		else 
+			skb->ip_summed = CHECKSUM_UNNECESSARY; //CHECKSUM_NONE;
 		
 		skb_put(skb, len);
 
@@ -952,7 +980,7 @@ cp_interrupt (int irq, void *dev_instance, struct pt_regs *regs)
 
         }
 
-        if (status & (RX_OK | RX_ERR | RX_EMPTY |RX_FIFOOVR))
+        if (status & cp_rx_intr_mask)
         {
 		if (netif_rx_schedule_prep(dev)) {
 
@@ -965,8 +993,8 @@ cp_interrupt (int irq, void *dev_instance, struct pt_regs *regs)
       
 	if (status & (TX_OK | TX_ERR | TX_EMPTY | SW_INT))
 		cp_tx(cp);
-	if (status & LINK_CHG)            
-		mii_check_media(&cp->mii_if, netif_msg_link(cp), FALSE);
+//	if (status & LINK_CHG)            
+//		mii_check_media(&cp->mii_if, netif_msg_link(cp), FALSE);
 		
         
 	spin_unlock(&cp->lock);
@@ -1290,18 +1318,21 @@ static int cp_init_hw (struct cp_private *cp)
         int i=0;
 
         
-
-
-        
-        cpw32(MIIAR, 0x04010000);
-	mdelay(5);
-
-	while (((cpr32(MIIAR)&0xfffdb)!= 0x17849) && (i<10)) {
+        while (((cp->mii_if.mdio_read(dev , cp->mii_if.phy_id, 1)&0xffdb) != 0x7849) 
+		&& (i<10)) {
 		printk("err MIIAR reg1 =0x%x , count=%d\n", cpr32(MIIAR), i++);
-                mdelay(100); 
-                cpw32(MIIAR, 0x04010000);
+	        mdelay(100);
+        }	
+       
+       // cpw32(MIIAR, 0x04010000);
+	//mdelay(5);
 
-	}	
+	//while (((cpr32(MIIAR)&0xfffdb)!= 0x17849) && (i<10)) {
+	//	printk("err MIIAR reg1 =0x%x , count=%d\n", cpr32(MIIAR), i++);
+        //        mdelay(100); 
+        //        cpw32(MIIAR, 0x04010000);
+
+	//}	
         if (i == 10)
              return -EINVAL;
 
@@ -1313,14 +1344,14 @@ static int cp_init_hw (struct cp_private *cp)
 
         
 
-//        cp->mii_if.mdio_write(dev , 1, 0, 0x8000); 
-//	cp->mii_if.mdio_write(dev , 1, 0, 0x0100); 
+        cp->mii_if.mdio_write(dev , cp->mii_if.phy_id, 0, 0x8000); 
+ 
 //	cp->mii_if.mdio_write(dev , 1, 4, 0x05e1); 
 
       
-        cpw32(MIIAR, 0x84008000) ; 
+        //cpw32(MIIAR, 0x84008000) ; 
 
-        mdelay(15); //cy test	     	    
+        //mdelay(15); //cy test	     	    
      
    	  
          
@@ -1328,17 +1359,19 @@ static int cp_init_hw (struct cp_private *cp)
     
         if((platform_info.board_id == realtek_neptune_qa_board)
            &&( (*(volatile unsigned int*)(0xb801a204)&0xffff0000) == 0xa00000))    
-                cpw32(MIIAR, 0x84000100) ;        	    
+                //cpw32(MIIAR, 0x84000100) ;        	    
+		cp->mii_if.mdio_write(dev , cp->mii_if.phy_id, 0, 0x0100);
 	else
-		cpw32(MIIAR, 0x84001000) ;
+		//cpw32(MIIAR, 0x84001000) ;
+		cp->mii_if.mdio_write(dev , cp->mii_if.phy_id, 0, 0x1000);
 
-        mdelay(15); //cy test	     	    
+        //mdelay(15); //cy test	     	    
     
-    
-        cpw32(MIIAR, 0x840405e1) ;
+        cp->mii_if.mdio_write(dev , cp->mii_if.phy_id, 4, 0x05e1);    
+        //cpw32(MIIAR, 0x840405e1) ;
 
         
-        mdelay(15); //cy test	     	    
+        //mdelay(15); //cy test	     	    
 	
 	cpw16(ISR,0xffff);
 	cpw16(IMR,cp_intr_mask);   	
@@ -1380,7 +1413,7 @@ static int cp_init_hw (struct cp_private *cp)
 	cp_start_hw(cp);
 
 	__cp_set_rx_mode(dev);	
-	
+        printk("init_hw finished \n");//cy test	
         return 0;
 }
 static int cp_refill_rx (struct cp_private *cp)
@@ -1450,8 +1483,8 @@ static int cp_alloc_rings (struct cp_private *cp)
 		goto ErrMem;
 	}	
 	cp->rxdesc_buf = pBuf;
-	printk("alloc rings cp->rxdesc_buf =0x%x \n",
-		            (u32)cp->rxdesc_buf);//cy test
+	printk("alloc rings cp->rxdesc_buf =0x%x , cp->ring_dma=0x%x\n",
+		            (u32)cp->rxdesc_buf, (u32)cp->ring_dma);//cy test
 	
 	memset(pBuf, 0, CP_RXRING_BYTES+CP_TXRING_BYTES);	
 	/* 256 bytes alignment */
@@ -1470,7 +1503,7 @@ static int cp_alloc_rings (struct cp_private *cp)
 //	memset(pBuf, 0, CP_TXRING_BYTES);
 	/* 256 bytes alignment */
 //	pBuf = (void*)( (u32)(pBuf + DESC_ALIGN-1) &  ~(DESC_ALIGN -1) ) ;
-//	cp->tx_hqring = (struct cp_desc*)((u32)(pBuf) | UNCACHE_MASK);
+///	cp->tx_hqring = (struct cp_desc*)((u32)(pBuf) | UNCACHE_MASK);
 	
 	return cp_init_rings(cp);
 ErrMem:
@@ -1529,15 +1562,14 @@ static int cp_open (struct net_device *dev)
 {
 	struct cp_private *cp = netdev_priv(dev);
 	int rc;
-//        printk("cp_open\n");//cy test
+	cp_status =CP_UNDER_INIT;
+	printk("cp_open \n");//cy test
 	if (netif_msg_ifup(cp))
 		printk(KERN_DEBUG "%s: enabling interface\n", dev->name);
 
-			
 	rc = cp_alloc_rings(cp);
 	if (rc)
 		return rc;
-      
 	rc = cp_init_hw(cp);
 	if (rc)
 		goto err_out_rings;
@@ -1547,9 +1579,19 @@ static int cp_open (struct net_device *dev)
 		goto err_out_hw;
      
 	netif_carrier_off(dev);
-	mii_check_media(&cp->mii_if, netif_msg_link(cp), TRUE); 
+	//mii_check_media(&cp->mii_if, netif_msg_link(cp), TRUE);
 	netif_start_queue(dev);
 
+	cp_status = CP_ON ;
+/*      we only create in init_one 
+	cp->thr_pid = -1;
+	cp->time_to_die = 0;
+	cp->thr_pid = kernel_thread(cp_hotplug, dev, CLONE_KERNEL);
+	if (cp->thr_pid < 0) {
+		printk (KERN_WARNING "%s: unable to start kernel thread\n",
+			dev->name);
+ 	}
+*/        
 	return 0;
 
 err_out_hw:
@@ -1559,12 +1601,29 @@ err_out_rings:
 	cp_free_rings(cp);
 	return rc;
 }
-
 static int cp_close (struct net_device *dev)
 {
 	struct cp_private *cp = netdev_priv(dev);
 	unsigned long flags;
-//        printk("cp_close\n");//cy test
+	int ret = 0;
+        printk("cp_close\n");//cy test
+/*	we dont release the thread 
+	if (cp->thr_pid >= 0) {
+		printk("11\n");//cy test
+		cp->time_to_die = 1;
+	        wmb();
+		printk("12\n");//cy test
+	        ret = kill_proc (cp->thr_pid, SIGTERM, 1);
+		printk("13\n");//cy test
+	        if (ret) {
+			printk (KERN_ERR "%s: unable to signal thread\n", dev->name);
+			return ret;
+		}
+		printk("14\n");//cy test
+	        wait_for_completion (&cp->thr_exited);
+		printk("15\n");//cy test
+	}
+*/	
 	if (netif_msg_ifdown(cp))
 		printk(KERN_DEBUG "%s: disabling interface\n", dev->name);
 
@@ -1581,9 +1640,41 @@ static int cp_close (struct net_device *dev)
 	free_irq(dev->irq, dev);
 
 	cp_free_rings(cp);
+
+	cp_status =CP_OFF;
 	return 0;
 }
 
+static int cp_hotplug(struct net_device *dev)
+{		
+	struct cp_private *cp = netdev_priv(dev);
+	unsigned long timeout;
+
+	printk("cp_hotplug \n");//cy test
+	
+	daemonize("%s", dev->name);
+        allow_signal(SIGTERM);
+        while (1) {
+                timeout = next_tick;
+                do {
+                        timeout = interruptible_sleep_on_timeout (&cp->thr_wait, timeout);
+
+                       /* make swsusp happy with our thread */
+                        try_to_freeze(0);
+                } while (!signal_pending (current) && (timeout > 0) || (cp_status != CP_ON));
+		if (signal_pending (current)) {
+			flush_signals(current);
+		}
+		
+		if (cp->time_to_die)
+			break;
+		mii_check_media(&cp->mii_if, netif_msg_link(cp), FALSE);
+		
+	
+	}
+        complete_and_exit (&cp->thr_exited, 0);	
+	
+}
 #ifdef BROKEN
 static int cp_change_mtu(struct net_device *dev, int new_mtu)
 {
@@ -1634,7 +1725,7 @@ static int mdio_read(struct net_device *dev, int phy_id, int location)
 {
 	struct cp_private *cp = netdev_priv(dev);
 
-#if 1
+#if 0
         if (location < 8 && mii_2_8139_map[location]) {	
 	    cpw32(MIIAR, 0x04000000+ (location <<16));
             do
@@ -1670,7 +1761,7 @@ static void mdio_write(struct net_device *dev, int phy_id, int location,
 		       int value)
 {
 	struct cp_private *cp = netdev_priv(dev);
-#if 1
+#if 0
         if (location < 8 && mii_2_8139_map[location]) {	
 	    cpw32(MIIAR, 0x84000000+ (location <<16)+ value);
             do
@@ -1983,9 +2074,19 @@ static int cp_init_one (void)
 	struct cp_private *cp;
 	int rc;
 	void __iomem *regs;
-
-
-
+	
+        if ((*(volatile unsigned int*)(0xb801a200)&0x0000ffff) == 0x1283) {
+		if ((*(volatile unsigned int*)(0xb800000c)&0x00000200) == 0x0) {
+			printk("No MARS eth clock \n"); 
+			return -EINVAL;		 
+		}	
+		rx_offset = 0;
+        	printk("this  MARS eth RX_OFFSET = 0x%x\n", RX_OFFSET); 
+	}	
+        else {
+		rx_offset = 2;
+		printk("this  eth RX_OFFSET = 0x%x\n", RX_OFFSET);
+	}	
 
 #ifndef MODULE
 	static int version_printed;
@@ -2004,6 +2105,12 @@ static int cp_init_one (void)
 	cp->dev = dev;
 	cp->msg_enable = (debug < 0 ? CP_DEF_MSG_ENABLE : debug);
 	spin_lock_init (&cp->lock);
+
+        init_waitqueue_head (&cp->thr_wait);
+	init_completion (&cp->thr_exited);
+	  
+
+	
 	cp->mii_if.dev = dev;
 	cp->mii_if.mdio_read = mdio_read;
 	cp->mii_if.mdio_write = mdio_write;
@@ -2119,6 +2226,13 @@ static int cp_init_one (void)
 	
 	driver_register (&cp_driver);
 #endif
+	cp->thr_pid = -1;
+	cp->time_to_die = 0;
+	cp->thr_pid = kernel_thread(cp_hotplug, dev, CLONE_KERNEL);
+	if (cp->thr_pid < 0) {
+		printk (KERN_WARNING "%s: unable to start kernel thread\n",
+				dev->name);
+	}
 	return 0;
 
 err_out_iomap:
@@ -2140,7 +2254,6 @@ static int cp_suspend (struct dev *p_dev, pm_message_t state)
 //	unsigned long flags;
         if (cp_status == CP_ON) {
 	dev = dev_get_drvdata (p_dev);
-        cp_status = CP_OFF ;
 	cp_close(dev);
        
 	}
@@ -2173,13 +2286,12 @@ static int cp_resume (struct dev *p_dev)
 //	struct cp_private *cp;
      
 	     
-	if (cp_status ==0) {
+	if (cp_status ==CP_OFF) {
 	dev = dev_get_drvdata (p_dev);
 	if (!dev)
 	      return 0;
-	cp_status =CP_UNDER_INIT;
 	cp_open(dev);
-	cp_status = CP_ON;
+
 	}
 #if 0	
 	cp  = netdev_priv(dev);

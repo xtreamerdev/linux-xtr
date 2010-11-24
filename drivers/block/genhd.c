@@ -352,12 +352,27 @@ static ssize_t disk_size_read(struct gendisk * disk, char *page)
 {
 	return sprintf(page, "%llu\n", (unsigned long long)get_capacity(disk));
 }
+
 /*  2007/05/23 cfyeh + : partiton number */
 static ssize_t disk_part_read(struct gendisk * disk, char *page)
 {
 	return sprintf(page, "%d\n", disk->part_num);
 }
 /*  2007/05/23 cfyeh - : partiton number */
+
+/*  2009/03/03 cfyeh + : port structure */
+static ssize_t disk_port_structure_read(struct gendisk * disk, char *page)
+{
+	return sprintf(page, "%s\n", disk->port_structure);
+}
+/*  2009/03/03 cfyeh - : port structure */
+
+/*  2009/03/04 cfyeh + : bus type */
+static ssize_t disk_bus_type_read(struct gendisk * disk, char *page)
+{
+	return sprintf(page, "%s\n", disk->bus_type);
+}
+/*  2009/03/04 cfyeh - : bus type */
 
 // add to know which partition is a extended partition
 // by cfyeh 2007/11/13 +
@@ -408,12 +423,27 @@ static struct disk_attribute disk_attr_stat = {
 	.attr = {.name = "stat", .mode = S_IRUGO },
 	.show	= disk_stats_read
 };
+
 /*  2007/05/23 cfyeh + : partiton number */
 static struct disk_attribute disk_attr_part = {
 	.attr = {.name = "part_num", .mode = S_IRUGO },
 	.show	= disk_part_read
 };
 /*  2007/05/23 cfyeh - : partiton number */
+
+/*  2009/03/03 cfyeh + : port structure */
+static struct disk_attribute disk_attr_port_structure = {
+	.attr = {.name = "port_structure", .mode = S_IRUGO },
+	.show	= disk_port_structure_read
+};
+/*  2009/03/03 cfyeh - : port structure */
+
+/*  2009/03/04 cfyeh + : bus type*/
+static struct disk_attribute disk_attr_bus_type = {
+	.attr = {.name = "bus_type", .mode = S_IRUGO },
+	.show	= disk_bus_type_read
+};
+/*  2009/03/04 cfyeh - : bus type */
 
 // add to know which partition is a extended partition
 // by cfyeh 2007/11/13 +
@@ -430,6 +460,8 @@ static struct attribute * default_attrs[] = {
 	&disk_attr_size.attr,
 	&disk_attr_stat.attr,
 	&disk_attr_part.attr, /*  2007/05/23 cfyeh : partiton number */
+	&disk_attr_port_structure.attr, /*  2009/03/03 cfyeh : port structure */
+	&disk_attr_bus_type.attr, /*  2009/03/04 cfyeh : bus type */
 
 	// add to know which partition is a extended partition
 	// by cfyeh 2007/11/13 +
@@ -476,12 +508,21 @@ static int block_hotplug(struct kset *kset, struct kobject *kobj, char **envp,
 		disk = container_of(kobj, struct gendisk, kobj);
 		add_hotplug_env_var(envp, num_envp, &i, buffer, buffer_size,
 				    &length, "MINOR=%u", disk->first_minor);
+		add_hotplug_env_var(envp, num_envp, &i, buffer, buffer_size,
+				    &length, "DISC_TYPE=%d", 1);
 	} else if (ktype == &ktype_part) {
 		disk = container_of(kobj->parent, struct gendisk, kobj);
 		part = container_of(kobj, struct hd_struct, kobj);
 		add_hotplug_env_var(envp, num_envp, &i, buffer, buffer_size,
 				    &length, "MINOR=%u",
 				    disk->first_minor + part->partno);
+		add_hotplug_env_var(envp, num_envp, &i, buffer, buffer_size,
+				    &length, "DISC_TYPE=%d", 0);
+
+		// cfyeh +++ : for part_serial
+		add_hotplug_env_var(envp, num_envp, &i, buffer, buffer_size, &length,
+				    "PART_SERIAL=%d", part->part_serial);
+		// cfyeh --- : for part_serial
 	} else
 		return 0;
 
@@ -509,6 +550,27 @@ static int block_hotplug(struct kset *kset, struct kobject *kobj, char **envp,
 					    "PHYSDEVDRIVER=%s",
 					    physdev->driver->name);
 	}
+
+	// add by cfyeh : for export bus_type port_structure 
+	add_hotplug_env_var(envp, num_envp, &i, buffer, buffer_size, &length,
+			    "BUS_TYPE=%s", disk->bus_type);
+	add_hotplug_env_var(envp, num_envp, &i, buffer, buffer_size, &length,
+			    "PORT_STRUCT=%s", disk->port_structure);
+
+	// cfyeh +++ : for signature for hdd
+	add_hotplug_env_var(envp, num_envp, &i, buffer, buffer_size, &length,
+			    "RT_SIGNATURE=%d", disk->signature);
+	// cfyeh --- : for signature for hdd
+
+	// cfyeh +++ : for part_num and part_extended
+	add_hotplug_env_var(envp, num_envp, &i, buffer, buffer_size, &length,
+			    "PART_NUM=%d", disk->part_num);
+	add_hotplug_env_var(envp, num_envp, &i, buffer, buffer_size, &length,
+			    "PART_EXTENDED=%d", disk->part_extended);
+	// cfyeh --- : for part_num and part_extended
+
+	add_hotplug_env_var(envp, num_envp, &i, buffer, buffer_size, &length,
+		"PART_EXTENDED_SERIAL=%d", disk->part_extended_serial);
 
 	/* terminate, set to next free slot, shrink available space */
 	envp[i] = NULL;

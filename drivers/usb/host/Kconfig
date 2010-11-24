@@ -51,6 +51,12 @@ config USB_EHCI_ROOT_HUB_TT
 
 	  This supports the EHCI implementation from TransDimension Inc.
 
+config USB_EHCI_INT_ERROR_HACK_1071
+	bool "Error interrupt hack for 1071 board"
+	depends on USB_EHCI_HCD
+	---help---
+	  When error interrupt comes, disable ehci interrupt for a while
+
 config USB_OHCI_HCD
 	tristate "OHCI HCD support"
 	depends on USB && USB_ARCH_HAS_OHCI

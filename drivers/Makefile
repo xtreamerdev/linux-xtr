@@ -35,7 +35,7 @@ obj-$(CONFIG_FC4)		+= fc4/
 obj-$(CONFIG_SCSI)		+= scsi/
 obj-$(CONFIG_FUSION)		+= message/
 obj-$(CONFIG_IEEE1394)		+= ieee1394/
-obj-$(CONFIG_IEEE1394_VENUS)	+= 1394SW/
+#obj-$(CONFIG_IEEE1394_VENUS)	+= 1394SW/
 obj-y				+= cdrom/
 obj-$(CONFIG_MTD)		+= mtd/
 obj-$(CONFIG_PCCARD)		+= pcmcia/
@@ -65,3 +65,8 @@ obj-$(CONFIG_INFINIBAND)	+= infiniband/
 obj-$(CONFIG_BLK_DEV_SGIIOC4)	+= sn/
 obj-y				+= firmware/
 obj-$(CONFIG_CRYPTO)		+= crypto/
+obj-$(CONFIG_CEC)		+= cec/
+obj-$(CONFIG_SMART_CARD)        += smartcard/
+obj-y                   += ci/
+
+obj-$(CONFIG_THIRD_PARTY_DRIVER) += $(shell echo $(CONFIG_THIRD_PARTY_DRIVER_LIST))

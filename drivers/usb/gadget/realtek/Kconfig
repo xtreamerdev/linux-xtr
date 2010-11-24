@@ -1,0 +1,12 @@
+
+config USB_OTG_REALTEK
+	tristate "Realtek USB OTG Controller"
+	depends on USB_GADGET	
+	help
+		"Dual-Role" device, which can act as either a device
+		or a host.  The initial role choice can be changed
+		later, when two dual-role devices talk to each other.
+		
+		Select this only if your Realtek board has a Mini-AB connector.
+
+		

@@ -571,7 +571,20 @@ td_fill (struct ohci_hcd *ohci, u32 info,
 	wmb ();
 	td->ed->hwTailP = td->hwNextTD;
 	
-	/*
+#ifdef USB_OHCI_CHECK_ALIGNMENT
+	if(is_venus_cpu() || is_neptune_cpu())
+	if ((unsigned int)td->hwCBP & (USB_OHCI_CHECK_ALIGNMENT_SIZE - 1))
+	{
+		if(len > (int)(USB_OHCI_CHECK_ALIGNMENT_SIZE - ((unsigned int)td->hwCBP & (USB_OHCI_CHECK_ALIGNMENT_SIZE - 1))))
+		{
+			// ehci qtd hw buffer cross 1k byte boundary
+			printk("#### [cfyeh] OHCI Cross 0x%x Bytes : td->hwCBP = %p, len = 0x%x\n", USB_OHCI_CHECK_ALIGNMENT_SIZE, (void *)td->hwCBP, len);
+			WARN_ON(1);
+		}
+	}
+#endif /* USB_OHCI_CHECK_ALIGNMENT */
+
+#if 0 // cfyeh ++ : debug info
 	printk("@@ td 0x%.8x @@\n", td);
 	printk("   hwINFO\t0x%.8x\n", td->hwINFO);
 	printk("   hwCBP\t0x%.8x\n", td->hwCBP);
@@ -579,7 +592,7 @@ td_fill (struct ohci_hcd *ohci, u32 info,
 	printk("   hwBE \t0x%.8x\n", td->hwBE);
 	printk("   hwPSW[0]\t0x%.8x\n", td->hwPSW[0]);
 	printk("   hwPSW[1]\t0x%.8x\n", td->hwPSW[1]);
-	*/
+#endif // cfyeh -- : debug info
 }
 
 /*-------------------------------------------------------------------------*/

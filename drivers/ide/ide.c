@@ -159,6 +159,7 @@
 #include <asm/irq.h>
 #include <asm/uaccess.h>
 #include <asm/io.h>
+#include <platform.h>
 
 int ide_debug = 1;
 
@@ -214,8 +215,8 @@ static void init_hwif_data(ide_hwif_t *hwif, unsigned int index)
 	memset(hwif, 0, sizeof(ide_hwif_t));
 
 	/* fill in any non-zero initial values */
-	hwif->index	= index;
-	hwif->major	= ide_hwif_to_major[index];
+	hwif->index	    = index;
+	hwif->major	    = ide_hwif_to_major[index];
 
 	hwif->name[0]	= 'i';
 	hwif->name[1]	= 'd';
@@ -224,10 +225,10 @@ static void init_hwif_data(ide_hwif_t *hwif, unsigned int index)
 
 	hwif->bus_state	= BUSSTATE_ON;
 
-	hwif->atapi_dma = 0;		/* disable all atapi dma */ 
-	hwif->ultra_mask = 0x80;	/* disable all ultra */
-	hwif->mwdma_mask = 0x80;	/* disable all mwdma */
-	hwif->swdma_mask = 0x80;	/* disable all swdma */
+	hwif->atapi_dma     = 0;		/* disable all atapi dma */
+	hwif->ultra_mask    = 0x80;	/* disable all ultra */
+	hwif->mwdma_mask    = 0x80;	/* disable all mwdma */
+	hwif->swdma_mask    = 0x80;	/* disable all swdma */
 
 	sema_init(&hwif->gendev_rel_sem, 0);
 
@@ -238,8 +239,8 @@ static void init_hwif_data(ide_hwif_t *hwif, unsigned int index)
 
 		drive->media			= ide_disk;
 		drive->select.all		= (unit<<4)|0xa0;
-		drive->hwif			= hwif;
-		drive->ctl			= 0x08;
+		drive->hwif			    = hwif;
+		drive->ctl			    = 0x08;
 		drive->ready_stat		= READY_STAT;
 		drive->bad_wstat		= BAD_W_STAT;
 		drive->special.b.recalibrate	= 1;
@@ -250,7 +251,7 @@ static void init_hwif_data(ide_hwif_t *hwif, unsigned int index)
 		drive->max_failures		= IDE_DEFAULT_MAX_FAILURES;
 		drive->using_dma		= 0;
 		drive->is_flash			= 0;
-		drive->vdma			= 0;
+		drive->vdma			    = 0;
 		INIT_LIST_HEAD(&drive->list);
 		sema_init(&drive->gendev_rel_sem, 0);
 	}
@@ -438,7 +439,7 @@ control_region_busy:
  *	allocated for weird IDE interface chipsets.
  *
  *	Note also that we don't yet handle mmio resources here. More
- *	importantly our caller should be doing this so we need to 
+ *	importantly our caller should be doing this so we need to
  *	restructure this as a helper function for drivers.
  */
 
@@ -472,27 +473,27 @@ void ide_hwif_release_regions(ide_hwif_t *hwif)
 static void ide_hwif_restore(ide_hwif_t *hwif, ide_hwif_t *tmp_hwif)
 {
 	ideinfo("ide_hwif_restore\n");
-	hwif->hwgroup			= tmp_hwif->hwgroup;
+	hwif->hwgroup		    = tmp_hwif->hwgroup;
 
-	hwif->gendev.parent		= tmp_hwif->gendev.parent;
+	hwif->gendev.parent	    = tmp_hwif->gendev.parent;
 
-	hwif->proc			= tmp_hwif->proc;
+	hwif->proc			    = tmp_hwif->proc;
 
-	hwif->major			= tmp_hwif->major;
-	hwif->straight8			= tmp_hwif->straight8;
-	hwif->bus_state			= tmp_hwif->bus_state;
+	hwif->major			    = tmp_hwif->major;
+	hwif->straight8		    = tmp_hwif->straight8;
+	hwif->bus_state		    = tmp_hwif->bus_state;
 
-	hwif->atapi_dma			= tmp_hwif->atapi_dma;
-	hwif->ultra_mask		= tmp_hwif->ultra_mask;
-	hwif->mwdma_mask		= tmp_hwif->mwdma_mask;
-	hwif->swdma_mask		= tmp_hwif->swdma_mask;
+	hwif->atapi_dma		    = tmp_hwif->atapi_dma;
+	hwif->ultra_mask	    = tmp_hwif->ultra_mask;
+	hwif->mwdma_mask	    = tmp_hwif->mwdma_mask;
+	hwif->swdma_mask	    = tmp_hwif->swdma_mask;
 
-	hwif->chipset			= tmp_hwif->chipset;
-	hwif->hold			= tmp_hwif->hold;
+	hwif->chipset		    = tmp_hwif->chipset;
+	hwif->hold			    = tmp_hwif->hold;
 
 #ifdef CONFIG_BLK_DEV_IDEPCI
-	hwif->pci_dev			= tmp_hwif->pci_dev;
-	hwif->cds			= tmp_hwif->cds;
+	hwif->pci_dev	        = tmp_hwif->pci_dev;
+	hwif->cds			    = tmp_hwif->cds;
 #endif
 
 	hwif->tuneproc			= tmp_hwif->tuneproc;
@@ -511,12 +512,12 @@ static void ide_hwif_restore(ide_hwif_t *hwif, ide_hwif_t *tmp_hwif)
 	hwif->atapi_input_bytes		= tmp_hwif->atapi_input_bytes;
 	hwif->atapi_output_bytes	= tmp_hwif->atapi_output_bytes;
 
-	hwif->dma_setup			= tmp_hwif->dma_setup;
-	hwif->dma_exec_cmd		= tmp_hwif->dma_exec_cmd;
-	hwif->dma_start			= tmp_hwif->dma_start;
-	hwif->ide_dma_end		= tmp_hwif->ide_dma_end;
-	hwif->ide_dma_check		= tmp_hwif->ide_dma_check;
-	hwif->ide_dma_on		= tmp_hwif->ide_dma_on;
+	hwif->dma_setup			    = tmp_hwif->dma_setup;
+	hwif->dma_exec_cmd		    = tmp_hwif->dma_exec_cmd;
+	hwif->dma_start			    = tmp_hwif->dma_start;
+	hwif->ide_dma_end		    = tmp_hwif->ide_dma_end;
+	hwif->ide_dma_check		    = tmp_hwif->ide_dma_check;
+	hwif->ide_dma_on		    = tmp_hwif->ide_dma_on;
 	hwif->ide_dma_off_quietly	= tmp_hwif->ide_dma_off_quietly;
 	hwif->ide_dma_test_irq		= tmp_hwif->ide_dma_test_irq;
 	hwif->ide_dma_host_on		= tmp_hwif->ide_dma_host_on;
@@ -524,27 +525,27 @@ static void ide_hwif_restore(ide_hwif_t *hwif, ide_hwif_t *tmp_hwif)
 	hwif->ide_dma_lostirq		= tmp_hwif->ide_dma_lostirq;
 	hwif->ide_dma_timeout		= tmp_hwif->ide_dma_timeout;
 
-	hwif->OUTB			= tmp_hwif->OUTB;
+	hwif->OUTB			    = tmp_hwif->OUTB;
 	hwif->OUTBSYNC			= tmp_hwif->OUTBSYNC;
-	hwif->OUTW			= tmp_hwif->OUTW;
-	hwif->OUTL			= tmp_hwif->OUTL;
-	hwif->OUTSW			= tmp_hwif->OUTSW;
-	hwif->OUTSL			= tmp_hwif->OUTSL;
+	hwif->OUTW			    = tmp_hwif->OUTW;
+	hwif->OUTL			    = tmp_hwif->OUTL;
+	hwif->OUTSW			    = tmp_hwif->OUTSW;
+	hwif->OUTSL			    = tmp_hwif->OUTSL;
 
-	hwif->INB			= tmp_hwif->INB;
-	hwif->INW			= tmp_hwif->INW;
-	hwif->INL			= tmp_hwif->INL;
-	hwif->INSW			= tmp_hwif->INSW;
-	hwif->INSL			= tmp_hwif->INSL;
+	hwif->INB			    = tmp_hwif->INB;
+	hwif->INW			    = tmp_hwif->INW;
+	hwif->INL			    = tmp_hwif->INL;
+	hwif->INSW			    = tmp_hwif->INSW;
+	hwif->INSL			    = tmp_hwif->INSL;
 
 	hwif->sg_max_nents		= tmp_hwif->sg_max_nents;
 
-	hwif->mmio			= tmp_hwif->mmio;
+	hwif->mmio			    = tmp_hwif->mmio;
 	hwif->rqsize			= tmp_hwif->rqsize;
 	hwif->no_lba48			= tmp_hwif->no_lba48;
 
 #ifndef CONFIG_BLK_DEV_IDECS
-	hwif->irq			= tmp_hwif->irq;
+	hwif->irq			    = tmp_hwif->irq;
 #endif
 
 	hwif->dma_base			= tmp_hwif->dma_base;
@@ -729,7 +730,7 @@ EXPORT_SYMBOL(ide_unregister);
  *	do it for you. This is basically a helper
  *
  */
- 
+
 void ide_setup_ports (	hw_regs_t *hw,
 			unsigned long base, int *offsets,
 			unsigned long ctrl, unsigned long intr,
@@ -863,7 +864,7 @@ DECLARE_MUTEX(ide_setting_sem);
  *	@auto_remove: setting auto removal flag
  *
  *	Removes the setting named from the device if it is present.
- *	The function takes the settings_lock to protect against 
+ *	The function takes the settings_lock to protect against
  *	parallel changes. This function must not be called from IRQ
  *	context. Returns 0 on success or -1 on failure.
  *
@@ -896,7 +897,7 @@ static int __ide_add_setting(ide_drive_t *drive, const char *name, int rw, int r
 	setting->div_factor = div_factor;
 	setting->data = data;
 	setting->set = set;
-	
+
 	setting->next = *p;
 	if (auto_remove)
 		setting->auto_remove = 1;
@@ -925,7 +926,7 @@ EXPORT_SYMBOL(ide_add_setting);
  *	Removes the setting named from the device if it is present.
  *	The caller must hold the setting semaphore.
  */
- 
+
 static void __ide_remove_setting (ide_drive_t *drive, char *name)
 {
 	ide_settings_t **p, *setting;
@@ -938,7 +939,7 @@ static void __ide_remove_setting (ide_drive_t *drive, char *name)
 		return;
 
 	(*p) = setting->next;
-	
+
 	kfree(setting->name);
 	kfree(setting);
 }
@@ -952,7 +953,7 @@ static void __ide_remove_setting (ide_drive_t *drive, char *name)
  *	this or NULL if no entry is found. The caller must hold the
  *	setting semaphore
  */
- 
+
 static ide_settings_t *ide_find_setting_by_ioctl (ide_drive_t *drive, int cmd)
 {
 	ide_settings_t *setting = drive->settings;
@@ -962,7 +963,7 @@ static ide_settings_t *ide_find_setting_by_ioctl (ide_drive_t *drive, int cmd)
 			break;
 		setting = setting->next;
 	}
-	
+
 	return setting;
 }
 
@@ -975,7 +976,7 @@ static ide_settings_t *ide_find_setting_by_ioctl (ide_drive_t *drive, int cmd)
  *	this or NULL if no entry is found. The caller must hold the
  *	setting semaphore
  */
- 
+
 ide_settings_t *ide_find_setting_by_name (ide_drive_t *drive, char *name)
 {
 	ide_settings_t *setting = drive->settings;
@@ -996,7 +997,7 @@ ide_settings_t *ide_find_setting_by_name (ide_drive_t *drive, char *name)
  *	drive. This function may sleep and must not be called from IRQ
  *	context. The caller must hold ide_setting_sem.
  */
- 
+
 static void auto_remove_settings (ide_drive_t *drive)
 {
 	ide_settings_t *setting;
@@ -1023,7 +1024,7 @@ repeat:
  *	so an error -EINVAL and true return of the same value cannot
  *	be told apart
  */
- 
+
 int ide_read_setting (ide_drive_t *drive, ide_settings_t *setting)
 {
 	int		val = -EINVAL;
@@ -1240,7 +1241,7 @@ static int generic_ide_suspend(struct device *dev, pm_message_t state)
 	int status;
 
  	ideinfo("generic_ide_suspend\n");
- 	
+
 	memset(&rq, 0, sizeof(rq));
 	memset(&rqpm, 0, sizeof(rqpm));
 	memset(&args, 0, sizeof(args));
@@ -1251,6 +1252,10 @@ static int generic_ide_suspend(struct device *dev, pm_message_t state)
 	rqpm.pm_state = state;
 
 	status = ide_do_drive_cmd(drive, &rq, ide_wait);
+
+	if(!is_venus_cpu())
+    	writel(0x0000002a,(void __iomem *) 0xb8000110); /*liaokh:disable IDE pad*/
+
 	return(status);
 }
 
@@ -1261,22 +1266,35 @@ static int generic_ide_resume(struct device *dev)
 	struct request_pm_state rqpm;
 	ide_task_t args;
 	unsigned long value, timeout = jiffies + WAIT_WORSTCASE;
-	
+
+	if(!is_venus_cpu())
+    	writel(0x0000000a,(void __iomem *) 0xb8000110); /*liaokh:enable IDE pad*/
+
 	drive->failures = 0;    // reset to zero
-	
+
 	value = readl((void __iomem *) 0xb8000004);
-	
+
+
 	if ((strcmp(drive->name, "hda")==0)||(strcmp(drive->name, "hdb")==0)){
 		writel(value|0x20020, (void __iomem *) 0xb8000004);
 	} else {
 		writel(value|0x30000, (void __iomem *) 0xb8000004);    // for hdc & hdd
 	}
-	
+
  	printk("generic_ide_resume\n");
 	msleep(2);		// spec.: read status after 2 ms
 	if (JM_SATA){
 		printk(KERN_WARNING "%s: generic_ide_resume for JM-SATA long delay\n", drive->name);
 		ssleep(3);
+        printk(KERN_WARNING "JM OOB status: 0x%x\n", readl((void __iomem *) 0xb801b114) );
+        printk(KERN_WARNING "reg24: 0x%x\n", readl((void __iomem *) 0xb8012024) );
+        printk(KERN_WARNING "reg28: 0x%x\n", readl((void __iomem *) 0xb8012028) );
+        printk(KERN_WARNING "reg2c: 0x%x\n", readl((void __iomem *) 0xb801202c) );
+        printk(KERN_WARNING "reg30: 0x%x\n", readl((void __iomem *) 0xb8012030) );
+        printk(KERN_WARNING "reg34: 0x%x\n", readl((void __iomem *) 0xb8012034) );
+        printk(KERN_WARNING "reg38: 0x%x\n", readl((void __iomem *) 0xb8012038) );
+        printk(KERN_WARNING "reg3c: 0x%x\n", readl((void __iomem *) 0xb801203c) );
+
 	} else {
  		if (!strcmp(drive->id->model, "DVDRW BDR L28")){ // hack for BTC loader
 			printk(KERN_WARNING "%s: generic_ide_resume for BTC-L28 long delay\n", drive->name);
@@ -1313,7 +1331,7 @@ int generic_ide_ioctl(ide_drive_t *drive, struct file *file, struct block_device
 	void __user *p = (void __user *)arg;
 
  	ideinfo("generic_ide_ioctl\n");
- 	
+
 	down(&ide_setting_sem);
 	if ((setting = ide_find_setting_by_ioctl(drive, cmd)) != NULL) {
 		if (cmd == setting->read_ioctl) {
@@ -1421,7 +1439,7 @@ int generic_ide_ioctl(ide_drive_t *drive, struct file *file, struct block_device
 		{
 			unsigned long flags;
 			if (!capable(CAP_SYS_ADMIN)) return -EACCES;
-			
+
 			/*
 			 *	Abort the current command on the
 			 *	group if there is one, taking
@@ -1436,10 +1454,10 @@ int generic_ide_ioctl(ide_drive_t *drive, struct file *file, struct block_device
 
 			if(HWGROUP(drive)->handler)
 				BUG();
-				
+
 			/* Ensure nothing gets queued after we
 			   drop the lock. Reset will clear the busy */
-		   
+
 			HWGROUP(drive)->busy = 1;
 			spin_unlock_irqrestore(&ide_lock, flags);
 			(void) ide_do_reset(drive);
@@ -1574,7 +1592,7 @@ static int __init ide_setup(char *s)
 	const char max_hwif  = '0' + (MAX_HWIFS - 1);
 
 	ideinfo("ide_setup = %s\n", s);
-	
+
 	if (strncmp(s,"hd",2) == 0 && s[2] == '=')	/* hd= is for hd.c   */
 		return 0;				/* driver and not us */
 
@@ -1701,7 +1719,7 @@ static int __init ide_setup(char *s)
 		 * (-8, -9, -10) are reserved to ease the hardcoding.
 		 */
 		static const char *ide_words[] = {
-			"noprobe", "serialize", "autotune", "noautotune", 
+			"noprobe", "serialize", "autotune", "noautotune",
 			"reset", "dma", "ata66", "minus8", "minus9",
 			"minus10", "four", "qd65xx", "ht6560b", "cmd640_vlb",
 			"dtc2278", "umc8672", "ali14xx", NULL };
@@ -1943,7 +1961,7 @@ EXPORT_SYMBOL(ide_register_subdriver);
 void ide_unregister_subdriver(ide_drive_t *drive, ide_driver_t *driver)
 {
 	unsigned long flags;
-	
+
 	down(&ide_setting_sem);
 	spin_lock_irqsave(&ide_lock, flags);
 #ifdef CONFIG_PROC_FS
@@ -1981,6 +1999,12 @@ EXPORT_SYMBOL_GPL(ide_bus_type);
  */
 static int __init ide_init(void)
 {
+	if(is_mars_cpu())
+        {       
+                printk (KERN_INFO "Mars no support IDE\n");
+                return 0;
+        }      
+
 	//@ do reset for 2.5" Hitachi 80G HDD fail-probing
 	//@ writel((u32)1, (void __iomem *)0xb801215c);		//@ 20070110
 	//@ writel((u32)0, (void __iomem *)0xb801215c);
@@ -2056,9 +2080,15 @@ extern void h8300_ide_exit(void);
 int init_module (void)
 {
 	ideinfo("init_module\n");
+	ideinfo("init_module\n");
+	if(is_mars_cpu())
+	{
+		printk (KERN_INFO "Mars no support IDE\n");
+		return 0;
+	}
 
 	h8300_ide_prepare();
-	
+
 	parse_options(options);
 	return ide_init();
 }
@@ -2068,7 +2098,7 @@ void cleanup_module (void)
 	int index;
 
 	ideinfo("cleanup_module\n");
-	
+
 	for (index = 0; index < MAX_HWIFS; ++index)
 		ide_unregister(index);
 

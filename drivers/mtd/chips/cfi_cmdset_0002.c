@@ -283,6 +283,17 @@ struct mtd_info *cfi_cmdset_0002(struct map_info *map, int primary)
 				cfi->cfiq->EraseRegionInfo[j] = swap;
 			}
 		}
+
+		/*
+		 * Hack - A problem was occurring because 0x555 is not equal to (0x2aa << 1).
+		 *
+		 * This hack turns off the addr_unlock scaling and causes the addr_unlock
+		 * values to be pre-assigned properly below. Most chips accept the address
+		 * of 0x554, which is equal to (0x2aa << 1), but we had encountered an
+		 * excpetion of new MX chip.
+		 */
+		/* No use this because there will still be problems in some places. Hack the problem in cfi_build_cmd_addr. */
+//		cfi->device_type = CFI_DEVICETYPE_X8;
 		/* Set the default CFI lock/unlock addresses */
 		cfi->addr_unlock1 = 0x555;
 		cfi->addr_unlock2 = 0x2aa;
@@ -490,6 +501,8 @@ static int get_chip(struct map_info *map, struct flchip *chip, unsigned long adr
 		/* Erase suspend */
 		/* It's harmless to issue the Erase-Suspend and Erase-Resume
 		 * commands when the erase algorithm isn't in progress. */
+		if(cfi->mfr == 0xC2)
+			goto sleep;	// Flashs of Macronix seem to have problem on erase-suspend-read, and therefore this functionality was diabled.
 		map_write_data(map, CMD(0xB0), chip->in_progress_block_addr);
 		chip->oldstate = FL_ERASING;
 		chip->state = FL_ERASE_SUSPENDING;

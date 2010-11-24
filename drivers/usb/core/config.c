@@ -503,7 +503,10 @@ int usb_get_configuration(struct usb_device *dev)
 
 		/* Now that we know the length, get the whole thing */
 #ifdef USB_512B_ALIGNMENT
-		bigbuffer = kmalloc(USB_512B_ALIGNMENT_SIZE, GFP_KERNEL);
+		if(length > USB_512B_ALIGNMENT_SIZE)
+			bigbuffer = kmalloc(length, GFP_KERNEL);
+		else
+			bigbuffer = kmalloc(USB_512B_ALIGNMENT_SIZE, GFP_KERNEL);
 #else
 		bigbuffer = kmalloc(length, GFP_KERNEL);
 #endif /* USB_512B_ALIGNMENT */

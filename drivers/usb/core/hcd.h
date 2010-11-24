@@ -238,7 +238,7 @@ extern int usb_hcd_rbus_resume  (struct usb_hcd *hcd, struct platform_device *pd
 		                                u32 level);
 #endif /* CONFIG_PM */
 #else
-#ifdef CONFIG_PCI
+#ifdef _CONFIG_PCI
 struct pci_dev;
 struct pci_device_id;
 extern int usb_hcd_pci_probe (struct pci_dev *dev,
@@ -250,7 +250,7 @@ extern int usb_hcd_pci_suspend (struct pci_dev *dev, pm_message_t state);
 extern int usb_hcd_pci_resume (struct pci_dev *dev);
 #endif /* CONFIG_PM */
 
-#endif /* CONFIG_PCI */
+#endif /* _CONFIG_PCI */
 #endif /* CONFIG_REALTEK_VENUS_USB */	//cfyeh- 2005/11/07
 
 /* pci-ish (pdev null is ok) buffer alloc/mapping support */

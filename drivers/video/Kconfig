@@ -38,6 +38,17 @@ config FB
 	  (e.g. an accelerated X server) and that are not frame buffer
 	  device-aware may cause unexpected results. If unsure, say N.
 
+config VENUS_FB
+	tristate "VENUS Frame Buffer Support"
+	depends on FB 
+	select FB_CFB_FILLRECT
+	select FB_CFB_COPYAREA
+	select FB_CFB_IMAGEBLIT
+	select FB_SOFT_CURSOR
+	default  n
+	---help---
+	  Frame buffer driver for Realtek Venus/Neptune/Mars media processor family
+
 config FB_CFB_FILLRECT
 	tristate
 	depends on FB
@@ -1459,6 +1470,13 @@ config FB_W100
 	  say M here and read <file:Documentation/modules.txt>.
 
 	  If unsure, say N.
+
+
+
+
+
+
+
 
 config FB_PXA_PARAMETERS
 	bool "PXA LCD command line parameters"

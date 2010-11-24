@@ -33,6 +33,7 @@ obj-$(CONFIG_USB_POWERMATE)	+= input/
 obj-$(CONFIG_USB_WACOM)		+= input/
 obj-$(CONFIG_USB_XPAD)		+= input/
 
+obj-$(CONFIG_USB_UVC)		+= media/
 obj-$(CONFIG_USB_DABUSB)	+= media/
 obj-$(CONFIG_USB_DSBR)		+= media/
 obj-$(CONFIG_USB_IBMCAM)	+= media/

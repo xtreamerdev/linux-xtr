@@ -178,6 +178,12 @@ config 8139CP_VENUS
 	default y
 	help
 	  If you want to enable ethernet on Venus board, say Y.
+#config 8139CP_MARS
+#	tristate "RealTek RTL-8139 C+ Ethernet Adapter support for Mars board"
+#	depends on NET_ETHERNET && REALTEK_VENUS
+#	default n
+#	help
+#	  If you want to enable ethernet on Mars board, say Y.	  
 
 source "drivers/net/arm/Kconfig"
 
@@ -1933,6 +1939,13 @@ config R8169_NAPI
 	  information.
 
 	  If in doubt, say N.
+config R8169_DISABLE_DAC
+	bool "Disable Dual Address Mode"
+	depends on R8169
+	default y
+	select CRC32
+	---help---
+	  Say Y here if you want to disable dual address mode of Realtek 8169 PCI Gigabit Ethernet adapter.	  
 
 config NET_SB1250_MAC
 	tristate "SB1250 Ethernet support"

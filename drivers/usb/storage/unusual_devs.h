@@ -377,12 +377,11 @@ UNUSUAL_DEV(  0x054c, 0x0010, 0x0106, 0x0450,
 		US_FL_SINGLE_LUN | US_FL_NOT_LOCKABLE | US_FL_NO_WP_DETECT ),
 
 /* This entry is needed because the device reports Sub=ff */
-UNUSUAL_DEV(  0x054c, 0x0010, 0x0500, 0x0500, 
+UNUSUAL_DEV(  0x054c, 0x0010, 0x0500, 0x0600, 
                "Sony",
-               "DSC-T1", 
+               "DSC-T1/N2", 
                US_SC_8070, US_PR_DEVICE, NULL,
                US_FL_SINGLE_LUN ),
-
 
 /* Reported by wim@geeks.nl */
 UNUSUAL_DEV(  0x054c, 0x0025, 0x0100, 0x0100, 
@@ -1089,3 +1088,10 @@ UNUSUAL_DEV(  0x55aa, 0xa103, 0x0000, 0x9999,
 		US_SC_SCSI, US_PR_SDDR55, NULL,
 		US_FL_SINGLE_LUN),
 #endif
+
+// Canon 10D
+UNUSUAL_DEV(  0x04a9, 0x3083, 0x0001, 0x0001, 
+		"Canon",
+		"10D",
+		US_SC_SCSI, US_PR_DEVICE, NULL, US_FL_SINGLE_LUN),
+

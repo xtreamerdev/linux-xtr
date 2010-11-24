@@ -41,10 +41,6 @@ ohci_pci_start (struct usb_hcd *hcd)
 	struct ohci_hcd	*ohci = hcd_to_ohci (hcd);
 	int		ret;
 
-#ifdef CONFIG_REALTEK_VENUS_USB_TEST_MODE       //cfyeh+ 2005/11/07
-	ohci_proc_test(hcd);//cfyeh+ 2005/10/05
-#endif /* CONFIG_REALTEK_VENUS_USB_TEST_MODE */	//cfyeh- 2005/11/07
-
 	/* NOTE: there may have already been a first reset, to
 	 * keep bios/smm irqs from making trouble
 	 */

@@ -16,7 +16,7 @@ menu "USB Gadget Support"
 
 config USB_GADGET
 	tristate "Support for USB Gadgets"
-	depends on !REALTEK_VENUS_USB
+#	depends on !REALTEK_VENUS_USB
 	help
 	   USB is a master/slave protocol, organized with one master
 	   host (such as a PC) controlling up to 127 peripheral devices.
@@ -65,6 +65,9 @@ choice
 	   Systems should have only one such upstream link.
 	   Many controller drivers are platform-specific; these
 	   often need board-specific hooks.
+
+# cyhuang (2008/3/5) : Add for OTG device.
+source "drivers/usb/gadget/realtek/Kconfig"
 
 config USB_GADGET_NET2280
 	boolean "NetChip 2280"
@@ -214,6 +217,10 @@ config USB_DUMMY_HCD
 
 endchoice
 
+
+# cyhuang (2008/3/5) : Add for OTG device options.
+source "drivers/usb/gadget/realtek/Kconfig.options"
+
 config USB_GADGET_DUALSPEED
 	bool
 	depends on USB_GADGET
@@ -246,6 +253,8 @@ choice
 	  a less common variant of a device class protocol.
 
 # this first set of drivers all depend on bulk-capable hardware.
+# cyhuang (2008/3/5) : Add for OTG device options.
+source "drivers/usb/gadget/realtek/verify/Kconfig"
 
 config USB_ZERO
 	tristate "Gadget Zero (DEVELOPMENT)"
@@ -353,6 +362,24 @@ config USB_FILE_STORAGE
 
 	  Say "y" to link the driver statically, or "m" to build a
 	  dynamically linked module called "g_file_storage".
+	
+config USB_FILE_STORAGE_DIRECT_IO_MODE
+	bool "File-backed Storage Gadget DIRECT IO mode"
+	depends on USB_FILE_STORAGE
+	help
+	  Enable DIRECT IO mode for The File-backed Storage Gadget.
+
+	  Say "y" to support DIRECT IO mode.
+	   
+# cyhuang (2008/4/1) : Add for remote wakeup test.
+config USB_OTG_REALTEK_REMOTE_WAKEUP
+	boolean "Realtek USB OTG Remote Wakeup Function"	
+	depends on USB_OTG_REALTEK && USB_FILE_STORAGE	
+	help
+		Enable to test USB device mode's remote wakeup function 
+		in File-backed Storage Gadget driver.
+		
+		Select this only if want to test remote wakeup funtion.	  
 
 config USB_FILE_STORAGE_TEST
 	bool "File-backed Storage Gadget testing version"
@@ -388,3 +415,5 @@ config USB_G_SERIAL
 endchoice
 
 endmenu
+
+

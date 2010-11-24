@@ -743,12 +743,14 @@ pci_scan_single_device(struct pci_bus *bus, int devfn)
 {
 	struct pci_dev *dev;
 
+    printk("%s, devfun = %d\n",__FUNCTION__, devfn);
 	dev = pci_scan_device(bus, devfn);
 	pci_scan_msi_device(dev);
 
-	if (!dev)
+	if (!dev) {
+	    printk("%s, no dev exists\n",__FUNCTION__);    
 		return NULL;
-	
+	}
 	/* Fix up broken headers */
 	pci_fixup_device(pci_fixup_header, dev);
 
@@ -781,7 +783,8 @@ int __devinit pci_scan_slot(struct pci_bus *bus, int devfn)
 	for (func = 0; func < 8; func++, devfn++) {
 		struct pci_dev *dev;
 
-		dev = pci_scan_single_device(bus, devfn);
+		dev = pci_scan_single_device(bus, devfn);				
+		
 		if (dev) {
 			nr++;
 
@@ -812,7 +815,8 @@ unsigned int __devinit pci_scan_child_bus(struct pci_bus *bus)
 	pr_debug("PCI: Scanning bus %04x:%02x\n", pci_domain_nr(bus), bus->number);
 
 	/* Go find them, Rover! */
-	for (devfn = 0; devfn < 0x10; devfn += 8)
+	//for (devfn = 0; devfn < 0x100; devfn += 8)
+	for (devfn = 0; devfn < 0x18; devfn += 8)
 		pci_scan_slot(bus, devfn);
 
 	/*

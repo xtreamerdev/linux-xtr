@@ -1,0 +1,53 @@
+menu "Realtek USB OTG Controller Configuration"
+	depends on USB_GADGET && USB_OTG_REALTEK
+		   	   		              
+config USB_GADGET_DUALSPEED
+	bool "Support High Speed Mode"
+	depends on USB_OTG_REALTEK
+	default Y
+	help
+	  Means that gadget drivers should include extra descriptors
+	  and code to handle dual-speed controllers.
+	  
+	  Select "y" if you want support high speed mode device.  
+  
+choice
+	prompt "Mode Configuration"
+	depends on USB_GADGET && USB_OTG_REALTEK
+	help
+	   Realtek USB OTG controller has tree kind of mode configurations.
+	   You can choice one of mode configuration in compile time.
+	   	 
+config USB_OTG_REALTEK_OTG_MODE
+	bool "OTG mode"
+	depends on USB_OTG_REALTEK
+	default Y
+	help
+	  Support OTG/Host/Device mode.	   	 
+	   	  
+config USB_OTG_REALTEK_HOST_ONLY_MODE
+	bool "Host only mode"
+	depends on USB_OTG_REALTEK
+	default n
+	help
+	  Host mode only.	
+	  
+config USB_OTG_REALTEK_DEVICE_ONLY_MODE
+	bool "Device only mode"
+	depends on USB_OTG_REALTEK
+	default n
+	help
+	  Device mode only.	
+	      
+endchoice
+
+config USB_OTG_REALTEK_TEST_SUPPORT
+	bool "Support HS Electrical Test Function"
+	depends on USB_OTG_REALTEK
+	default Y
+	help
+	  Quick and dirty hack to implement the HS Electrical Test
+	  SINGLE_STEP_GET_DEVICE_DESCRIPTOR feature.
+	  		
+endmenu	
+	   

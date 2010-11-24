@@ -1,0 +1,12 @@
+# drivers/Kconfig
+
+comment"CEC Adapters"
+	depends on CEC
+
+config MARS_CEC
+	bool "NEPTUNE/MARS CEC Controller"
+	depends on CEC && REALTEK_VENUS
+	default n
+	help
+	  If you want to use CEC on Neptune/Mars board, say Y.
+

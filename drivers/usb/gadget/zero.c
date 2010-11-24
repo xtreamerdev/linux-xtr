@@ -1067,9 +1067,15 @@ unknown:
 	}
 
 	/* respond with data transfer before status phase? */
-	if (value >= 0) {
+	if (value >= 0) {		
 		req->length = value;
+
+/* cyhuang (2008/3/14) : We don't need to send any zero length packet. */
+#if defined(CONFIG_USB_OTG_REALTEK)		
+		req->zero = 0;
+#else
 		req->zero = value < w_length;
+#endif		
 		value = usb_ep_queue (gadget->ep0, req, GFP_ATOMIC);
 		if (value < 0) {
 			DBG (dev, "ep_queue --> %d\n", value);

@@ -228,6 +228,50 @@ find_ep (struct usb_gadget *gadget, const char *name)
  *
  * On failure, this returns a null endpoint descriptor.
  */
+/* cyhuang (2008/3/17) : 
+ * 
+ * We config all endpoint to bi-direction (IN/OUT) , 
+ * so we can't use default autoconfig function. 
+ * 
+ */
+#if defined(CONFIG_USB_OTG_REALTEK)	
+
+static inline int __init is_duplicate_ep(struct usb_gadget *gadget , struct usb_ep *ep) 
+{
+	struct usb_ep *claimed_ep;
+	
+	list_for_each_entry (claimed_ep, &gadget->ep_list, ep_list) { 
+		if (claimed_ep->driver_data) {
+			if (!strncmp(claimed_ep->name,ep->name,sizeof("epN")-1))
+				return 1;
+		}
+	}	
+	
+	return 0;					
+}
+
+struct usb_ep * __init usb_ep_autoconfig (
+	struct usb_gadget		*gadget,
+	struct usb_endpoint_descriptor	*desc
+)
+{
+	struct usb_ep	*ep;
+		
+	/* Second, look at endpoints until an unclaimed one looks usable */ 
+	list_for_each_entry (ep, &gadget->ep_list, ep_list) {
+		if (!is_duplicate_ep(gadget,ep))
+			if (ep_matches (gadget, ep, desc)) {
+				// printk("Got ep = %s\n",ep->name); 
+				return ep;
+			}	
+	}
+	
+	
+	/* Fail */
+	return NULL;	
+}	
+
+#else 
 struct usb_ep * __init usb_ep_autoconfig (
 	struct usb_gadget		*gadget,
 	struct usb_endpoint_descriptor	*desc
@@ -285,6 +329,7 @@ struct usb_ep * __init usb_ep_autoconfig (
 	/* Fail */
 	return NULL;
 }
+#endif
 
 /**
  * usb_ep_autoconfig_reset - reset endpoint autoconfig state
@@ -307,4 +352,6 @@ void __init usb_ep_autoconfig_reset (struct usb_gadget *gadget)
 #endif
 	epnum = 0;
 }
+
+
 

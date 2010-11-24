@@ -504,10 +504,42 @@ config I2C_VENUS
 	help
 	  This driver supports I2C Controller on Realtek Venus SoC
 	  
+config MARS_I2C_EN
+	bool "Mars I2C"
+	depends on I2C_VENUS
+	default 'n'
+	select I2C_VENUS_INT_MODE_XFER
+	help
+	  Say Y here if you want use it on Mars Platform.
+
+config I2C_VENUS_INT_MODE_XFER
+	bool "Using Interrupt Mode Venus I2C xfer"
+	depends on I2C_VENUS
+	default 'y'
+	help
+	  Say Y here if you want use the interrupt transfer.	
+	  
+config I2C_VENUS_BUS_JAM_RECOVER
+	bool "Do recover if i2c bus is jammed"
+	depends on I2C_VENUS && I2C_VENUS_INT_MODE_XFER
+	default 'y'
+	help
+	  Say Y here if you do recover procedure if i2c bus is jammed.
+	  The I2c driver will detect bus status before an i2c transfer.
+	  If the bus is jammed, the driver will force output 10 extra clocks
+	  on SCL to recover the bus jam problem.
+	  
+config I2C_VENUS_NON_STOP_WRITE_XFER
+	bool "Support non stop write"
+	depends on I2C_VENUS && I2C_VENUS_INT_MODE_XFER
+	default 'n'
+	help
+	  Say Y here if you want to supoort non stop write.	  
+	  
 config I2C_VENUS_WAIT_COMPLETE_AT_END
 	bool "Venus I2C Wait complete at end of xfer"
-	depends on I2C
-	default 'y'
+	depends on I2C_VENUS && !I2C_VENUS_INT_MODE_XFER
+	default 'n'
 	help
 	  Say Y here if you want the Venus I2C bus wait completion at end of xfer.	  
 	  	  

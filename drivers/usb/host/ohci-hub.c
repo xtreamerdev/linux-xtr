@@ -59,9 +59,11 @@ static int ohci_hub_suspend (struct usb_hcd *hcd)
 	int			status = 0;
 	unsigned long		flags;
 
+#ifndef USB_FREE_IRQ_AT_SUSPEND_MODE
 #if defined(CONFIG_REALTEK_VENUS_USB_1261) || defined(CONFIG_REALTEK_VENUS_USB_1261_ECO)
 	return 0;
 #endif /* defined(CONFIG_REALTEK_VENUS_USB_1261) || defined(CONFIG_REALTEK_VENUS_USB_1261_ECO) */
+#endif /* USB_FREE_IRQ_AT_SUSPEND_MODE */
 
 	spin_lock_irqsave (&ohci->lock, flags);
 
@@ -152,8 +154,8 @@ static int ohci_hub_resume (struct usb_hcd *hcd)
 	int			status = -EINPROGRESS;
 
 #if defined(CONFIG_REALTEK_VENUS_USB_1261) || defined(CONFIG_REALTEK_VENUS_USB_1261_ECO)
-	//for pulling 0xb8013800 bit6 high befor resume OHCI port 
-	writel(readl((void __iomem *)0xb8013800)| 1<<6, (void __iomem *)0xb8013800);
+	//FOR PULLING VENUS_USB_HOST_WRAPPER BIT6 HIGH BEFOR RESUME OHCI PORT 
+	outl(inl(VENUS_USB_HOST_WRAPPER)| 1<<6, VENUS_USB_HOST_WRAPPER);
 	(void) ohci_init (ohci);
 	return ohci_restart (ohci);
 #endif /* defined(CONFIG_REALTEK_VENUS_USB_1261) || defined(CONFIG_REALTEK_VENUS_USB_1261_ECO) */
@@ -178,8 +180,8 @@ static int ohci_hub_resume (struct usb_hcd *hcd)
 	} else switch (ohci->hc_control & OHCI_CTRL_HCFS) {
 	case OHCI_USB_SUSPEND:
 #ifdef CONFIG_REALTEK_VENUS_USB //cfyeh+
-		//for pulling 0xb8013800 bit6 high befor resume OHCI port 
-		writel(readl((void __iomem *)0xb8013800)| 1<<6, (void __iomem *)0xb8013800);
+		//for pulling VENUS_USB_HOST_WRAPPER bit6 high befor resume OHCI port 
+		outl(inl(VENUS_USB_HOST_WRAPPER)| 1<<6, VENUS_USB_HOST_WRAPPER);
 #endif /* CONFIG_REALTEK_VENUS_USB */ //cfyeh-
 		ohci->hc_control &= ~(OHCI_CTRL_HCFS|OHCI_SCHED_ENABLES);
 		ohci->hc_control |= OHCI_USB_RESUME;

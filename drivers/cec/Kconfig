@@ -1,0 +1,9 @@
+# drivers/cec/Kconfig
+
+menu "CEC Support"
+
+source drivers/cec/core/Kconfig
+source drivers/cec/adapter/Kconfig
+
+endmenu
+	

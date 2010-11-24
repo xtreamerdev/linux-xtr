@@ -915,6 +915,9 @@ static int usb_stor_scan_thread(void * __us)
 	printk(KERN_DEBUG
 		"usb-storage: device found at %d\n", us->pusb_dev->devnum);
 
+	strcpy(us_to_host(us)->port_structure, us->pusb_dev->devpath); /*  2009/03/03 cfyeh : port structure */
+	strcpy(us_to_host(us)->bus_type, "usb"); /*  2009/03/04 cfyeh : bus type */
+
 #ifdef USB_STORAGE_SPEEDUP_PORT_ONE
 	if(!strcmp (us->pusb_dev->devpath, USB_STORAGE_SPEEDUP_DEVPATH))
 	{
@@ -958,6 +961,15 @@ retry:
 			up(&us->dev_semaphore);
 		}
 		scsi_scan_host(us_to_host(us));
+
+#ifdef USB_STORAGE_POWER_CONDITION_MODE // test for power condition mode page
+		printk("#######[cfyeh-debug] %s(%d) vid 0x%.4x\n", __func__, __LINE__, us->pusb_dev->descriptor.idVendor);
+		printk("#######[cfyeh-debug] %s(%d) pid 0x%.4x\n", __func__, __LINE__, us->pusb_dev->descriptor.idProduct);
+		//if((us->pusb_dev->descriptor.idVendor == vid) &&
+		//		(us->pusb_dev->descriptor.idProduct == pid))
+			scsi_set_power_condition(us_to_host(us));
+#endif /* USB_STORAGE_POWER_CONDITION_MODE */ // test for power condition mode page
+
 		printk(KERN_DEBUG "usb-storage: device scan complete\n");
 
 		/* Should we unbind if no devices were detected? */

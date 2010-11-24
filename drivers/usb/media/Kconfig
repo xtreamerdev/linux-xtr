@@ -4,6 +4,21 @@
 comment "USB Multimedia devices"
 	depends on USB
 
+config USB_UVC
+        tristate "UVC driver"
+        depends on USB && VIDEO_DEV 
+        ---help---
+          The USB Device Class Definition for Video Devices, or USB Video Class, 
+	  defines video streaming functionality on the Universal Serial Bus. 
+	  Much like nearly all mass storage devices (USB flash disks, 
+	  external IDE disk enclosures, ...) can be managed by a single driver 
+	  because they conform to the USB Mass Storage specification, 
+	  UVC compliant peripherals only need a generic driver.
+
+	  The UVC specification covers webcams, digital camcorders, 
+	  analog video converters, analog and digital television tuners, 
+	  and still-image cameras that support video streaming for both video input and output.
+
 config USB_DABUSB
 	tristate "DABUSB driver"
 	depends on USB

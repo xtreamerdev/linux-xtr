@@ -18,6 +18,16 @@
 #include <linux/mtd/mtd.h>
 #include <linux/mtd/blktrans.h>
 
+#define MARS_DEBUG 0
+#if MARS_DEBUG
+      #define debug_mars(fmt, arg...)  printk(fmt, ##arg);
+#else
+      #define debug_mars(fmt, arg...)
+#endif
+
+/* Ken: 20090211 */
+#define ERASE_NAND 1
+
 static struct mtdblk_dev {
 	struct mtd_info *mtd;
 	int count;
@@ -40,6 +50,7 @@ static struct mtdblk_dev {
 
 static void erase_callback(struct erase_info *done)
 {
+debug_mars("---------[%s]----------\n", __FUNCTION__);
 	wait_queue_head_t *wait_q = (wait_queue_head_t *)done->priv;
 	wake_up(wait_q);
 }
@@ -47,6 +58,7 @@ static void erase_callback(struct erase_info *done)
 static int erase_write (struct mtd_info *mtd, unsigned long pos, 
 			int len, const char *buf)
 {
+debug_mars("---------[%s]----------\n", __FUNCTION__);
 	struct erase_info erase;
 	DECLARE_WAITQUEUE(wait, current);
 	wait_queue_head_t wait_q;
@@ -56,34 +68,60 @@ static int erase_write (struct mtd_info *mtd, unsigned long pos,
 	/*
 	 * First, let's erase the flash block.
 	 */
+	//Ken, 20080816
+	//printk("[%s] mtd->type =%d\n", __FUNCTION__, mtd->type);
+	if ( mtd->type == MTD_NANDFLASH || strstr(mtd->name, "nand") ){	//Nand flash
+//printk("---------[%d]----------\n", __LINE__);
+#if ERASE_NAND	//Ken: 20090211
+		if ( !(pos%mtd->erasesize) ){
+			init_waitqueue_head(&wait_q);
+			erase.mtd = mtd;
+			erase.callback = erase_callback;
+			erase.addr = pos;
+			erase.len = len;
+			erase.priv = (u_long)&wait_q;
 
-	init_waitqueue_head(&wait_q);
-	erase.mtd = mtd;
-	erase.callback = erase_callback;
-	erase.addr = pos;
-	erase.len = len;
-	erase.priv = (u_long)&wait_q;
+			set_current_state(TASK_INTERRUPTIBLE);
+			add_wait_queue(&wait_q, &wait);
+			ret = MTD_ERASE(mtd, &erase);
+			if (ret) {
+				set_current_state(TASK_RUNNING);
+				remove_wait_queue(&wait_q, &wait);
+				printk (KERN_WARNING "mtdblock:erase nand of region [0x%lx, 0x%x] "
+						     "on \"%s\" failed\n", pos, len, mtd->name);
+				return ret;
+			}
+			//schedule();  /* Wait for erase to finish. */	//This will hang up when using dd
+			remove_wait_queue(&wait_q, &wait);
+		}
+#endif		
+	}else{		//Nor flash
+		init_waitqueue_head(&wait_q);
+		erase.mtd = mtd;
+		erase.callback = erase_callback;
+		erase.addr = pos;
+		erase.len = len;
+		erase.priv = (u_long)&wait_q;
 
-	set_current_state(TASK_INTERRUPTIBLE);
-	add_wait_queue(&wait_q, &wait);
+		set_current_state(TASK_INTERRUPTIBLE);
+		add_wait_queue(&wait_q, &wait);
 
-	ret = MTD_ERASE(mtd, &erase);
-	if (ret) {
-		set_current_state(TASK_RUNNING);
-		remove_wait_queue(&wait_q, &wait);
-		printk (KERN_WARNING "mtdblock: erase of region [0x%lx, 0x%x] "
-				     "on \"%s\" failed\n",
-			pos, len, mtd->name);
-		return ret;
+		ret = MTD_ERASE(mtd, &erase);
+		if (ret) {
+			set_current_state(TASK_RUNNING);
+			remove_wait_queue(&wait_q, &wait);
+			printk (KERN_WARNING "mtdblock: erase of region [0x%lx, 0x%x] "
+					     "on \"%s\" failed\n",
+				pos, len, mtd->name);
+			return ret;
+		}
+
+		schedule();  /* Wait for erase to finish. */
+		remove_wait_queue(&wait_q, &wait);	
 	}
-
-	schedule();  /* Wait for erase to finish. */
-	remove_wait_queue(&wait_q, &wait);
-
 	/*
 	 * Next, writhe data to flash.
 	 */
-
 	ret = MTD_WRITE (mtd, pos, len, &retlen, buf);
 	if (ret)
 		return ret;
@@ -95,6 +133,7 @@ static int erase_write (struct mtd_info *mtd, unsigned long pos,
 
 static int write_cached_data (struct mtdblk_dev *mtdblk)
 {
+debug_mars("---------[%s]----------\n", __FUNCTION__);
 	struct mtd_info *mtd = mtdblk->mtd;
 	int ret;
 
@@ -125,6 +164,7 @@ static int write_cached_data (struct mtdblk_dev *mtdblk)
 static int do_cached_write (struct mtdblk_dev *mtdblk, unsigned long pos, 
 			    int len, const char *buf)
 {
+debug_mars("---------[%s]----------\n", __FUNCTION__);
 	struct mtd_info *mtd = mtdblk->mtd;
 	unsigned int sect_size = mtdblk->cache_size;
 	size_t retlen;
@@ -140,48 +180,55 @@ static int do_cached_write (struct mtdblk_dev *mtdblk, unsigned long pos,
 		unsigned long sect_start = (pos/sect_size)*sect_size;
 		unsigned int offset = pos - sect_start;
 		unsigned int size = sect_size - offset;
+		//printk("[%s] sect_start=0x%x, pos=0x%x, offset=0x%x, sect_size=%d, size=%d\n", 
+					//__FUNCTION__, sect_start, pos, offset, sect_size, size);
 		if( size > len ) 
 			size = len;
-
-		if (size == sect_size) {
+		//Ken, 20080903
+		//printk("[%s] mtd->type =%d\n", __FUNCTION__, mtd->type);
+		if ( mtd->type == MTD_NANDFLASH || strstr(mtd->name, "nand") ){
+			ret = erase_write (mtd, pos, size, buf);
+			if (ret)
+				return ret;
+		}else{
+			if (size == sect_size) {
 			/* 
 			 * We are covering a whole sector.  Thus there is no
 			 * need to bother with the cache while it may still be
 			 * useful for other partial writes.
 			 */
-			ret = erase_write (mtd, pos, size, buf);
-			if (ret)
-				return ret;
-		} else {
-			/* Partial sector: need to use the cache */
-
-			if (mtdblk->cache_state == STATE_DIRTY &&
-			    mtdblk->cache_offset != sect_start) {
-				ret = write_cached_data(mtdblk);
-				if (ret) 
-					return ret;
-			}
-
-			if (mtdblk->cache_state == STATE_EMPTY ||
-			    mtdblk->cache_offset != sect_start) {
-				/* fill the cache with the current sector */
-				mtdblk->cache_state = STATE_EMPTY;
-				ret = MTD_READ(mtd, sect_start, sect_size, &retlen, mtdblk->cache_data);
+				ret = erase_write (mtd, pos, size, buf);
 				if (ret)
 					return ret;
-				if (retlen != sect_size)
-					return -EIO;
+			} else {
+			/* Partial sector: need to use the cache */
+				if (mtdblk->cache_state == STATE_DIRTY &&
+				    mtdblk->cache_offset != sect_start) {
+					ret = write_cached_data(mtdblk);
+					if (ret) 
+						return ret;
+				}
 
-				mtdblk->cache_offset = sect_start;
-				mtdblk->cache_size = sect_size;
-				mtdblk->cache_state = STATE_CLEAN;
+				if (mtdblk->cache_state == STATE_EMPTY ||
+				    mtdblk->cache_offset != sect_start) {
+					/* fill the cache with the current sector */
+					mtdblk->cache_state = STATE_EMPTY;
+					ret = MTD_READ(mtd, sect_start, sect_size, &retlen, mtdblk->cache_data);
+					if (ret)
+						return ret;
+					if (retlen != sect_size)
+						return -EIO;
+
+					mtdblk->cache_offset = sect_start;
+					mtdblk->cache_size = sect_size;
+					mtdblk->cache_state = STATE_CLEAN;
+				}
+
+				/* write data to our local cache */
+				memcpy (mtdblk->cache_data + offset, buf, size);
+				mtdblk->cache_state = STATE_DIRTY;
 			}
-
-			/* write data to our local cache */
-			memcpy (mtdblk->cache_data + offset, buf, size);
-			mtdblk->cache_state = STATE_DIRTY;
 		}
-
 		buf += size;
 		pos += size;
 		len -= size;
@@ -194,6 +241,7 @@ static int do_cached_write (struct mtdblk_dev *mtdblk, unsigned long pos,
 static int do_cached_read (struct mtdblk_dev *mtdblk, unsigned long pos, 
 			   int len, char *buf)
 {
+debug_mars("---------[%s]----------\n", __FUNCTION__);
 	struct mtd_info *mtd = mtdblk->mtd;
 	unsigned int sect_size = mtdblk->cache_size;
 	size_t retlen;
@@ -202,9 +250,10 @@ static int do_cached_read (struct mtdblk_dev *mtdblk, unsigned long pos,
 	DEBUG(MTD_DEBUG_LEVEL2, "mtdblock: read on \"%s\" at 0x%lx, size 0x%x\n", 
 			mtd->name, pos, len);
 	
+
 	if (!sect_size)
 		return MTD_READ (mtd, pos, len, &retlen, buf);
-
+	
 	while (len > 0) {
 		unsigned long sect_start = (pos/sect_size)*sect_size;
 		unsigned int offset = pos - sect_start;
@@ -240,13 +289,21 @@ static int do_cached_read (struct mtdblk_dev *mtdblk, unsigned long pos,
 static int mtdblock_readsect(struct mtd_blktrans_dev *dev,
 			      unsigned long block, char *buf)
 {
+debug_mars("---------[%s]----------\n", __FUNCTION__);
 	struct mtdblk_dev *mtdblk = mtdblks[dev->devnum];
-	return do_cached_read(mtdblk, block<<9, 512, buf);
+	//Ken, 20080903
+	struct mtd_info *mtd = mtdblk->mtd;
+	//printk("[%s] mtd->type =%d\n", __FUNCTION__, mtd->type);
+	if ( mtd->type == MTD_NANDFLASH || strstr(mtd->name, "nand") )
+		return do_cached_read(mtdblk, block<<9, mtd->oobblock, buf);	
+	else
+		return do_cached_read(mtdblk, block<<9, 512, buf);
 }
 
 static int mtdblock_writesect(struct mtd_blktrans_dev *dev,
 			      unsigned long block, char *buf)
 {
+debug_mars("---------[%s]----------\n", __FUNCTION__);
 	struct mtdblk_dev *mtdblk = mtdblks[dev->devnum];
 	if (unlikely(!mtdblk->cache_data && mtdblk->cache_size)) {
 		mtdblk->cache_data = vmalloc(mtdblk->mtd->erasesize);
@@ -257,11 +314,18 @@ static int mtdblock_writesect(struct mtd_blktrans_dev *dev,
 		 * return -EAGAIN sometimes, but why bother?
 		 */
 	}
-	return do_cached_write(mtdblk, block<<9, 512, buf);
+	//Ken, 20080903
+	struct mtd_info *mtd = mtdblk->mtd;
+	//printk("[%s] mtd->type =%d\n", __FUNCTION__, mtd->type);
+	if ( mtd->type == MTD_NANDFLASH || strstr(mtd->name, "nand") )
+		return do_cached_write(mtdblk, block<<9, mtd->oobblock, buf);
+	else
+		return do_cached_write(mtdblk, block<<9, 512, buf);	//Ken, org	
 }
 
 static int mtdblock_open(struct mtd_blktrans_dev *mbd)
 {
+debug_mars("---------[%s]----------\n", __FUNCTION__);
 	struct mtdblk_dev *mtdblk;
 	struct mtd_info *mtd = mbd->mtd;
 	int dev = mbd->devnum;
@@ -284,11 +348,13 @@ static int mtdblock_open(struct mtd_blktrans_dev *mbd)
 
 	init_MUTEX (&mtdblk->cache_sem);
 	mtdblk->cache_state = STATE_EMPTY;
+
 	if ((mtdblk->mtd->flags & MTD_CAP_RAM) != MTD_CAP_RAM &&
 	    mtdblk->mtd->erasesize) {
 		mtdblk->cache_size = mtdblk->mtd->erasesize;
 		mtdblk->cache_data = NULL;
 	}
+
 
 	mtdblks[dev] = mtdblk;
 	
@@ -299,6 +365,7 @@ static int mtdblock_open(struct mtd_blktrans_dev *mbd)
 
 static int mtdblock_release(struct mtd_blktrans_dev *mbd)
 {
+debug_mars("---------[%s]----------\n", __FUNCTION__);
 	int dev = mbd->devnum;
 	struct mtdblk_dev *mtdblk = mtdblks[dev];
 
@@ -323,8 +390,8 @@ static int mtdblock_release(struct mtd_blktrans_dev *mbd)
 
 static int mtdblock_flush(struct mtd_blktrans_dev *dev)
 {
+debug_mars("---------[%s]----------\n", __FUNCTION__);
 	struct mtdblk_dev *mtdblk = mtdblks[dev->devnum];
-
 	down(&mtdblk->cache_sem);
 	write_cached_data(mtdblk);
 	up(&mtdblk->cache_sem);
@@ -336,6 +403,7 @@ static int mtdblock_flush(struct mtd_blktrans_dev *dev)
 
 static void mtdblock_add_mtd(struct mtd_blktrans_ops *tr, struct mtd_info *mtd)
 {
+debug_mars("---------[%s]----------\n", __FUNCTION__);
 	struct mtd_blktrans_dev *dev = kmalloc(sizeof(*dev), GFP_KERNEL);
 
 	if (!dev)
@@ -345,8 +413,15 @@ static void mtdblock_add_mtd(struct mtd_blktrans_ops *tr, struct mtd_info *mtd)
 
 	dev->mtd = mtd;
 	dev->devnum = mtd->index;
-	dev->blksize = 512;
-	dev->size = mtd->size >> 9;
+	//Ken, 20080903
+	//printk("[%s] mtd->type =%d\n", __FUNCTION__, mtd->type);
+	if ( mtd->type == MTD_NANDFLASH || strstr(mtd->name, "nand") ){
+		dev->blksize = mtd->oobblock;
+		dev->size = mtd->size/mtd->oobblock;
+	}else{
+		dev->blksize = 512;	
+		dev->size = mtd->size >> 9;	
+	}
 	dev->tr = tr;
 
 	if (!(mtd->flags & MTD_WRITEABLE))
@@ -357,6 +432,7 @@ static void mtdblock_add_mtd(struct mtd_blktrans_ops *tr, struct mtd_info *mtd)
 
 static void mtdblock_remove_dev(struct mtd_blktrans_dev *dev)
 {
+debug_mars("---------[%s]----------\n", __FUNCTION__);
 	del_mtd_blktrans_dev(dev);
 	kfree(dev);
 }

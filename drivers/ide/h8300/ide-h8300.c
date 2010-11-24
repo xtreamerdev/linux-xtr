@@ -2,8 +2,8 @@
  * drivers/ide/ide-h8300.c
  * H8/300 generic IDE interface
  */
- 
- //#define	PIO
+
+ //#define  PIO
 
 #include <linux/init.h>
 #include <linux/ide.h>
@@ -11,74 +11,74 @@
 
 #include <asm/io.h>
 #include <asm/irq.h>
-#include <asm/r4kcache.h>	//@ for NEPTUNE
-#include <asm/mach-venus/platform.h>	//@
+#include <asm/r4kcache.h>   //@ for NEPTUNE
+#include <asm/mach-venus/platform.h>    //@
 
 #include "../debug.h"
 #include "ide-h8300.h"
 extern int ide_debug;
 
-int FPGA;		//@
-int NEPTUNE;   		//@
+int FPGA;       //@
+int NEPTUNE;        //@
 int JM_SATA;
 
 // ide controller
 
-#define	VENUS_BANK_GAP		0x100
+#define VENUS_BANK_GAP      0x100
 
-#define	VENUS_IDE_GAP			4
+#define VENUS_IDE_GAP           4
 
-#define	VENUS_ATA0_BASE		0xb8012000
-#define	VENUS_ATA0_ALT			0xb8012020
+#define VENUS_ATA0_BASE     0xb8012000
+#define VENUS_ATA0_ALT          0xb8012020
 
-#define	VENUS_ATA0_DEV0		0xb8012024
-#define	VENUS_ATA0_PIO0			0xb801202c
-#define	VENUS_ATA0_DMA0		0xb8012034
-#define	VENUS_ATA0_DLEN		0xb801203c
-#define	VENUS_ATA0_CTL			0xb8012040
-#define	VENUS_ATA0_GO			0xb8012044
-#define	VENUS_ATA0_INT			0xb8012048
-#define	VENUS_ATA0_ENABLE		0xb801204c
-#define	VENUS_ATA0_INADR		0xb8012050
-#define	VENUS_ATA0_OUTADR		0xb8012054
+#define VENUS_ATA0_DEV0     0xb8012024
+#define VENUS_ATA0_PIO0         0xb801202c
+#define VENUS_ATA0_DMA0     0xb8012034
+#define VENUS_ATA0_DLEN     0xb801203c
+#define VENUS_ATA0_CTL          0xb8012040
+#define VENUS_ATA0_GO           0xb8012044
+#define VENUS_ATA0_INT          0xb8012048
+#define VENUS_ATA0_ENABLE       0xb801204c
+#define VENUS_ATA0_INADR        0xb8012050
+#define VENUS_ATA0_OUTADR       0xb8012054
 
-#define	VENUS_ATA0_RST			0xb801205c
+#define VENUS_ATA0_RST          0xb801205c
 
 // content protection controller
-#define	VENUS_CP_CTRL			0xb8015000
-#define	VENUS_CP0_KEY			0xb8015004
-#define	VENUS_CP1_KEY			0xb8015014
+#define VENUS_CP_CTRL           0xb8015000
+#define VENUS_CP0_KEY           0xb8015004
+#define VENUS_CP1_KEY           0xb8015014
 
 // IDE occupies IRQ2
-#define	VENUS_IDE_IRQ			2
+#define VENUS_IDE_IRQ           2
 
-#define WRAPPER_BANK_GAP			0x400		//@
-#define WRAPPER_ATA0_CTRL		0xb8012400
-#define WRAPPER_ATA0_PRDADDR	0xb8012404
-#define WRAPPER_ATA0_PRDNUM	0xb8012408
+#define WRAPPER_BANK_GAP            0x400       //@
+#define WRAPPER_ATA0_CTRL       0xb8012400
+#define WRAPPER_ATA0_PRDADDR    0xb8012404
+#define WRAPPER_ATA0_PRDNUM 0xb8012408
 
 #define SG_VIRT_ADDR(p_sg)      ((void*)(page_address((p_sg)->page)+ (p_sg)->offset))
 
 //@ #ifdef IDE_FPGA_BOARD
 /*
 unsigned int venus_pio_timing[]={
-	((2<<27)|(6<<21)|(3<<16)|(2<<11)|(10<<5)|3),	// XFER_PIO_0
-	((2<<27)|(5<<21)|(2<<16)|(2<<11)|(10<<5)|2),	// XFER_PIO_1
-  	((2<<27)|(4<<21)|(2<<16)|(2<<11)|(10<<5)|2)	// XFER_PIO_2	
+    ((2<<27)|(6<<21)|(3<<16)|(2<<11)|(10<<5)|3),    // XFER_PIO_0
+    ((2<<27)|(5<<21)|(2<<16)|(2<<11)|(10<<5)|2),    // XFER_PIO_1
+    ((2<<27)|(4<<21)|(2<<16)|(2<<11)|(10<<5)|2) // XFER_PIO_2
 };
 
 unsigned int venus_dma_timing[]={
-	((8<<27)|(8<<21)|(3<<16)|(8<<11)|(8<<5)|3),	// XFER_MW_DMA_0 
-	((6<<27)|(6<<21)|(3<<16)|(6<<11)|(6<<5)|3),	// XFER_MW_DMA_1
-  	((4<<27)|(4<<21)|(3<<16)|(4<<11)|(4<<5)|3),	// XFER_MW_DMA_2
-	((8<<27)|(8<<21)|(3<<16)|(8<<11)|(8<<5)|3), 	// XFER_UDMA_0
-	((6<<27)|(6<<21)|(3<<16)|(6<<11)|(6<<5)|3),	// XFER_UDMA_1
-	((4<<27)|(4<<21)|(3<<16)|(4<<11)|(4<<5)|3),	// XFER_UDMA_2	 	
-	((4<<27)|(4<<21)|(3<<16)|(4<<11)|(4<<5)|3),	// XFER_UDMA_3	 	
-	((4<<27)|(4<<21)|(3<<16)|(4<<11)|(4<<5)|3),	// XFER_UDMA_4	 	
-	((4<<27)|(4<<21)|(3<<16)|(4<<11)|(4<<5)|3),	// XFER_UDMA_5	 	
-	((4<<27)|(4<<21)|(3<<16)|(4<<11)|(4<<5)|3),	// XFER_UDMA_6
-	((4<<27)|(4<<21)|(3<<16)|(4<<11)|(4<<5)|3),	// XFER_UDMA_7	 	
+    ((8<<27)|(8<<21)|(3<<16)|(8<<11)|(8<<5)|3), // XFER_MW_DMA_0
+    ((6<<27)|(6<<21)|(3<<16)|(6<<11)|(6<<5)|3), // XFER_MW_DMA_1
+    ((4<<27)|(4<<21)|(3<<16)|(4<<11)|(4<<5)|3), // XFER_MW_DMA_2
+    ((8<<27)|(8<<21)|(3<<16)|(8<<11)|(8<<5)|3),     // XFER_UDMA_0
+    ((6<<27)|(6<<21)|(3<<16)|(6<<11)|(6<<5)|3), // XFER_UDMA_1
+    ((4<<27)|(4<<21)|(3<<16)|(4<<11)|(4<<5)|3), // XFER_UDMA_2
+    ((4<<27)|(4<<21)|(3<<16)|(4<<11)|(4<<5)|3), // XFER_UDMA_3
+    ((4<<27)|(4<<21)|(3<<16)|(4<<11)|(4<<5)|3), // XFER_UDMA_4
+    ((4<<27)|(4<<21)|(3<<16)|(4<<11)|(4<<5)|3), // XFER_UDMA_5
+    ((4<<27)|(4<<21)|(3<<16)|(4<<11)|(4<<5)|3), // XFER_UDMA_6
+    ((4<<27)|(4<<21)|(3<<16)|(4<<11)|(4<<5)|3), // XFER_UDMA_7
 };
 */
 //@ #else
@@ -209,7 +209,7 @@ unsigned int venus_dma_timing[]={
     (REG_UDMA(0, T9)| REG_UDMA(0, T8)| REG_UDMA(0, T7)| REG_MW(0, T6)| REG_MW(0, T5)| REG_MW(0, T4)), // XFER_MW_DMA_0
     (REG_UDMA(0, T9)| REG_UDMA(0, T8)| REG_UDMA(0, T7)| REG_MW(1, T6)| REG_MW(1, T5)| REG_MW(1, T4)), // XFER_MW_DMA_1
     (REG_UDMA(0, T9)| REG_UDMA(0, T8)| REG_UDMA(0, T7)| REG_MW(2, T6)| REG_MW(2, T5)| REG_MW(2, T4)), // XFER_MW_DMA_2
-    
+
     (REG_UDMA(0, T9)| REG_UDMA(0, T8)| REG_UDMA(0, T7)| REG_MW(2, T6)| REG_MW(2, T5)| REG_MW(2, T4)), // XFER_UDMA_0
     (REG_UDMA(1, T9)| REG_UDMA(1, T8)| REG_UDMA(1, T7)| REG_MW(2, T6)| REG_MW(2, T5)| REG_MW(2, T4)), // XFER_UDMA_1
     (REG_UDMA(2, T9)| REG_UDMA(2, T8)| REG_UDMA(2, T7)| REG_MW(2, T6)| REG_MW(2, T5)| REG_MW(2, T4)), // XFER_UDMA_2
@@ -225,176 +225,176 @@ unsigned int venus_dma_timing[]={
 
 static u8 venus_mm_inb (unsigned long port)
 {
-	return (u8) (readl((void __iomem *) port) & 0xff);
+    return (u8) (readl((void __iomem *) port) & 0xff);
 }
 
 static void venus_mm_outb (u8 value, unsigned long port)
 {
-	writel((u32)value, (void __iomem *) port);
+    writel((u32)value, (void __iomem *) port);
 }
 
 static void venus_mm_outbsync (ide_drive_t *drive, u8 value, unsigned long port)
 {
-	writeb((u32)value, (void __iomem *) port);
+    writeb((u32)value, (void __iomem *) port);
 }
 
 static void venus_mm_outw(u16 d, unsigned long a)
 {
-	writel((u32)d, (void __iomem *) a);
+    writel((u32)d, (void __iomem *) a);
 }
 
 static u16 venus_mm_inw(unsigned long a)
 {
-	return (u16) (readl((void __iomem *) a) & 0xffff);
+    return (u16) (readl((void __iomem *) a) & 0xffff);
 }
 
 static void venus_mm_outsw(unsigned long addr, void *buf, u32 len)
 {
-	unsigned short *bp = (unsigned short *)buf;
-	for (; len > 0; len--, bp++)
-		writel((u32)(*bp), (void __iomem *) addr);
+    unsigned short *bp = (unsigned short *)buf;
+    for (; len > 0; len--, bp++)
+        writel((u32)(*bp), (void __iomem *) addr);
 }
 
 static void venus_mm_insw(unsigned long addr, void *buf, u32 len)
 {
-	unsigned short *bp = (unsigned short *)buf;
-	for (; len > 0; len--, bp++)
-		*bp = (u16) (readl((void __iomem *) addr) & 0xffff);
+    unsigned short *bp = (unsigned short *)buf;
+    for (; len > 0; len--, bp++)
+        *bp = (u16) (readl((void __iomem *) addr) & 0xffff);
 }
 
 
 static inline void hw_setup(hw_regs_t *hw, int bank)
 {
-	int i;
-	unsigned long  ideoffset = bank*VENUS_BANK_GAP;
+    int i;
+    unsigned long  ideoffset = bank*VENUS_BANK_GAP;
 
-	memset(hw, 0, sizeof(hw_regs_t));
-	for (i = 0; i <= IDE_STATUS_OFFSET; i++)
-		hw->io_ports[i] = ideoffset + VENUS_ATA0_BASE + VENUS_IDE_GAP*i;
-	hw->io_ports[IDE_CONTROL_OFFSET] = ideoffset + VENUS_ATA0_ALT;
-	hw->io_ports[IDE_IRQ_OFFSET] = ideoffset + VENUS_ATA0_INT;
-	hw->irq = 2 + VENUS_IDE_IRQ;
-	hw->dma = NO_DMA;
-	hw->chipset = ide_generic;
+    memset(hw, 0, sizeof(hw_regs_t));
+    for (i = 0; i <= IDE_STATUS_OFFSET; i++)
+        hw->io_ports[i] = ideoffset + VENUS_ATA0_BASE + VENUS_IDE_GAP*i;
+    hw->io_ports[IDE_CONTROL_OFFSET] = ideoffset + VENUS_ATA0_ALT;
+    hw->io_ports[IDE_IRQ_OFFSET] = ideoffset + VENUS_ATA0_INT;
+    hw->irq = 2 + VENUS_IDE_IRQ;
+    hw->dma = NO_DMA;
+    hw->chipset = ide_generic;
 }
 
 static void venus_selectproc (ide_drive_t *drive)
 {
-	ide_hwif_t *hwif = HWIF(drive);
-	unsigned long flags;
-	u8 unit = (drive->select.b.unit & 0x01)<<1;
-	u8 value;
-	struct venus_state *state = hwif->hwif_data;
-	
- 	//ideinfo("venus_selectproc\n");
- 	
-	local_irq_save(flags);
+    ide_hwif_t *hwif = HWIF(drive);
+    unsigned long flags;
+    u8 unit = (drive->select.b.unit & 0x01)<<1;
+    u8 value;
+    struct venus_state *state = hwif->hwif_data;
 
-	value=hwif->INB(state->ctl);
-	value&=(~0x02);
-	hwif->OUTB(value|unit, state->ctl);
+    //ideinfo("venus_selectproc\n");
 
-	local_irq_restore(flags);
+    local_irq_save(flags);
+
+    value=hwif->INB(state->ctl);
+    value&=(~0x02);
+    hwif->OUTB(value|unit, state->ctl);
+
+    local_irq_restore(flags);
 }
 
 static inline void venus_hwif_setup(ide_hwif_t *hwif)
 {
-	// marked by frank(2005/6/2)
-	//default_hwif_iops(hwif);
-	// use I/O memory 
-	default_hwif_mmiops(hwif);
-	
-	hwif->mmio  = 2;
+    // marked by frank(2005/6/2)
+    //default_hwif_iops(hwif);
+    // use I/O memory
+    default_hwif_mmiops(hwif);
 
-	// added by frank(2005/6/6)
-	hwif->OUTB	= venus_mm_outb;
-	hwif->OUTBSYNC	= venus_mm_outbsync;
-	hwif->INB		= venus_mm_inb;
-	
-	// modified by frank(2005/6/6)
-	hwif->OUTW 	= venus_mm_outw;
-	hwif->OUTSW 	= venus_mm_outsw;
-	hwif->INW	= venus_mm_inw;
-	hwif->INSW	= venus_mm_insw;
+    hwif->mmio  = 2;
 
-	// hwif->OUTL	= NULL;
-	// hwif->INL	= NULL;
-	// hwif->OUTSL	= NULL;
-	// hwif->INSL	= NULL;
-	
+    // added by frank(2005/6/6)
+    hwif->OUTB  = venus_mm_outb;
+    hwif->OUTBSYNC  = venus_mm_outbsync;
+    hwif->INB       = venus_mm_inb;
 
-	
+    // modified by frank(2005/6/6)
+    hwif->OUTW  = venus_mm_outw;
+    hwif->OUTSW     = venus_mm_outsw;
+    hwif->INW   = venus_mm_inw;
+    hwif->INSW  = venus_mm_insw;
+
+    // hwif->OUTL   = NULL;
+    // hwif->INL    = NULL;
+    // hwif->OUTSL  = NULL;
+    // hwif->INSL   = NULL;
+
+
+
 }
 
 ide_startstop_t venus_dma_intr (ide_drive_t *drive)
 {
-	u8 stat = 0, dma_stat = 0, err = 0;;
+    u8 stat = 0, dma_stat = 0, err = 0;;
 
- 	ideinfo("venus_dma_intr\n");
- 	
-	dma_stat = HWIF(drive)->ide_dma_end(drive);
-	
-	stat = HWIF(drive)->INB(IDE_STATUS_REG);	/* get drive status */
+    ideinfo("venus_dma_intr\n");
 
-	// for Venus, CRC HW error
-	if (stat & ERR_STAT){
-		err = HWIF(drive)->INB(IDE_ERROR_REG);
-		if (err & ICRC_ERR){
-			 printk(KERN_ERR "%s: CRC warning: status=%x err=%x\n", drive->name, stat, err);
-			 stat &= ~ERR_STAT;
-		}
-	}
-	
-	
-	if (OK_STAT(stat,DRIVE_READY,drive->bad_wstat|DRQ_STAT)) {
-		if (!dma_stat) {
-			struct request *rq = HWGROUP(drive)->rq;
-			if (rq->rq_disk) {
+    dma_stat = HWIF(drive)->ide_dma_end(drive);
 
-				ide_driver_t *drv;
-				drv = *(ide_driver_t **)rq->rq_disk->private_data;;
-			
-				drv->end_request(drive, 1, rq->nr_sectors);
-			} else
-				ide_end_request(drive, 1, rq->nr_sectors);
-				
-			return ide_stopped;
-		}
-		printk(KERN_ERR "%s: venus_dma_intr: bad DMA status (dma_stat=%x)\n", 
-		       drive->name, dma_stat);
-	}
-	return ide_error(drive, "venus_dma_intr", stat);
+    stat = HWIF(drive)->INB(IDE_STATUS_REG);    /* get drive status */
+
+    // for Venus, CRC HW error
+    if (stat & ERR_STAT){
+        err = HWIF(drive)->INB(IDE_ERROR_REG);
+        if (err & ICRC_ERR){
+             printk(KERN_ERR "%s: CRC warning: status=%x err=%x\n", drive->name, stat, err);
+             stat &= ~ERR_STAT;
+        }
+    }
+
+
+    if (OK_STAT(stat,DRIVE_READY,drive->bad_wstat|DRQ_STAT)) {
+        if (!dma_stat) {
+            struct request *rq = HWGROUP(drive)->rq;
+            if (rq->rq_disk) {
+
+                ide_driver_t *drv;
+                drv = *(ide_driver_t **)rq->rq_disk->private_data;;
+
+                drv->end_request(drive, 1, rq->nr_sectors);
+            } else
+                ide_end_request(drive, 1, rq->nr_sectors);
+
+            return ide_stopped;
+        }
+        printk(KERN_ERR "%s: venus_dma_intr: bad DMA status (dma_stat=%x)\n",
+               drive->name, dma_stat);
+    }
+    return ide_error(drive, "venus_dma_intr", stat);
 }
 
 #ifdef VENUS_DMA_BUFFER
 
 static int venus_sg_length(struct scatterlist *p_sg, int n_sg)
 {
-	int i;
-	int dma_length= 0;
+    int i;
+    int dma_length= 0;
 
-	for (i= 0; i< n_sg; i++, p_sg++){
-		dma_length+= sg_dma_len(p_sg);
-	}
-	return dma_length;
-	
+    for (i= 0; i< n_sg; i++, p_sg++){
+        dma_length+= sg_dma_len(p_sg);
+    }
+    return dma_length;
+
 }
 
 static void venus_copy_sg_to_dma_buffer(ide_hwif_t *hwif)
 {
-	struct venus_state *state = hwif->hwif_data;
-	struct scatterlist *sg_table = hwif->sg_table;	
-	int i, sg_nents = hwif->sg_nents;
-	unsigned int length;
-	u8 *ptr = state->p_virt_single_buf;
+    struct venus_state *state = hwif->hwif_data;
+    struct scatterlist *sg_table = hwif->sg_table;
+    int i, sg_nents = hwif->sg_nents;
+    unsigned int length;
+    u8 *ptr = state->p_virt_single_buf;
 
-	state->dma_buffer_length= 0;
-	for (i= 0; i< sg_nents; i++, sg_table++){
-		length= sg_dma_len(sg_table);
-		memcpy(ptr, SG_VIRT_ADDR(sg_table), length);
-		ptr+= length;
-		state->dma_buffer_length+= length;
-	}
+    state->dma_buffer_length= 0;
+    for (i= 0; i< sg_nents; i++, sg_table++){
+        length= sg_dma_len(sg_table);
+        memcpy(ptr, SG_VIRT_ADDR(sg_table), length);
+        ptr+= length;
+        state->dma_buffer_length+= length;
+    }
 }
 
 #endif
@@ -410,58 +410,58 @@ static void venus_copy_sg_to_dma_buffer(ide_hwif_t *hwif)
  */
 static void venus_build_sglist(ide_drive_t *drive, dma_addr_t *dma_addr, unsigned int *dma_len)
 {
-	ide_hwif_t *hwif = drive->hwif;
-	struct request *rq = hwif->hwgroup->rq;
-	struct venus_state *state = hwif->hwif_data;
-	struct scatterlist *sg = hwif->sg_table;
-	u32 i, sg_nents;	                                 //@ for NEPTUNE
-	u32 *table = state->wrap_dmatable; 	//@ for NEPTUNE
- 	
-	ide_map_sg(drive, rq);
+    ide_hwif_t *hwif = drive->hwif;
+    struct request *rq = hwif->hwgroup->rq;
+    struct venus_state *state = hwif->hwif_data;
+    struct scatterlist *sg = hwif->sg_table;
+    u32 i, sg_nents;                                     //@ for NEPTUNE
+    u32 *table = state->wrap_dmatable;  //@ for NEPTUNE
 
- 	ideinfo("venus_build_sglist = %i\n", hwif->sg_nents);
- 	
-	if (rq_data_dir(rq) == READ)
-		hwif->sg_dma_direction = DMA_FROM_DEVICE;
-	else
-		hwif->sg_dma_direction = DMA_TO_DEVICE;
-		
-	if(NEPTUNE){     //@
-		sg_nents = dma_map_sg(state->dev, sg, hwif->sg_nents, hwif->sg_dma_direction);
-	
-		for(i=0; i<sg_nents; i++, sg++){				
-			*dma_len = sg_dma_len(sg);	
-		 	*dma_addr = sg_dma_address(sg);
-	 		*table++ = (hwif->sg_dma_direction == DMA_FROM_DEVICE)? *dma_addr&0x7FFFFFFF : *dma_addr|0x80000000;
-			*table++ = *dma_len;
-		}
-		*--table |= 0x80000000;	
-		return;
-	}	
-		
+    ide_map_sg(drive, rq);
 
-	if ( hwif->sg_nents==1){
-		hwif->sg_nents = dma_map_sg(state->dev, sg, hwif->sg_nents, hwif->sg_dma_direction);
-		*dma_addr = sg_dma_address(sg);
-		*dma_len = sg_dma_len(hwif->sg_table);
-		return;
-	}
+    ideinfo("venus_build_sglist = %i\n", hwif->sg_nents);
+
+    if (rq_data_dir(rq) == READ)
+        hwif->sg_dma_direction = DMA_FROM_DEVICE;
+    else
+        hwif->sg_dma_direction = DMA_TO_DEVICE;
+
+    if(NEPTUNE){     //@
+        sg_nents = dma_map_sg(state->dev, sg, hwif->sg_nents, hwif->sg_dma_direction);
+
+        for(i=0; i<sg_nents; i++, sg++){
+            *dma_len = sg_dma_len(sg);
+            *dma_addr = sg_dma_address(sg);
+            *table++ = (hwif->sg_dma_direction == DMA_FROM_DEVICE)? *dma_addr&0x7FFFFFFF : *dma_addr|0x80000000;
+            *table++ = *dma_len;
+        }
+        *--table |= 0x80000000;
+        return;
+    }
+
+
+    if ( hwif->sg_nents==1){
+        hwif->sg_nents = dma_map_sg(state->dev, sg, hwif->sg_nents, hwif->sg_dma_direction);
+        *dma_addr = sg_dma_address(sg);
+        *dma_len = sg_dma_len(hwif->sg_table);
+        return;
+    }
 
 #ifdef VENUS_DMA_BUFFER
-	if (DMA_TO_DEVICE== hwif->sg_dma_direction){
-		venus_copy_sg_to_dma_buffer(hwif);
-	}else{
-		state->dma_buffer_length= venus_sg_length(sg, hwif->sg_nents);
-	}
+    if (DMA_TO_DEVICE== hwif->sg_dma_direction){
+        venus_copy_sg_to_dma_buffer(hwif);
+    }else{
+        state->dma_buffer_length= venus_sg_length(sg, hwif->sg_nents);
+    }
 
-	state->p_bus_addr_single_buf= dma_map_single(
+    state->p_bus_addr_single_buf= dma_map_single(
                                     state->dev,
                                     state->p_virt_single_buf,
                                     state->dma_buffer_length,
                                     hwif->sg_dma_direction);
-                                    
-	*dma_addr =  state->p_bus_addr_single_buf;
-	*dma_len = state->dma_buffer_length;
+
+    *dma_addr =  state->p_bus_addr_single_buf;
+    *dma_len = state->dma_buffer_length;
 #endif
 }
 
@@ -475,753 +475,827 @@ static void venus_build_sglist(ide_drive_t *drive, dma_addr_t *dma_addr, unsigne
  *
  * We have the following IOMD DMA modes to choose from:
  *
- *	Type	Active		Recovery	Cycle
- *	A	250 (250)	312 (550)	562 (800)
- *	B	187		250		437
- *	C	125 (125)	125 (375)	250 (500)
- *	D	62		125		187
+ *  Type    Active      Recovery    Cycle
+ *  A   250 (250)   312 (550)   562 (800)
+ *  B   187     250     437
+ *  C   125 (125)   125 (375)   250 (500)
+ *  D   62      125     187
  *
  * (figures in brackets are actual measured timings)
  *
  * However, we also need to take care of the read/write active and
  * recovery timings:
  *
- *			Read	Write
- *  	Mode	Active	-- Recovery --	Cycle	IOMD type
- *	MW0	215	50	215	480	A
- *	MW1	80	50	50	150	C
- *	MW2	70	25	25	120	C
+ *          Read    Write
+ *      Mode    Active  -- Recovery --  Cycle   IOMD type
+ *  MW0 215 50  215 480 A
+ *  MW1 80  50  50  150 C
+ *  MW2 70  25  25  120 C
  */
 static int venus_set_speed(ide_drive_t *drive, u8 xfer_mode)
 {
-	ide_hwif_t *hwif = HWIF(drive);
-	struct venus_state *state = hwif->hwif_data;
-	u8 unit = (drive->select.b.unit & 0x01);
-	u32 index=0, value, mode=0;
+    ide_hwif_t *hwif = HWIF(drive);
+    struct venus_state *state = hwif->hwif_data;
+    u8 unit = (drive->select.b.unit & 0x01);
+    u32 index=0, value, mode=0;
 
- 	//if ( ide_config_drive_speed(drive, xfer_mode))
-	//	return(1);
+    //if ( ide_config_drive_speed(drive, xfer_mode))
+    //  return(1);
 
-	ideinfo("venus_set_speed %s: %s \n", drive->name, ide_xfer_verbose(drive->current_speed));
+    ideinfo("venus_set_speed %s: %s \n", drive->name, ide_xfer_verbose(drive->current_speed));
 
-	//drive->current_speed = xfer_mode;
-	switch(drive->current_speed){
-		case XFER_UDMA_7:   mode=2; index = 3+7; printk("XFER_UDMA_7\n"); break;
-		case XFER_UDMA_6:   mode=2; index = 3+6; printk("XFER_UDMA_6\n"); break;
-		case XFER_UDMA_5:   mode=2; index = 3+5; printk("XFER_UDMA_5\n"); break;
-		case XFER_UDMA_4:{
-			mode=2;
-			//if (!strncmp(drive->id->model, "ST3160212ACE", 12)){
-			if (!strncmp(drive->id->model, "ST", 2)){
-				// Temporary solution for venus bug
-				index = 3+3;
-				printk("XFER_UDMA_4(Read 4/Write 3)\n");
-				break;
-		   	}else{
-				index = 3+4;
-				printk("XFER_UDMA_4\n");
-				break;
-			}
-		}
-		case XFER_UDMA_3:   mode=2; index = 3+3; printk("XFER_UDMA_3\n"); break;
-		case XFER_UDMA_2:   mode=2; index = 3+2; printk("XFER_UDMA_2\n"); break;
-		case XFER_UDMA_1:   mode=2; index = 3+1; printk("XFER_UDMA_1\n"); break;
-		case XFER_UDMA_0:   mode=2; index = 3+0; printk("XFER_UDMA_0\n"); break;
-		case XFER_MW_DMA_2: mode=1; index = 2; printk("XFER_MW_DMA_2\n"); break;
-		case XFER_MW_DMA_1: mode=1; index = 1; printk("XFER_MW_DMA_1\n"); break;
-		case XFER_MW_DMA_0: mode=1; index = 0; printk("XFER_MW_DMA_0\n"); break;
-	}
+    //drive->current_speed = xfer_mode;
+    switch(drive->current_speed){
+        case XFER_UDMA_7:   mode=2; index = 3+7; printk("XFER_UDMA_7\n"); break;
+        case XFER_UDMA_6:   mode=2; index = 3+6; printk("XFER_UDMA_6\n"); break;
+        case XFER_UDMA_5:   mode=2; index = 3+5; printk("XFER_UDMA_5\n"); break;
+        case XFER_UDMA_4:{
+            mode=2;
+            //if (!strncmp(drive->id->model, "ST3160212ACE", 12)){
+            if (!strncmp(drive->id->model, "ST", 2) && (JM_SATA==0) ){
+                // Temporary solution for venus bug
+                index = 3+3;
+                printk("XFER_UDMA_4(Read 4/Write 3)\n");
+                break;
+            }else{
+                index = 3+4;
+                printk("XFER_UDMA_4\n");
+                break;
+            }
+        }
+        case XFER_UDMA_3:   mode=2; index = 3+3; printk("XFER_UDMA_3\n"); break;
+        case XFER_UDMA_2:   mode=2; index = 3+2; printk("XFER_UDMA_2\n"); break;
+        case XFER_UDMA_1:   mode=2; index = 3+1; printk("XFER_UDMA_1\n"); break;
+        case XFER_UDMA_0:   mode=2; index = 3+0; printk("XFER_UDMA_0\n"); break;
+        case XFER_MW_DMA_2: mode=1; index = 2; printk("XFER_MW_DMA_2\n"); break;
+        case XFER_MW_DMA_1: mode=1; index = 1; printk("XFER_MW_DMA_1\n"); break;
+        case XFER_MW_DMA_0: mode=1; index = 0; printk("XFER_MW_DMA_0\n"); break;
+    }
 
-	ideinfo("mode=%d: index=%d \n", mode, index);
-	hwif->OUTL(venus_dma_timing[index], state->dma[unit]);
-	value = hwif->INL(state->vdev[unit]) & ~0x03;
-	hwif->OUTL(value|mode, state->vdev[unit]);
-	
-	return(0);
+    ideinfo("mode=%d: index=%d \n", mode, index);
+    hwif->OUTL(venus_dma_timing[index], state->dma[unit]);
+    value = hwif->INL(state->vdev[unit]) & ~0x03;
+    hwif->OUTL(value|mode, state->vdev[unit]);
+
+    return(0);
 }
 
 static int venus_dma_host_off(ide_drive_t *drive)
 {
-	return 0;
+    return 0;
 }
 
 static int venus_dma_off_quietly(ide_drive_t *drive)
 {
-	ideinfo("venus_dma_off_quietly\n");
- 	drive->using_dma = 0;
-	ide_toggle_bounce(drive, 0);
-	return venus_dma_host_off(drive);
+    ideinfo("venus_dma_off_quietly\n");
+    drive->using_dma = 0;
+    ide_toggle_bounce(drive, 0);
+    return venus_dma_host_off(drive);
 }
 
 static int venus_dma_host_on(ide_drive_t *drive)
 {
-	return 0;
+    return 0;
 }
 
 static int venus_dma_on(ide_drive_t *drive)
 {
-	/* consult the list of known "bad" drives */
-	/*if (__ide_dma_bad_drive(drive))
-		return 1;*/
-		
-	ideinfo("venus_dma_on\n");
-	
-	drive->using_dma = 1;
-	ide_toggle_bounce(drive, 1);
-	return venus_dma_host_on(drive);
+    /* consult the list of known "bad" drives */
+    /*if (__ide_dma_bad_drive(drive))
+        return 1;*/
+
+    ideinfo("venus_dma_on\n");
+
+    drive->using_dma = 1;
+    ide_toggle_bounce(drive, 1);
+    return venus_dma_host_on(drive);
 }
 
 
 static int venus_dma_check(ide_drive_t *drive)
 {
-	struct hd_driveid *id = drive->id;
-	ide_hwif_t *hwif = HWIF(drive);
-	int xfer_mode = XFER_PIO_0;
+    struct hd_driveid *id = drive->id;
+    ide_hwif_t *hwif = HWIF(drive);
+    int xfer_mode = XFER_PIO_0;
 
-	ideinfo("venus_dma_check\n");
-	
-	if (!(id->capability & 1) || !hwif->autodma)
-		goto out;
+    ideinfo("venus_dma_check\n");
+
+    if (!(id->capability & 1) || !hwif->autodma)
+        goto out;
 
 //@ #ifdef IDE_FPGA_BOARD
 
-	if(FPGA) 
-		xfer_mode = ide_dma_speed(drive, 1);
+    if(FPGA)
+        xfer_mode = ide_dma_speed(drive, 1);
 //@ #else
-	else
-	// @FIXME: adjust to the faster mode after stable
-		xfer_mode = ide_dma_speed(drive, 4);		// Max. speed = Ultra DMA 6
-	//xfer_mode = ide_dma_speed(drive, 3);		// Max. speed = Ultra DMA 5		
-	//xfer_mode = ide_dma_speed(drive, 2);		// Max. speed = Ultra DMA 4		
+    else
+    // @FIXME: adjust to the faster mode after stable
+        xfer_mode = ide_dma_speed(drive, 4);        // Max. speed = Ultra DMA 6
+    //xfer_mode = ide_dma_speed(drive, 3);      // Max. speed = Ultra DMA 5
+    //xfer_mode = ide_dma_speed(drive, 2);      // Max. speed = Ultra DMA 4
 //@ #endif
 
 
 out:
-	
 
-	
-	if (!strcmp(drive->id->model, "DVDRW BDR L28")){
-			// Temporary solution for BTC-Sunext loader
-			printk("%s: Hacker for BDR Loader\n", drive->name);
- 			ide_config_drive_speed(drive, xfer_mode);
-			venus_set_speed(drive, xfer_mode);
-			return venus_dma_on(drive);
-			
-	} else {
-		 	if (ide_config_drive_speed(drive, xfer_mode)){
- 				return venus_dma_off_quietly(drive);
-			}else{
-				venus_set_speed(drive, xfer_mode);
-				return venus_dma_on(drive);
-			}
-	}
+
+
+    if (!strcmp(drive->id->model, "DVDRW BDR L28")){
+            // Temporary solution for BTC-Sunext loader
+            printk("%s: Hacker for BDR Loader\n", drive->name);
+            ide_config_drive_speed(drive, xfer_mode);
+            venus_set_speed(drive, xfer_mode);
+            return venus_dma_on(drive);
+
+    } else {
+            if (ide_config_drive_speed(drive, xfer_mode)){
+                return venus_dma_off_quietly(drive);
+            }else{
+                venus_set_speed(drive, xfer_mode);
+                return venus_dma_on(drive);
+            }
+    }
 
 }
 
 #ifdef VENUS_DMA_BUFFER
 static void venus_copy_dma_buffer_to_sg(ide_hwif_t *hwif)
 {
-	struct venus_state *state = hwif->hwif_data;
-	struct scatterlist *sg_table = hwif->sg_table;
-	int  sg_nents =  hwif->sg_nents;
-	int i, sg_buf_length, total=0;
-	u8 *ptr = state->p_virt_single_buf;
+    struct venus_state *state = hwif->hwif_data;
+    struct scatterlist *sg_table = hwif->sg_table;
+    int  sg_nents =  hwif->sg_nents;
+    int i, sg_buf_length, total=0;
+    u8 *ptr = state->p_virt_single_buf;
 
-	for (i= 0; i< sg_nents; i++, sg_table++){
-		sg_buf_length= sg_dma_len(sg_table);
-		memcpy(SG_VIRT_ADDR(sg_table), ptr, sg_buf_length);
-		ptr+= sg_buf_length;
-		total+= sg_buf_length;
-	}
-	// Added by Frank(96/6/28) for PLI uncached buffer access
-	//if (total>VENUS_DMA_BUF_LEN){	
-	//	dma_map_sg(state->dev, hwif->sg_table, hwif->sg_nents, DMA_TO_DEVICE);
-	//}
-	//******************************************************
-	if (state->dma_buffer_length!=total) printk("%s: error %d %d\n", __func__,  state->dma_buffer_length, total);
+    for (i= 0; i< sg_nents; i++, sg_table++){
+        sg_buf_length= sg_dma_len(sg_table);
+        memcpy(SG_VIRT_ADDR(sg_table), ptr, sg_buf_length);
+        ptr+= sg_buf_length;
+        total+= sg_buf_length;
+    }
+    // Added by Frank(96/6/28) for PLI uncached buffer access
+    //if (total>VENUS_DMA_BUF_LEN){
+    //  dma_map_sg(state->dev, hwif->sg_table, hwif->sg_nents, DMA_TO_DEVICE);
+    //}
+    //******************************************************
+    if (state->dma_buffer_length!=total) printk("%s: error %d %d\n", __func__,  state->dma_buffer_length, total);
 }
 #endif
 
 static void venus_release_buffer(ide_hwif_t *hwif)
 {
-	struct venus_state *state = hwif->hwif_data;
-	int sg_nents = hwif->sg_nents;
-	enum dma_data_direction sg_dma_direction = hwif->sg_dma_direction;
-	
-	if(NEPTUNE){	//@
-		dma_unmap_sg(state->dev, hwif->sg_table, sg_nents, sg_dma_direction);
-		return;
-	}	
-	
-	if (sg_nents== 1){
-		dma_unmap_sg(state->dev, hwif->sg_table, 1, sg_dma_direction);
-		return;
-	}
+    struct venus_state *state = hwif->hwif_data;
+    int sg_nents = hwif->sg_nents;
+    enum dma_data_direction sg_dma_direction = hwif->sg_dma_direction;
+
+    if(NEPTUNE){    //@
+        dma_unmap_sg(state->dev, hwif->sg_table, sg_nents, sg_dma_direction);
+        return;
+    }
+
+    if (sg_nents== 1){
+        dma_unmap_sg(state->dev, hwif->sg_table, 1, sg_dma_direction);
+        return;
+    }
 
 #ifdef VENUS_DMA_BUFFER
 
-	dma_unmap_single(state->dev, state->p_bus_addr_single_buf, state->dma_buffer_length, sg_dma_direction);
-	
-	if (sg_dma_direction== DMA_FROM_DEVICE)
-		venus_copy_dma_buffer_to_sg(hwif);
+    dma_unmap_single(state->dev, state->p_bus_addr_single_buf, state->dma_buffer_length, sg_dma_direction);
 
-	//state->p_bus_addr_single_buf= 0;
-	state->dma_buffer_length= 0;
-	
-#endif	
+    if (sg_dma_direction== DMA_FROM_DEVICE)
+        venus_copy_dma_buffer_to_sg(hwif);
+
+    //state->p_bus_addr_single_buf= 0;
+    state->dma_buffer_length= 0;
+
+#endif
 
 }
 
 static int venus_dma_end(ide_drive_t *drive)
 {
-	ide_hwif_t *hwif = HWIF(drive);
-	struct venus_state *state = hwif->hwif_data;
-	u8 ctl_mode;
+    ide_hwif_t *hwif = HWIF(drive);
+    struct venus_state *state = hwif->hwif_data;
+    u8 ctl_mode;
 
-	drive->waiting_for_dma = 0;
+    drive->waiting_for_dma = 0;
 
-	//disable_dma(hwif->hw.dma);
+    //disable_dma(hwif->hw.dma);
 
-	venus_release_buffer(hwif);
+    venus_release_buffer(hwif);
 
-	ctl_mode=hwif->INB(state->ctl);
-	hwif->OUTB(ctl_mode&(~0x08), state->ctl);
-	
-	/* verify good DMA status */
-	hwif->dma = 0;
-	
-	//hwif->OUTB(0, hwif->dma_command);	// reset go bit for special case
-	
-	return(0) ;				// always return zero
-	
+    ctl_mode=hwif->INB(state->ctl);
+    hwif->OUTB(ctl_mode&(~0x08), state->ctl);
+
+    /* verify good DMA status */
+    hwif->dma = 0;
+
+    //hwif->OUTB(0, hwif->dma_command); // reset go bit for special case
+
+    return(0) ;             // always return zero
+
 }
 
 static void venus_dma_start(ide_drive_t *drive)
 {
-	ide_hwif_t *hwif = HWIF(drive);
-	struct venus_state *state = hwif->hwif_data;
-	u8 ctl_mode;
-	unsigned long flag;	//@ for NEPTUNE
+    ide_hwif_t *hwif = HWIF(drive);
+    struct venus_state *state = hwif->hwif_data;
+    u8 ctl_mode;
+    unsigned long flag; //@ for NEPTUNE
 
-	/* We can not enable DMA on both channels simultaneously. */
-	//BUG_ON(dma_channel_active(hwif->hw.dma));
-	//enable_dma(hwif->hw.dma);
-	ctl_mode=hwif->INB(state->ctl);
-	hwif->OUTB(ctl_mode| 0x08, state->ctl);
-	
-	/* start DMA */
-	if(NEPTUNE){	//@	
-		save_and_cli(flag);
-  		blast_dcache16();
-		restore_flags(flag);
-			
-		hwif->OUTB(0x03, state->wrap_ctrl);	// wrapper go
-		hwif->dma = 1;
-		return;
-	}
-	
-	hwif->OUTB(1, hwif->dma_command);
-		
-	hwif->dma = 1;
+    /* We can not enable DMA on both channels simultaneously. */
+    //BUG_ON(dma_channel_active(hwif->hw.dma));
+    //enable_dma(hwif->hw.dma);
+    ctl_mode=hwif->INB(state->ctl);
+    hwif->OUTB(ctl_mode| 0x08, state->ctl);
+
+    /* start DMA */
+    if(NEPTUNE){    //@
+        save_and_cli(flag);
+        blast_dcache16();
+        restore_flags(flag);
+
+        hwif->OUTB(0x03, state->wrap_ctrl); // wrapper go
+        hwif->dma = 1;
+        return;
+    }
+
+    hwif->OUTB(1, hwif->dma_command);
+
+    hwif->dma = 1;
 }
 
 static int venus_dma_setup(ide_drive_t *drive)
 {
-	ide_hwif_t *hwif = HWIF(drive);
-	struct request *rq = hwif->hwgroup->rq;
-	unsigned char ctl_mode;
-	struct venus_state *state = hwif->hwif_data;
-	unsigned int dmaaddr, dmalen;
-	u8 unit = (drive->select.b.unit & 0x01);
-	u32 cp_ctrl = 0;
-	
-	
-	ctl_mode=hwif->INB(state->ctl);
-	if (rq_data_dir(rq)==WRITE) ctl_mode |= 0x04;	// 0x04: write, otherwise read
-	else ctl_mode &= (~0x04);
+    ide_hwif_t *hwif = HWIF(drive);
+    struct request *rq = hwif->hwgroup->rq;
+    unsigned char ctl_mode;
+    struct venus_state *state = hwif->hwif_data;
+    unsigned int dmaaddr, dmalen;
+    u8 unit = (drive->select.b.unit & 0x01);
+    u32 cp_ctrl = 0;
 
-	if (state->cp[unit] && state->cp_type[unit]) {
-		ctl_mode |= 0x10;			// CP enable
-	} else ctl_mode &= (~0x10);
+    ideinfo("venus_dma_setup\n");
 
-	hwif->OUTB(ctl_mode, state->ctl);
-	
-	if (ctl_mode & 0x10) {
-		switch(state->cp_type[unit]){
-		case CP_DECSS:
-			cp_ctrl = 0x5555;	
-			hwif->OUTL(state->cpkey[unit].key[0], state->cp_cp_key[0]);	
-			hwif->OUTL(state->cpkey[unit].key[1], state->cp_cp_key[1]);
-			// Added for debug
-			// printk(KERN_ERR "%s: cp key = %x %x\n", drive->name, hwif->INL(state->cp_cp_key[0]), hwif->INL(state->cp_cp_key[1]));			
-			break;
-		default:
-			printk(KERN_ERR"%s: unknown CP command\n", drive->name);
-			break;	
-		}
-		hwif->OUTL(cp_ctrl, state->cp_ctrl);	
-	}
-	
-	/*
-	 * We can not enable DMA on both channels.
-	 */
-	//BUG_ON(dma_channel_active(hwif->hw.dma));
 
-	venus_build_sglist(drive, &dmaaddr, &dmalen);
-	
-	if(NEPTUNE){	//@
-		hwif->OUTL(state->wrap_dmatable, state->wrap_prdaddr);
-		hwif->OUTL(hwif->sg_nents, state->wrap_prdnum);
-		drive->waiting_for_dma = 1;
-		return 0;
-	} 
-		
-	hwif->OUTL(dmalen, state->dlen);
-	hwif->OUTL(dmaaddr>>1, (hwif->sg_dma_direction == DMA_FROM_DEVICE)?
-		state->outadr: state->inadr);
-	ideinfo("ctl_mode = %x dmaaddr=%x len=%x\n", ctl_mode, dmaaddr, dmalen);
-		
+    ctl_mode=hwif->INB(state->ctl);
+    if (rq_data_dir(rq)==WRITE) ctl_mode |= 0x04;   // 0x04: write, otherwise read
+    else ctl_mode &= (~0x04);
 
-	/*
-	 * Ensure that we have the right interrupt routed.
-	 */
-	//venus_ide_maskproc(drive, 0);
+    if (state->cp[unit] && state->cp_type[unit]) {
+        ctl_mode |= 0x10;           // CP enable
+        ideinfo("CP enable\n");
+    } else{
+        ctl_mode &= (~0x10);
+        ideinfo("CP disable\n");
+    }
+    hwif->OUTB(ctl_mode, state->ctl);
 
-	/*
-	 * Select the correct timing for this drive.
-	 */
-	//set_dma_speed(hwif->hw.dma, drive->drive_data);
+    if (ctl_mode & 0x10) {
+        ideinfo("CP case\n");
+        switch(state->cp_type[unit]){
+        case CP_DECSS:
+            cp_ctrl = 0x5555;
+            hwif->OUTL(state->cpkey[unit].key[0], state->cp_cp_key[0]);
+            hwif->OUTL(state->cpkey[unit].key[1], state->cp_cp_key[1]);
+            // Added for debug
+            // printk(KERN_ERR "%s: cp key = %x %x\n", drive->name, hwif->INL(state->cp_cp_key[0]), hwif->INL(state->cp_cp_key[1]));
+            break;
+        default:
+            printk(KERN_ERR"%s: unknown CP command\n", drive->name);
+            break;
+        }
+        hwif->OUTL(cp_ctrl, state->cp_ctrl);
+    }
 
-	/*  Tell the DMA engine about the SG table and data direction. */
+    /*
+     * We can not enable DMA on both channels.
+     */
+    //BUG_ON(dma_channel_active(hwif->hw.dma));
 
-	drive->waiting_for_dma = 1;
+    venus_build_sglist(drive, &dmaaddr, &dmalen);
 
-	return 0;
+    if(NEPTUNE){    //@
+        hwif->OUTL(state->wrap_dmatable, state->wrap_prdaddr);
+        hwif->OUTL(hwif->sg_nents, state->wrap_prdnum);
+        drive->waiting_for_dma = 1;
+        return 0;
+    }
+
+    hwif->OUTL(dmalen, state->dlen);
+    hwif->OUTL(dmaaddr>>1, (hwif->sg_dma_direction == DMA_FROM_DEVICE)?
+        state->outadr: state->inadr);
+    ideinfo("ctl_mode = %x dmaaddr=%x len=%x\n", ctl_mode, dmaaddr, dmalen);
+
+
+    /*
+     * Ensure that we have the right interrupt routed.
+     */
+    //venus_ide_maskproc(drive, 0);
+
+    /*
+     * Select the correct timing for this drive.
+     */
+    //set_dma_speed(hwif->hw.dma, drive->drive_data);
+
+    /*  Tell the DMA engine about the SG table and data direction. */
+
+    drive->waiting_for_dma = 1;
+
+    return 0;
 }
 
 static void venus_dma_exec_cmd(ide_drive_t *drive, u8 cmd)
 {
-	ideinfo("venus_dma_exec_cmd\n");
-	/* issue cmd to drive */
-	ide_execute_command(drive, cmd, venus_dma_intr, 2 * WAIT_CMD, NULL);
+    ideinfo("venus_dma_exec_cmd\n");
+    /* issue cmd to drive */
+    ide_execute_command(drive, cmd, venus_dma_intr, 2 * WAIT_CMD, NULL);
 }
 
 static int venus_dma_test_irq(ide_drive_t *drive)
 {
-	ide_hwif_t *hwif = HWIF(drive);
-	struct venus_state *state = hwif->hwif_data;
-	u8 status = hwif->INB(hwif->io_ports[IDE_IRQ_OFFSET]);
-	u8 go = hwif->INB(hwif->dma_command);
-	u8 ctl_mode = hwif->INB(state->ctl);
-	u32 cnt =  hwif->INL(state->dlen);
+    ide_hwif_t *hwif = HWIF(drive);
+    struct venus_state *state = hwif->hwif_data;
+    u8 status = hwif->INB(hwif->io_ports[IDE_IRQ_OFFSET]);
+    u8 go = hwif->INB(hwif->dma_command);
+    u8 ctl_mode = hwif->INB(state->ctl);
+    u32 cnt =  hwif->INL(state->dlen);
 
-	ideinfo("venus_dma_test_irq=%x cnt=%x go=%x\n", status, cnt, go);
+    ideinfo("venus_dma_test_irq=%x cnt=%x go=%x\n", status, cnt, go);
 
-	if( NEPTUNE && cnt )		hwif->OUTB(0x05, state->wrap_ctrl);	//@ reset IDE/wrapper circuit
-		
-	if (go&0x01){
-		if (drive->media == ide_disk)
-				printk(KERN_ERR "%s: status=%x cnt=%x go=%x\n", drive->name, status, cnt, go);
-		ctl_mode &= (~0x10);
-		hwif->OUTB(ctl_mode, state->ctl);		// clear cpen  for hardware bug	
-		hwif->OUTB(0, state->dlen);					// reset  for hardware bug	
-		hwif->OUTB(0, hwif->dma_command);		// reset go bit for special case	
-	}
+    if( NEPTUNE && cnt )        hwif->OUTB(0x05, state->wrap_ctrl); //@ reset IDE/wrapper circuit
 
-	hwif->INB(IDE_STATUS_REG);	
-	
-	return( status & 8);
+    if (go&0x01){
+        if (drive->media == ide_disk)
+                printk(KERN_ERR "%s: status=%x cnt=%x go=%x\n", drive->name, status, cnt, go);
+        ctl_mode &= (~0x10);
+        hwif->OUTB(ctl_mode, state->ctl);       // clear cpen  for hardware bug
+        hwif->OUTB(0, state->dlen);                 // reset  for hardware bug
+        hwif->OUTB(0, hwif->dma_command);       // reset go bit for special case
+    }
+
+    hwif->INB(IDE_STATUS_REG);
+
+    return( status & 8);
 }
 
 static int venus_dma_timeout(ide_drive_t *drive)
 {
-	ideinfo(KERN_ERR "%s: DMA timeout occurred: ", drive->name);
+    ideinfo(KERN_ERR "%s: DMA timeout occurred: ", drive->name);
 
-	if (HWIF(drive)->ide_dma_test_irq(drive))
-		return 0;
+    if (HWIF(drive)->ide_dma_test_irq(drive))
+        return 0;
 
-	ide_dump_status(drive, "DMA timeout",
-		HWIF(drive)->INB(IDE_STATUS_REG));
+    ide_dump_status(drive, "DMA timeout",
+        HWIF(drive)->INB(IDE_STATUS_REG));
 
-	return HWIF(drive)->ide_dma_end(drive);
+    return HWIF(drive)->ide_dma_end(drive);
 }
 
 static int venus_dma_lostirq(ide_drive_t *drive)
 {
-	ideinfo(KERN_ERR "%s: IRQ lost\n", drive->name);
-	return 1;
+    ideinfo(KERN_ERR "%s: IRQ lost\n", drive->name);
+    return 1;
 }
 
 static void venus_tune_drive (ide_drive_t *drive, u8 pio)
 {
-	ideinfo("venus_tune_drive\n");
-	pio = ide_get_best_pio_mode(drive, pio, 5, NULL);
-	printk("best PIO mode: %d\n",pio);
+    ideinfo("venus_tune_drive\n");
+    pio = ide_get_best_pio_mode(drive, pio, 5, NULL);
+    printk("best PIO mode: %d\n",pio);
 }
 
 static void venus_resetproc(ide_drive_t *drive)
 {
-	struct hd_driveid *id = drive->id;
-	ide_hwif_t *hwif = HWIF(drive);
-	int xfer_mode = XFER_PIO_0;
+    struct hd_driveid *id = drive->id;
+    ide_hwif_t *hwif = HWIF(drive);
+    int xfer_mode = XFER_PIO_0;
 
-	printk("%s: venus_resetproc word[63]=%x, word[88]=%x\n", drive->name, id->dma_mword, id->dma_ultra);
-	
-	if ((id->dma_mword>>8)){
-		switch(id->dma_mword>>8) {
-			case 0x04: xfer_mode = XFER_MW_DMA_2; break;
-			case 0x02: xfer_mode = XFER_MW_DMA_1; break;
-			case 0x01: xfer_mode = XFER_MW_DMA_0; break;
-			default: return;	
-		}		
-	}else{
-		if ((id->dma_ultra>>8)){
-			switch(id->dma_ultra>>8) {
-				case 0x40: xfer_mode = XFER_UDMA_6; break;
-				case 0x20: xfer_mode = XFER_UDMA_5; break;
-				case 0x10: xfer_mode = XFER_UDMA_4; break;
-				case 0x08: xfer_mode = XFER_UDMA_3; break;
-				case 0x04: xfer_mode = XFER_UDMA_2; break;
-				case 0x02: xfer_mode = XFER_UDMA_1; break;
-				case 0x01: xfer_mode = XFER_UDMA_0; break;
-				default: return;	
-			}
-		}else return;		
-	}
-	
-	printk("%s: transfer mode = %x\n", drive->name, xfer_mode);
+    printk("%s: venus_resetproc word[63]=%x, word[88]=%x\n", drive->name, id->dma_mword, id->dma_ultra);
 
- 	if (ide_config_drive_speed(drive, xfer_mode)){
-		venus_dma_off_quietly(drive);
-	}else{
-		venus_set_speed(drive, xfer_mode);
-		venus_dma_on(drive);
-	}
+    if ((id->dma_mword>>8)){
+        switch(id->dma_mword>>8) {
+            case 0x04: xfer_mode = XFER_MW_DMA_2; break;
+            case 0x02: xfer_mode = XFER_MW_DMA_1; break;
+            case 0x01: xfer_mode = XFER_MW_DMA_0; break;
+            default: return;
+        }
+    }else{
+        if ((id->dma_ultra>>8)){
+            switch(id->dma_ultra>>8) {
+                case 0x40: xfer_mode = XFER_UDMA_6; break;
+                case 0x20: xfer_mode = XFER_UDMA_5; break;
+                case 0x10: xfer_mode = XFER_UDMA_4; break;
+                case 0x08: xfer_mode = XFER_UDMA_3; break;
+                case 0x04: xfer_mode = XFER_UDMA_2; break;
+                case 0x02: xfer_mode = XFER_UDMA_1; break;
+                case 0x01: xfer_mode = XFER_UDMA_0; break;
+                default: return;
+            }
+        }else return;
+    }
+
+    printk("%s: transfer mode = %x\n", drive->name, xfer_mode);
+
+    if (ide_config_drive_speed(drive, xfer_mode)){
+        venus_dma_off_quietly(drive);
+    }else{
+        venus_set_speed(drive, xfer_mode);
+        venus_dma_on(drive);
+    }
 
 }
 
 static inline int venus_setup_dma(ide_hwif_t *hwif, int bank)
 {
 #ifdef PIO
-	int autodma = 0;
+    int autodma = 0;
 #else
-	int autodma = 1;
-#endif	
-	struct venus_state *state;
-	int i;
-	unsigned long  ideoffset = bank*VENUS_BANK_GAP;
-	unsigned long  wrapoffset = bank*WRAPPER_BANK_GAP;		//@ for NEPTUNE
-	
-	ideinfo("    %s: Venus-DMA", hwif->name);
-	
-	state = kmalloc(sizeof(struct venus_state), GFP_KERNEL);
-	if (!state) {
-		return(-ENOMEM);
-	}
-	memset(state, 0, sizeof(struct venus_state));
+    int autodma = 1;
+#endif
+    struct venus_state *state;
+    int i;
+    unsigned long  ideoffset    = bank*VENUS_BANK_GAP;
+    unsigned long  wrapoffset   = bank*WRAPPER_BANK_GAP;        //@ for NEPTUNE
+
+    ideinfo("    %s: Venus-DMA", hwif->name);
+
+    state = kmalloc(sizeof(struct venus_state), GFP_KERNEL);
+    if (!state) {
+        return(-ENOMEM);
+    }
+    memset(state, 0, sizeof(struct venus_state));
 
 
-	state->p_virt_single_buf	=       kmalloc(VENUS_DMA_BUF_LEN*sizeof(unsigned char), GFP_KERNEL);
-	if (!state->p_virt_single_buf)  return(-ENOMEM);
+    state->p_virt_single_buf = kmalloc(VENUS_DMA_BUF_LEN*sizeof(unsigned char), GFP_KERNEL);
+    if (!state->p_virt_single_buf)  return(-ENOMEM);
 
-	hwif->hwif_data	= state;
-	
-	for (i=0;i<2;i++){
-		state->vdev[i] = ideoffset + VENUS_ATA0_DEV0 + (i<<2);
-		state->pio[i] = ideoffset + VENUS_ATA0_PIO0 + (i<<2);
-		state->dma[i]= ideoffset + VENUS_ATA0_DMA0 + (i<<2);
-	}
-	
-	state->dlen		= ideoffset + VENUS_ATA0_DLEN;
-	state->ctl		= ideoffset + VENUS_ATA0_CTL;
-	state->en			= ideoffset + VENUS_ATA0_ENABLE;
-	state->inadr	= ideoffset + VENUS_ATA0_INADR;	
-	state->outadr	= ideoffset + VENUS_ATA0_OUTADR;
-	state->rst 		= ideoffset + VENUS_ATA0_RST;
-	
-	hwif->dma_command	= ideoffset + VENUS_ATA0_GO;
-	
-	if(NEPTUNE){	//@
-		state->wrap_dmatable = kmalloc(NEPTUNE_MAX_SG_SEGMENT*2*sizeof(int), GFP_KERNEL);	
-		if (!state->wrap_dmatable)  return(-ENOMEM);    
-		
-		state->wrap_ctrl 	 = wrapoffset + WRAPPER_ATA0_CTRL;
-		state->wrap_prdaddr = wrapoffset + WRAPPER_ATA0_PRDADDR;
-		state->wrap_prdnum  = wrapoffset + WRAPPER_ATA0_PRDNUM;		
-		hwif->OUTB(0xC1, state->wrap_ctrl);	//# enable wrapper, descriptor-address swap	
-	}	
+    hwif->hwif_data = state;
 
-	// Added by Frank 94/1/26 for content protection controller
-	state->cp_ctrl = VENUS_CP_CTRL;
-	for (i=0;i<4;i++) state->cp_cp_key[i] = (bank ? VENUS_CP1_KEY : VENUS_CP0_KEY) + (i<<2);
-	//********************************************	
+    for (i=0;i<2;i++){
+        state->vdev[i]  = ideoffset + VENUS_ATA0_DEV0 + (i<<2);
+        state->pio[i]   = ideoffset + VENUS_ATA0_PIO0 + (i<<2);
+        state->dma[i]   = ideoffset + VENUS_ATA0_DMA0 + (i<<2);
+    }
+
+    state->dlen     = ideoffset + VENUS_ATA0_DLEN;
+    state->ctl      = ideoffset + VENUS_ATA0_CTL;
+    state->en       = ideoffset + VENUS_ATA0_ENABLE;
+    state->inadr    = ideoffset + VENUS_ATA0_INADR;
+    state->outadr   = ideoffset + VENUS_ATA0_OUTADR;
+    state->rst      = ideoffset + VENUS_ATA0_RST;
+
+    hwif->dma_command   = ideoffset + VENUS_ATA0_GO;
+
+    if(NEPTUNE){    //@
+        state->wrap_dmatable = kmalloc(NEPTUNE_MAX_SG_SEGMENT*2*sizeof(int), GFP_KERNEL);
+        if (!state->wrap_dmatable)  return(-ENOMEM);
+
+        state->wrap_ctrl    = wrapoffset + WRAPPER_ATA0_CTRL;
+        state->wrap_prdaddr = wrapoffset + WRAPPER_ATA0_PRDADDR;
+        state->wrap_prdnum  = wrapoffset + WRAPPER_ATA0_PRDNUM;
+        hwif->OUTB(0xC1, state->wrap_ctrl); //# enable wrapper, descriptor-address swap
+    }
+
+    // Added by Frank 94/1/26 for content protection controller
+    state->cp_ctrl = VENUS_CP_CTRL;
+    for (i=0;i<4;i++) state->cp_cp_key[i] = (bank ? VENUS_CP1_KEY : VENUS_CP0_KEY) + (i<<2);
+    //********************************************
 #ifdef PIO
-	hwif->atapi_dma	= 0;
+    hwif->atapi_dma = 0;
 #else
-	hwif->atapi_dma	= 1;
-#endif	
-	hwif->mwdma_mask	= 0x07; 	/* enable dma MW0..2 */
+    hwif->atapi_dma = 1;
+#endif
+    hwif->mwdma_mask = 0x07;    /* enable dma MW0..2 */
 
 //@ #ifdef IDE_FPGA_BOARD
-	if(FPGA)
-		hwif->ultra_mask	= 0x07;	/* enable dma ULTRA0..2 */
-//@ #else	
+    if(FPGA)
+        hwif->ultra_mask    = 0x07; /* enable dma ULTRA0..2 */
+//@ #else
         // @FIXME: venus supports ATA/ATAPI-7
         //         That means venus support udma mode up to 6
         //         The hardware interface host udma capaity should set to 0x7f
-	//hwif->ultra_mask	= 0x7f;	/* enable dma ULTRA0..6 */
-	else
-		hwif->ultra_mask	= 0x1f;		/* enable dma ULTRA0..4 */
-	
-//@#endif
-	hwif->swdma_mask	= 0x80; 	/* disable dma SW0..2 */
+    //hwif->ultra_mask  = 0x7f; /* enable dma ULTRA0..6 */
+    else
+        hwif->ultra_mask    = 0x1f;     /* enable dma ULTRA0..4 */
 
-	hwif->dmatable_cpu	= NULL;
-	hwif->dmatable_dma	= 0;
-	hwif->speedproc		= venus_set_speed;
-	hwif->selectproc		= venus_selectproc;
-	//hwif->tuneproc 		= venus_tune_drive;
-	
-	hwif->autodma		= autodma;
-	hwif->udma_four		= 1;
+//@#endif
+    hwif->swdma_mask    = 0x80;     /* disable dma SW0..2 */
+
+    hwif->dmatable_cpu  = NULL;
+    hwif->dmatable_dma  = 0;
+    hwif->speedproc     = venus_set_speed;
+    hwif->selectproc    = venus_selectproc;
+    //hwif->tuneproc    = venus_tune_drive;
+
+    hwif->autodma       = autodma;
+    hwif->udma_four     = 1;
 
 #ifdef PIO
-	hwif->ide_dma_check		= NULL;
-#else	
-	hwif->ide_dma_check		= venus_dma_check;
-#endif	
+    hwif->ide_dma_check     = NULL;
+#else
+    hwif->ide_dma_check     = venus_dma_check;
+#endif
 
-	hwif->ide_dma_host_off	= venus_dma_host_off;
-	hwif->ide_dma_off_quietly 	= venus_dma_off_quietly;
-	hwif->ide_dma_host_on	= venus_dma_host_on;
-	hwif->ide_dma_on		= venus_dma_on;
-	hwif->dma_setup		= venus_dma_setup;
-	hwif->dma_exec_cmd		= venus_dma_exec_cmd;
-	hwif->dma_start		= venus_dma_start;
-	hwif->ide_dma_end		= venus_dma_end;
-	hwif->ide_dma_test_irq	= venus_dma_test_irq;
-	hwif->ide_dma_timeout	= venus_dma_timeout;
-	hwif->ide_dma_lostirq		= venus_dma_lostirq;
-	
-	hwif->resetproc = venus_resetproc;
+    hwif->ide_dma_host_off      = venus_dma_host_off;
+    hwif->ide_dma_off_quietly   = venus_dma_off_quietly;
+    hwif->ide_dma_host_on       = venus_dma_host_on;
+    hwif->ide_dma_on            = venus_dma_on;
+    hwif->dma_setup             = venus_dma_setup;
+    hwif->dma_exec_cmd          = venus_dma_exec_cmd;
+    hwif->dma_start             = venus_dma_start;
+    hwif->ide_dma_end           = venus_dma_end;
+    hwif->ide_dma_test_irq      = venus_dma_test_irq;
+    hwif->ide_dma_timeout       = venus_dma_timeout;
+    hwif->ide_dma_lostirq       = venus_dma_lostirq;
 
-	hwif->drives[0].autodma 	= hwif->autodma;
-	hwif->drives[1].autodma 	= hwif->autodma;
+    hwif->resetproc             = venus_resetproc;
 
-	hwif->drives[0].autotune	= IDE_TUNE_AUTO;
-	hwif->drives[1].autotune	= IDE_TUNE_AUTO;
-	
-	ideinfo(" capable%s\n", hwif->autodma ? ", auto-enable" : "");
-	
- 	return(0);	
+    hwif->drives[0].autodma     = hwif->autodma;
+    hwif->drives[1].autodma     = hwif->autodma;
+
+    hwif->drives[0].autotune    = IDE_TUNE_AUTO;
+    hwif->drives[1].autotune    = IDE_TUNE_AUTO;
+
+    ideinfo(" capable%s\n", hwif->autodma ? ", auto-enable" : "");
+
+    return(0);
 }
 
 static void venus_ide_init(int bank)
 // bank=0 for ATA0 Register, bank=1 for ATA1 Register
 {
-	hw_regs_t hw;
-	ide_hwif_t *hwif;
-	int idx;
-	struct venus_state *state;
-	char name[]={'i', 'd', 'e', '-', 'v', 'e', 'n', 'u', 's', 48+bank, 0};
-	int i;
-	
-	printk(KERN_INFO "ATA%d: Register\n", bank);
-	/*
-	if (!request_mem_region(VENUS_ATA0_BASE+bank*VENUS_BANK_GAP, VENUS_IDE_GAP*9, name))
-		goto out_busy;
+    hw_regs_t hw;
+    ide_hwif_t *hwif;
+    int idx;
+    struct venus_state *state;
+    char name[]={'i', 'd', 'e', '-', 'v', 'e', 'n', 'u', 's', 48+bank, 0};
+    int i;
 
-	if (!request_mem_region(VENUS_ATA0_INT+bank*VENUS_BANK_GAP, VENUS_IDE_GAP, name)) {
-		release_mem_region(VENUS_ATA0_BASE, VENUS_IDE_GAP*9);
-		goto out_busy;
-	}*/
-	
-	if (!request_mem_region(VENUS_ATA0_BASE+bank*VENUS_BANK_GAP, VENUS_IDE_GAP*23, name))
-		goto out_busy;
-	
-	if(FPGA){		//@
-		printk("\nWRAPPER MODE!! ");
-		venus_pio_timing[0]=((2<<27)|(6<<21)|(3<<16)|(2<<11)|(10<<5)|3);	// XFER_PIO_0
-		venus_pio_timing[1]=((2<<27)|(5<<21)|(2<<16)|(2<<11)|(10<<5)|2);	// XFER_PIO_1
- 		venus_pio_timing[2]=((2<<27)|(4<<21)|(2<<16)|(2<<11)|(10<<5)|2);	// XFER_PIO_2	
+    printk(KERN_INFO "ATA%d: Register\n", bank);
+    /*
+    if (!request_mem_region(VENUS_ATA0_BASE+bank*VENUS_BANK_GAP, VENUS_IDE_GAP*9, name))
+        goto out_busy;
 
-		//@ revised by ABEVAU
-		venus_dma_timing[0]=((3<<27)|(3<<21)|(1<<16)|(8<<11)|(8<<5)|3);		// XFER_MW_DMA_0 
-		venus_dma_timing[1]=((2<<27)|(2<<21)|(1<<16)|(6<<11)|(6<<5)|3);		// XFER_MW_DMA_1
- 		venus_dma_timing[2]=((1<<27)|(1<<21)|(1<<16)|(4<<11)|(4<<5)|3);		// XFER_MW_DMA_2
-		venus_dma_timing[3]=((3<<27)|(3<<21)|(1<<16)|(8<<11)|(8<<5)|3); 	// XFER_UDMA_0
-		venus_dma_timing[4]=((2<<27)|(2<<21)|(1<<16)|(6<<11)|(6<<5)|3);		// XFER_UDMA_1
-		venus_dma_timing[5]=((1<<27)|(1<<21)|(1<<16)|(4<<11)|(4<<5)|3);		// XFER_UDMA_2	 	
-	};
-		
-	
-	hw_setup(&hw, bank);
-	
-	// disable IDE0 device reset
-	// marked due to errors from BDR-L06S
-	// ATAPI Mode Sense command error
-	/*writel((u32)0x00, (void __iomem *)VENUS_ATA0_RST+bank*VENUS_BANK_GAP );
-	msleep(5);*/
-	writel((u32)0x01, (void __iomem *)VENUS_ATA0_RST+bank*VENUS_BANK_GAP );
-	
+    if (!request_mem_region(VENUS_ATA0_INT+bank*VENUS_BANK_GAP, VENUS_IDE_GAP, name)) {
+        release_mem_region(VENUS_ATA0_BASE, VENUS_IDE_GAP*9);
+        goto out_busy;
+    }*/
 
-	/* register if */
-	idx = ide_register_hw(&hw, &hwif);
-	if (idx == -1) {
-		if(NEPTUNE)	writel((u32)0x05, (void __iomem *)WRAPPER_ATA0_CTRL+bank*WRAPPER_BANK_GAP );	//@ reset IDE/wrapper circuit
-		writel((u32)0x00, (void __iomem *)VENUS_ATA0_RST+bank*VENUS_BANK_GAP );	// enable IDE0 device reset
-		printk(KERN_ERR "%s: IDE I/F register failed\n", name);
-		return;
-	}
+    if (!request_mem_region(VENUS_ATA0_BASE+bank*VENUS_BANK_GAP, VENUS_IDE_GAP*23, name))
+        goto out_busy;
 
-	venus_hwif_setup(hwif);
-	
-	if (venus_setup_dma(hwif, bank)){
-		printk(KERN_ERR "ide%d: dma failed\n", idx);
-		return;
-	}
-	
-	state = hwif->hwif_data;
-	hwif->OUTL((u32)0x9, state->en);				// enable IDE0 interrupt
-//@ #ifdef IDE_FPGA_BOARD	
-	if(FPGA){
-		//@hwif->OUTL(((1<<16) | (3<<19) | (3<<23) | (6<<26)), state->vdev[0]);	// set ATA0/DEV0 timing
-		//@hwif->OUTL(((1<<16) | (3<<19) | (3<<23) | (6<<26)), state->vdev[1]);	// set ATA0/DEV1 timing
-		hwif->OUTL(((1<<16) | (2<<19) | (1<<23) | (4<<26)), state->vdev[0]);	// set ATA0/DEV0 timing, //@ revised by ABEVAU 20070105
-		hwif->OUTL(((1<<16) | (2<<19) | (1<<23) | (4<<26)), state->vdev[1]);	// set ATA0/DEV1 timing	
-	} else {	
-//@ #else	
+    if(FPGA){       //@
+        printk("\nWRAPPER MODE!! ");
+        venus_pio_timing[0]=((2<<27)|(6<<21)|(3<<16)|(2<<11)|(10<<5)|3);    // XFER_PIO_0
+        venus_pio_timing[1]=((2<<27)|(5<<21)|(2<<16)|(2<<11)|(10<<5)|2);    // XFER_PIO_1
+        venus_pio_timing[2]=((2<<27)|(4<<21)|(2<<16)|(2<<11)|(10<<5)|2);    // XFER_PIO_2
+
+        //@ revised by ABEVAU
+        venus_dma_timing[0]=((3<<27)|(3<<21)|(1<<16)|(8<<11)|(8<<5)|3);     // XFER_MW_DMA_0
+        venus_dma_timing[1]=((2<<27)|(2<<21)|(1<<16)|(6<<11)|(6<<5)|3);     // XFER_MW_DMA_1
+        venus_dma_timing[2]=((1<<27)|(1<<21)|(1<<16)|(4<<11)|(4<<5)|3);     // XFER_MW_DMA_2
+        venus_dma_timing[3]=((3<<27)|(3<<21)|(1<<16)|(8<<11)|(8<<5)|3);     // XFER_UDMA_0
+        venus_dma_timing[4]=((2<<27)|(2<<21)|(1<<16)|(6<<11)|(6<<5)|3);     // XFER_UDMA_1
+        venus_dma_timing[5]=((1<<27)|(1<<21)|(1<<16)|(4<<11)|(4<<5)|3);     // XFER_UDMA_2
+    };
+
+
+    hw_setup(&hw, bank);
+
+    // disable IDE0 device reset
+    // marked due to errors from BDR-L06S
+    // ATAPI Mode Sense command error
+    /*writel((u32)0x00, (void __iomem *)VENUS_ATA0_RST+bank*VENUS_BANK_GAP );
+    msleep(5);*/
+    writel((u32)0x01, (void __iomem *)VENUS_ATA0_RST+bank*VENUS_BANK_GAP );
+
+
+    /* register if */
+    idx = ide_register_hw(&hw, &hwif);
+    if (idx == -1) {
+        if(NEPTUNE) writel((u32)0x05, (void __iomem *)WRAPPER_ATA0_CTRL+bank*WRAPPER_BANK_GAP );    //@ reset IDE/wrapper circuit
+        writel((u32)0x00, (void __iomem *)VENUS_ATA0_RST+bank*VENUS_BANK_GAP ); // enable IDE0 device reset
+        printk(KERN_ERR "%s: IDE I/F register failed\n", name);
+        return;
+    }
+
+    venus_hwif_setup(hwif);
+
+    if (venus_setup_dma(hwif, bank)){
+        printk(KERN_ERR "ide%d: dma failed\n", idx);
+        return;
+    }
+
+    state = hwif->hwif_data;
+    hwif->OUTL((u32)0x9, state->en);                // enable IDE0 interrupt
+//@ #ifdef IDE_FPGA_BOARD
+    if(FPGA){
+        //@hwif->OUTL(((1<<16) | (3<<19) | (3<<23) | (6<<26)), state->vdev[0]); // set ATA0/DEV0 timing
+        //@hwif->OUTL(((1<<16) | (3<<19) | (3<<23) | (6<<26)), state->vdev[1]); // set ATA0/DEV1 timing
+        hwif->OUTL(((1<<16) | (2<<19) | (1<<23) | (4<<26)), state->vdev[0]);    // set ATA0/DEV0 timing, //@ revised by ABEVAU 20070105
+        hwif->OUTL(((1<<16) | (2<<19) | (1<<23) | (4<<26)), state->vdev[1]);    // set ATA0/DEV1 timing
+    } else {
+//@ #else
 #ifndef CONFIG_BLK_DEV_IDE_SATA_BRIDGE
 
-		hwif->OUTL(((1<<16) | (12<<19) | (7<<23) | (35<<26)), state->vdev[0]);	// set ATA0/DEV0 timing
-		hwif->OUTL(((1<<16) | (12<<19) | (7<<23) | (35<<26)), state->vdev[1]);	// set ATA0/DEV1 timing
-#else		
-		hwif->OUTL(((1<<16) | (12<<19) | (7<<23) | (8<<26)), state->vdev[0]);	// adjust trp for JMicro due to CRC error
-		hwif->OUTL(((1<<16) | (12<<19) | (7<<23) | (8<<26)), state->vdev[1]);	// adjust trp for JMicro due to CRC error
-#endif	
-		if (JM_SATA){
-			printk(KERN_INFO "Use JM_SATA timing parameters\n");
-			hwif->OUTL(((1<<16) | (12<<19) | (7<<23) | (8<<26)), state->vdev[0]);	// adjust trp for JMicro due to CRC error
-			hwif->OUTL(((1<<16) | (12<<19) | (7<<23) | (8<<26)), state->vdev[1]);	// adjust trp for JMicro due to CRC error
-		}
+        hwif->OUTL(((1<<16) | (12<<19) | (7<<23) | (35<<26)), state->vdev[0]);  // set ATA0/DEV0 timing
+        hwif->OUTL(((1<<16) | (12<<19) | (7<<23) | (35<<26)), state->vdev[1]);  // set ATA0/DEV1 timing
+#else
+        hwif->OUTL(((1<<16) | (12<<19) | (7<<23) | (8<<26)), state->vdev[0]);   // adjust trp for JMicro due to CRC error
+        hwif->OUTL(((1<<16) | (12<<19) | (7<<23) | (8<<26)), state->vdev[1]);   // adjust trp for JMicro due to CRC error
+#endif
+        if (JM_SATA){
+            printk(KERN_INFO "Use JM_SATA timing parameters\n");
+            hwif->OUTL(((1<<16) | (12<<19) | (7<<23) | (8<<26)), state->vdev[0]);   // adjust trp for JMicro due to CRC error
+            hwif->OUTL(((1<<16) | (12<<19) | (7<<23) | (8<<26)), state->vdev[1]);   // adjust trp for JMicro due to CRC error
+        }
 
-		
-	}	
-	
-	// Warning: udmahold can't be set to 2
-	
+
+    }
+
+    // Warning: udmahold can't be set to 2
+
 //@ #endif
-	
-	hwif->OUTL(venus_pio_timing[0], state->pio[0]);			// set ATA0/PIO0 timing
-	hwif->OUTL(venus_pio_timing[0], state->pio[1]);			// set ATA0/PIO1 timing
-	
-	for (i=0;i<5;i++){
-		ideinfo("    venus_pio_timing[%x]= %x\n", i, venus_pio_timing[i]);
-	}
-	for (i=0;i<11;i++){
-		ideinfo("    venus_dma_timing[%x]= %x\n", i, venus_dma_timing[i]);
-	}
-	return;
+
+    hwif->OUTL(venus_pio_timing[0], state->pio[0]);         // set ATA0/PIO0 timing
+    hwif->OUTL(venus_pio_timing[0], state->pio[1]);         // set ATA0/PIO1 timing
+
+    for (i=0;i<5;i++){
+        ideinfo("    venus_pio_timing[%x]= %x\n", i, venus_pio_timing[i]);
+    }
+    for (i=0;i<11;i++){
+        ideinfo("    venus_dma_timing[%x]= %x\n", i, venus_dma_timing[i]);
+    }
+    return;
 
 out_busy:
-	printk(KERN_ERR "%s: IDE I/F resource already used.\n", name);
+    printk(KERN_ERR "%s: IDE I/F resource already used.\n", name);
 }
 
 
 void __init h8300_ide_init(void)
 {
-	u8 bga;			// judge the package type(LQFP or BGA)
-	u8 serial, serial_mem;	// judge the flash memory type(serial flash memory or parellel flash memory)
-	u8 cpu1282;
-	char sata[]="JM_SATA";
-	
-	//@ printk("\nplatform_info.board_id = %x", platform_info.board_id);	//@ 20070110
-	printk("\nide kernel, 2007/01/10 revised");	//@
+    u8 bga;         // judge the package type(LQFP or BGA)
+    u8 serial, serial_mem;  // judge the flash memory type(serial flash memory or parellel flash memory)
+    u8 cpu1282;
+    char sata[]="JM_SATA";
 
-	if(platform_info.board_id == realtek_neptune_qa_board){	//@
-		FPGA = 0;
-		NEPTUNE = 0;
-	} else {
-		FPGA = 0;		
-		NEPTUNE = 0;
-	}	
-	
-	printk(KERN_INFO "system parameters = %s\n", platform_info.system_parameters);
-	if (strstr(platform_info.system_parameters, sata)){
-		printk(KERN_INFO "JM_SATA\n");
-		JM_SATA=1;
-		msleep(1000);
-	}
+    //@ printk("\nplatform_info.board_id = %x", platform_info.board_id);    //@ 20070110
+    printk("\nide kernel, 2007/01/10 revised"); //@
 
-	cpu1282 = ((readl((void __iomem *) 0xb801a200)& 0xffff)==0x1282)? 1 : 0;
-	if (cpu1282){
-		u8 ddr_num;
-		printk("Neptune chip\n");
-		ddr_num = (u8) (readl((void __iomem *) 0xb8008800) & 0x01);	// bit0=1: 1*DDR, bit0=0: 2*DDR
-		bga = ddr_num ? 0 : 1;
-		serial = (u8) (readl((void __iomem *) 0xbfc01010) & 0xff);	// 0xbe: parallel, 0xde: SPI serial
-	} else {
-		bga = (u8) (readl((void __iomem *) 0xb801a204) & 0x10);	// bit4=1: BGA, bit4=0: LQFP
-		serial = (u8) (readl((void __iomem *) 0xbfc10010) & 0xff);	// 0xbe: parallel, 0xde: SPI serial
-		// 0xee: serial flash memory for Nucom DEMO system PCB
-	}
+    if(platform_info.board_id == realtek_neptune_qa_board){ //@
+        FPGA = 0;
+        NEPTUNE = 0;
+    } else {
+        FPGA = 0;
+        NEPTUNE = 0;
+    }
 
-	if (bga) printk(KERN_INFO "ide: BGA package\n");
-	else printk(KERN_INFO "ide: LQFP package\n");
-	
-	if ((serial==0xde)||(serial==0xee)){
-	       	printk(KERN_INFO "ide: Serial flash memory 0x%x\n", serial);
-		serial_mem=1;
-	} else {
-		printk(KERN_INFO "ide: Parellel flash memory 0x%x\n", serial);
-		serial_mem=0;
-	}
+    printk(KERN_INFO "system parameters = %s\n", platform_info.system_parameters);
+    if (strstr(platform_info.system_parameters, sata)){
+        printk(KERN_INFO "JM_SATA\n");
+        JM_SATA=1;
+        msleep(1000);
+    }
 
-	//@ Setting IDE1 8mA pad for Maxtor 250G "bad CRC" bug. By ABEVAU 20070117
-	if (JM_SATA && cpu1282){
-		u32 ide0_padcurrent;
-		// set driving current to 4mA for JM_SATA & Neptune Demo board due to PCB layout
-		printk("set IDE0 driving current to 4mA\n");
-		ide0_padcurrent = readl((void __iomem *)0xb801a140);
-		writel((u32)ide0_padcurrent & 0xdfffffff, (void __iomem *)0xb801a140);          //IDE1 8mA pad setting for serial flash	
-		
-	} else {
-		u32 ide1_padcurrent;
-		if (serial_mem){
-			ide1_padcurrent = readl((void __iomem *)0xb801a144);
-			writel((u32)ide1_padcurrent|0x00004000, (void __iomem *)0xb801a144);          //IDE1 8mA pad setting for serial flash	
-		}else{
-			ide1_padcurrent = readl((void __iomem *)0xb801a140);
-			writel((u32)ide1_padcurrent|0x00001000, (void __iomem *)0xb801a140);          //IDE1 8mA pad setting for parallel flash		
-		}
-	}	
-	
-	venus_ide_init(0);
-	
-	if (FPGA || bga ||serial_mem) {		
-		venus_ide_init(1);
-	}
+    cpu1282 = ((readl((void __iomem *) 0xb801a200)& 0xffff)==0x1282)? 1 : 0;
+    if (cpu1282){
+        u8 ddr_num;
+        printk("Neptune chip\n");
+        ddr_num = (u8) (readl((void __iomem *) 0xb8008800) & 0x01); // bit0=1: 1*DDR, bit0=0: 2*DDR
+        bga = ddr_num ? 0 : 1;
+        serial = (u8) (readl((void __iomem *) 0xbfc01010) & 0xff);  // 0xbe: parallel, 0xde: SPI serial
+    } else {
+        bga = (u8) (readl((void __iomem *) 0xb801a204) & 0x10); // bit4=1: BGA, bit4=0: LQFP
+        serial = (u8) (readl((void __iomem *) 0xbfc10010) & 0xff);  // 0xbe: parallel, 0xde: SPI serial
+        // 0xee: serial flash memory for Nucom DEMO system PCB
+    }
+
+    if (bga) printk(KERN_INFO "ide: BGA package\n");
+    else printk(KERN_INFO "ide: LQFP package\n");
+
+    if ((serial==0xde)||(serial==0xee)){
+            printk(KERN_INFO "ide: Serial flash memory 0x%x\n", serial);
+        serial_mem=1;
+    } else {
+        printk(KERN_INFO "ide: Parellel flash memory 0x%x\n", serial);
+        serial_mem=0;
+    }
+
+    //@ Setting IDE1 8mA pad for Maxtor 250G "bad CRC" bug. By ABEVAU 20070117
+    if (JM_SATA && cpu1282){
+        u32 ide0_padcurrent;
+        // set driving current to 4mA for JM_SATA & Neptune Demo board due to PCB layout
+        printk("set IDE0 driving current to 4mA\n");
+        ide0_padcurrent = readl((void __iomem *)0xb801a140);
+        writel((u32)ide0_padcurrent & 0xdfffffff, (void __iomem *)0xb801a140);          //IDE1 8mA pad setting for serial flash
+
+    } else {
+        u32 ide1_padcurrent;
+        if (serial_mem){
+            ide1_padcurrent = readl((void __iomem *)0xb801a144);
+            writel((u32)ide1_padcurrent|0x00004000, (void __iomem *)0xb801a144);          //IDE1 8mA pad setting for serial flash
+        }else{
+            ide1_padcurrent = readl((void __iomem *)0xb801a140);
+            writel((u32)ide1_padcurrent|0x00001000, (void __iomem *)0xb801a140);          //IDE1 8mA pad setting for parallel flash
+        }
+    }
+
+    venus_ide_init(0);
+
+//  if (FPGA || bga ||serial_mem) {
+//      venus_ide_init(1);
+//  }
+
+    // Originally, ide(1) is enabled for bga && DA && parallel_mem, but now it's not enabled.
+    u8 second_ide = 0;
+
+    if (0x0 == ((u8) (readl((void __iomem *) 0xb8008800) & 0x01)))
+    {
+        //bit0=0: 2*DDR
+        //1282
+        u8 bonding_option = (u8) (readl((void __iomem *) 0xb801A204) & 0xff);
+
+    if (realtek_1281_demo_board == platform_info.board_id)
+    {
+            //hack for realtek_1281_demo_board (little-blue)
+            second_ide = 1;
+    }
+    else if (0x00 == bonding_option)
+        {
+            // PA
+            second_ide = 1;
+        }
+        else if (0x0F == bonding_option)
+        {
+            // DA
+            if (0x0 == (readl((void __iomem *) 0xb801A200) & 0x10000))
+            {
+                // parallel flash
+                second_ide = 0;
+            }
+            else
+            {
+                // serial flash
+                second_ide = 1;
+            }
+        }
+    }
+    else
+    {
+        // !cpu1282
+        if (FPGA || bga ||serial_mem)
+        {
+            second_ide = 1;
+        }
+    }
+
+/*****************************************************
+IDE bank2 enable:
+ 1261 2.5" board id : 0x000E
+
+IDE bank2 disable:
+    1262 Neptune A Ver. Demo Board of board id :0x0102
+    realtek_1262_neptuneB_avhdd_ewha10_mk_board
+******************************************************/
+    printk("\nplatform_info.board_id = %x", platform_info.board_id);
+    if((platform_info.board_id&0x0FFF) == 0x0106
+     ||(platform_info.board_id&0x0FFF) == 0x0102
+     ||platform_info.board_id == realtek_1262_neptuneB_avhdd_ewha10_mk_board)
+    {
+            second_ide = 0;
+    }
+    else if(((platform_info.board_id)&0x0FFF) == 0x000E )
+    {
+        second_ide = 1;
+    }
+
+    if (second_ide)
+    {
+        venus_ide_init (1);
+    }
 }
 
 void h8300_ide_prepare(void)
 {
-	unsigned int status;
-	
-	if ((platform_info.board_id == realtek_neptune_qa_board)||
-		(platform_info.board_id == realtek_neptuneB_demo_board)){
-		 printk(KERN_INFO "ide: enable primary IDE normal output\n");
-		status = readl((void __iomem *) 0xb8000110);	
-		writel(status & (~0x20), (void __iomem *)0xb8000110);          
-	}
+    unsigned int status;
+
+    if ((platform_info.board_id == realtek_neptune_qa_board)||
+        (platform_info.board_id == realtek_neptuneB_demo_board)){
+         printk(KERN_INFO "ide: enable primary IDE normal output\n");
+        status = readl((void __iomem *) 0xb8000110);
+        writel(status & (~0x20), (void __iomem *)0xb8000110);
+    }
 }
 
 void h8300_ide_exit(void)
 {
-	unsigned int status;
-	if ((platform_info.board_id == realtek_neptune_qa_board)||
-		(platform_info.board_id == realtek_neptuneB_demo_board)){
-		 printk(KERN_INFO "ide: disable primary IDE normal output\n");
-		status = readl((void __iomem *) 0xb8000110);	
-		writel(status|0x20, (void __iomem *)0xb8000110);          
-	}
+    unsigned int status;
+    if ((platform_info.board_id == realtek_neptune_qa_board)||
+        (platform_info.board_id == realtek_neptuneB_demo_board)){
+         printk(KERN_INFO "ide: disable primary IDE normal output\n");
+        status = readl((void __iomem *) 0xb8000110);
+        writel(status|0x20, (void __iomem *)0xb8000110);
+    }
 }

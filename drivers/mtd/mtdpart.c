@@ -344,6 +344,9 @@ int del_mtd_partitions(struct mtd_info *master)
 	return 0;
 }
 
+// The name that represents the whole MTD Flash device
+char *mtd_disc="disc";
+
 /*
  * This function, given a master MTD object and a partition table, creates
  * and registers slave MTD objects which are bound to the master according to
@@ -361,7 +364,8 @@ int add_mtd_partitions(struct mtd_info *master,
 
 	printk (KERN_NOTICE "Creating %d MTD partitions on \"%s\":\n", nbparts, master->name);
 
-	for (i = 0; i < nbparts; i++) {
+
+	for (i = 0; i <= nbparts; i++) {
 
 		/* allocate the partition structure */
 		slave = kmalloc (sizeof(*slave), GFP_KERNEL);
@@ -376,14 +380,22 @@ int add_mtd_partitions(struct mtd_info *master,
 
 		/* set up the MTD object for this partition */
 		slave->mtd.type = master->type;
-		slave->mtd.flags = master->flags & ~parts[i].mask_flags;
-		slave->mtd.size = parts[i].size;
+		if(i == nbparts) {
+			slave->mtd.flags = (master->flags & ~parts[0].mask_flags) | MTD_WRITEABLE;
+			slave->mtd.size = master->size;
+ 		} else {
+			slave->mtd.flags = master->flags & ~parts[i].mask_flags;
+			slave->mtd.size = parts[i].size;
+		}
 		slave->mtd.oobblock = master->oobblock;
 		slave->mtd.oobsize = master->oobsize;
 		slave->mtd.ecctype = master->ecctype;
 		slave->mtd.eccsize = master->eccsize;
 
-		slave->mtd.name = parts[i].name;
+		if(i == nbparts)
+			slave->mtd.name = mtd_disc;
+		else
+			slave->mtd.name = parts[i].name;
 		slave->mtd.bank_size = master->bank_size;
 		slave->mtd.owner = master->owner;
 
@@ -433,7 +445,10 @@ int add_mtd_partitions(struct mtd_info *master,
 			slave->mtd.block_markbad = part_block_markbad;
 		slave->mtd.erase = part_erase;
 		slave->master = master;
-		slave->offset = parts[i].offset;
+		if(i == nbparts)
+			slave->offset = parts[0].offset;
+		else
+			slave->offset = parts[i].offset;
 		slave->index = i;
 
 		if (slave->offset == MTDPART_OFS_APPEND)
@@ -455,17 +470,19 @@ int add_mtd_partitions(struct mtd_info *master,
 			slave->offset + slave->mtd.size, slave->mtd.name);
 
 		/* let's do some sanity checks */
-		if (slave->offset >= master->size) {
+		if(i != nbparts) {
+			if (slave->offset >= master->size) {
 				/* let's register it anyway to preserve ordering */
-			slave->offset = 0;
-			slave->mtd.size = 0;
-			printk ("mtd: partition \"%s\" is out of reach -- disabled\n",
-				parts[i].name);
-		}
-		if (slave->offset + slave->mtd.size > master->size) {
-			slave->mtd.size = master->size - slave->offset;
-			printk ("mtd: partition \"%s\" extends beyond the end of device \"%s\" -- size truncated to %#x\n",
-				parts[i].name, master->name, slave->mtd.size);
+				slave->offset = 0;
+				slave->mtd.size = 0;
+				printk ("mtd: partition \"%s\" is out of reach -- disabled\n",
+					parts[i].name);
+			}
+			if (slave->offset + slave->mtd.size > master->size) {
+				slave->mtd.size = master->size - slave->offset;
+				printk ("mtd: partition \"%s\" extends beyond the end of device \"%s\" -- size truncated to %#x\n",
+					parts[i].name, master->name, slave->mtd.size);
+			}
 		}
 		if (master->numeraseregions>1) {
 			/* Deal with variable erase size stuff */
@@ -491,20 +508,28 @@ int add_mtd_partitions(struct mtd_info *master,
 			/* Doesn't start on a boundary of major erase size */
 			/* FIXME: Let it be writable if it is on a boundary of _minor_ erase size though */
 			slave->mtd.flags &= ~MTD_WRITEABLE;
-			printk ("mtd: partition \"%s\" doesn't start on an erase block boundary -- force read-only\n",
-				parts[i].name);
+			if(i == nbparts) {
+				printk ("mtd: partition \"disc\" doesn't start on an erase block boundary -- force read-only\n");
+			} else {
+				printk ("mtd: partition \"%s\" doesn't start on an erase block boundary -- force read-only\n",
+					parts[i].name);
+			}
 		}
 		if ((slave->mtd.flags & MTD_WRITEABLE) && 
 		    (slave->mtd.size % slave->mtd.erasesize)) {
 			slave->mtd.flags &= ~MTD_WRITEABLE;
-			printk ("mtd: partition \"%s\" doesn't end on an erase block -- force read-only\n",
-				parts[i].name);
+			if(i == nbparts) {
+				printk ("mtd: partition \"disc\" doesn't end on an erase block -- force read-only\n");
+			} else {
+				printk ("mtd: partition \"%s\" doesn't end on an erase block -- force read-only\n",
+					parts[i].name);
+			}
 		}
 
 		/* copy oobinfo from master */ 
 		memcpy(&slave->mtd.oobinfo, &master->oobinfo, sizeof(slave->mtd.oobinfo));
 
-		if(parts[i].mtdp)
+		if(i != nbparts && parts[i].mtdp)
 		{	/* store the object pointer (caller may or may not register it */
 			*parts[i].mtdp = &slave->mtd;
 			slave->registered = 0;

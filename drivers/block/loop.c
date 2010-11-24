@@ -250,7 +250,11 @@ static int do_lo_send_aops(struct loop_device *lo, struct bio_vec *bvec,
 			memset(kaddr + offset, 0, size);
 			kunmap_atomic(kaddr, KM_USER0);
 		}
+#ifdef CONFIG_REALTEK_PREVENT_DC_ALIAS
+		/* EJ: i don't think we need to do the cache flush here... */
+#else
 		flush_dcache_page(page);
+#endif
 		if (unlikely(aops->commit_write(file, page, offset,
 				offset + size)))
 			goto unlock;
@@ -368,6 +372,10 @@ static int lo_send(struct loop_device *lo, struct bio *bio, int bsize,
 		}
 	}
 	bio_for_each_segment(bvec, bio, i) {
+#ifdef CONFIG_REALTEK_PREVENT_DC_ALIAS
+		/* EJ: prevent the virtual alias of the source page... */
+		flush_dcache_page_alias(bvec->bv_page);
+#endif
 		ret = do_lo_send(lo, bvec, bsize, pos, page);
 		if (ret < 0)
 			break;
@@ -406,6 +414,9 @@ lo_read_actor(read_descriptor_t *desc, struct page *page,
 	if (size > count)
 		size = count;
 
+#ifdef CONFIG_REALTEK_PREVENT_DC_ALIAS
+	/* EJ: i think the p->page should be clean, so we don't do the cache flush here... */
+#endif
 	if (lo_do_transfer(lo, READ, page, offset, p->page, p->offset, size, IV)) {
 		size = 0;
 		printk(KERN_ERR "loop: transfer error block %ld\n",
@@ -568,6 +579,25 @@ static inline void loop_handle_bio(struct loop_device *lo, struct bio *bio)
 	} else {
 		ret = do_bio_filebacked(lo, bio);
 		bio_endio(bio, bio->bi_size, ret);
+
+#if 0
+		// The following code was used to minimize the waiting time when the corresponding
+		// device was disconnected...
+		if (ret) {
+			// clear all the remaining requests...
+			while (1) {
+				if (!down_trylock(&lo->lo_bh_mutex)) {
+					bio = loop_get_bio(lo);
+					if (!bio) {
+						printk("loop: missing bio\n");
+						continue;
+					}
+					bio_endio(bio, bio->bi_size, ret);
+				} else
+					break;
+			}
+		}
+#endif
 	}
 }
 

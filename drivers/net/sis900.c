@@ -1067,10 +1067,12 @@ sis900_init_rxfilter (struct net_device * net_dev)
 
 		w = (u32) *((u16 *)(net_dev->dev_addr)+i);
 		outl((i << RFADDR_shift), ioaddr + rfcr);
+		udelay(1);
 		outl(w, ioaddr + rfdr);
+		udelay(1);
 
 		if (netif_msg_hw(sis_priv)) {
-			printk(KERN_DEBUG "%s: Receive Filter Addrss[%d]=%x\n",
+			printk("%s: Receive Filter Addrss[%d]=%x\n",
 			       net_dev->name, i, inl(ioaddr + rfdr));
 		}
 	}

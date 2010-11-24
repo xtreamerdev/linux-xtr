@@ -1571,7 +1571,7 @@ irqreturn_t ide_intr (int irq, void *dev_id, struct pt_regs *regs)
 #endif /* CONFIG_BLK_DEV_IDEPCI */
 		}
 		spin_unlock_irqrestore(&ide_lock, flags);
-		printk("not here\n");
+		//printk("not here\n");
 		return IRQ_NONE;
 	}
 	drive = hwgroup->drive;

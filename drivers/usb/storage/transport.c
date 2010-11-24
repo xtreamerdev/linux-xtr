@@ -113,9 +113,19 @@ int command_abort_flag = 0; // cfyeh: 2007/03/27
  * called more than once or from being called during usb_submit_urb().
  */
 
-/* This is the completion handler which will wake us up when an URB
- * completes.
+/* This is the timeout handler which will cancel an URB when its timeout
+ * expires.
  */
+static void timeout_handler(unsigned long us_)
+{
+	struct us_data *us = (struct us_data *) us_;
+
+	if (test_and_clear_bit(US_FLIDX_URB_ACTIVE, &us->flags)) {
+		US_DEBUGP("Timeout -- cancelling URB\n");
+		usb_unlink_urb(us->current_urb);
+	}
+}
+
 static void usb_stor_blocking_completion(struct urb *urb, struct pt_regs *regs)
 {
 	struct completion *urb_done_ptr = (struct completion *)urb->context;
@@ -132,7 +142,7 @@ static void usb_stor_blocking_completion(struct urb *urb, struct pt_regs *regs)
 static int usb_stor_msg_common(struct us_data *us, int timeout)
 {
 	struct completion urb_done;
-	long timeleft;
+	struct timer_list to_timer;
 	int status;
 
 	/* don't submit URBs during abort/disconnect processing */
@@ -180,17 +190,22 @@ static int usb_stor_msg_common(struct us_data *us, int timeout)
 		}
 	}
  
-	/* wait for the completion of the URB */
-	timeleft = wait_for_completion_interruptible_timeout(
-			&urb_done, timeout ? : MAX_SCHEDULE_TIMEOUT);
-	
-	clear_bit(US_FLIDX_URB_ACTIVE, &us->flags);
-
-	if (timeleft <= 0) {
-		US_DEBUGP("%s -- cancelling URB\n",
-				timeleft == 0 ? "Timeout" : "Signal");
-		usb_unlink_urb(us->current_urb);
+	/* submit the timeout timer, if a timeout was requested */
+	if (timeout > 0) {
+		init_timer(&to_timer);
+		to_timer.expires = jiffies + timeout;
+		to_timer.function = timeout_handler;
+		to_timer.data = (unsigned long) us;
+		add_timer(&to_timer);
 	}
+
+	/* wait for the completion of the URB */
+	wait_for_completion(&urb_done);
+	clear_bit(US_FLIDX_URB_ACTIVE, &us->flags);
+ 
+	/* clean up the timeout timer */
+	if (timeout > 0)
+		del_timer_sync(&to_timer);
 
 	/* return the URB status */
 	return us->current_urb->status;
@@ -1317,7 +1332,7 @@ int usb_stor_Bulk_reset(struct us_data *us)
 			bulk_reset_times = 0;
 #ifdef USB_HACK_DISABLE_ALL_SCSI_DEVICE
 			usb_set_scsi_sibings_device_offline(us);
-			return;
+			return 0;
 #endif /* USB_HACK_DISABLE_ALL_SCSI_DEVICE */
 
 #ifdef USB_HACK_SET_US_FLIDX_DISCONNECTING 
@@ -1329,7 +1344,7 @@ int usb_stor_Bulk_reset(struct us_data *us)
 					__func__, __LINE__);
 			usb_disconnect(&us->pusb_dev);
 #endif
-			return;
+			return 0;
 		}
 	}
 	// hack for usb to ide, cfyeh add 2007/03/23 -

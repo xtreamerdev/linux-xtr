@@ -232,20 +232,23 @@ static int gEnableHubOnBoard_woone = -1; //default = -1
 static int gUsbEhciRootHubPort = 1; //default = 1
 static int gUsbEhciRootHubTestMode = 0;
 static int gUsbForceHsMode = 1; //default = 1
-static int gUsbEhciHubSuspendResume = 0; // 0:Resume, 1:Suspend
+int gUsbEhciHubSuspendResume[4] = {-1, -1, -1, -1}; // 0:Resume, 1:Suspend
+EXPORT_SYMBOL(gUsbEhciHubSuspendResume);
 
 //for ehci hub on board
 static int gUsbEhciHubPort = 1; //default = 1
 static int gUsbEhciHubTestMode = 0;
 static int gUsbEhciHubPortSuspendResume = 0; // 0:Resume, 1:Suspend
 static int usb_hub_port_power[4]={-1, -1, -1, -1};
-static int usb_hub_port_power_woone = -1;
 
 //share w/ ehci root hub and ehci hub on boar
 static int gUsbTestModeChanged = 0;
 
 int gUsbGetDescriptor = 0;
 EXPORT_SYMBOL(gUsbGetDescriptor);
+
+int bForEhciDebug = 0;
+EXPORT_SYMBOL(bForEhciDebug);
 
 static int HubLEDControl_value = 0;
 
@@ -307,6 +310,51 @@ static int hub_check_port_suspend_resume(struct usb_device *hdev, int port1)
 	return ret;
 }
 
+static int usb_test_mode_ehci_interrupt = 0;
+static int ehci_disable_interrupt_reg(void)
+{
+	if(usb_test_mode_ehci_interrupt == 0)
+	{
+		usb_test_mode_ehci_interrupt = inl(VENUS_USB_EHCI_USBINTR);
+		if(usb_test_mode_ehci_interrupt != 0)
+		{
+			printk("[cfyeh] %s(%d) VENUS_USB_EHCI_USBINTR = 0x%x\n", __func__, __LINE__, inl(VENUS_USB_EHCI_USBINTR));
+			outl(0, VENUS_USB_EHCI_USBINTR);
+			printk("[cfyeh] %s(%d) VENUS_USB_EHCI_USBINTR = 0x%x\n", __func__, __LINE__, inl(VENUS_USB_EHCI_USBINTR));
+		}
+		else
+			printk("[cfyeh] %s(%d) VENUS_USB_EHCI_USBINTR = 0x%x\n", __func__, __LINE__, inl(VENUS_USB_EHCI_USBINTR));
+	}
+
+	return usb_test_mode_ehci_interrupt;
+}
+
+static int ehci_enable_interrupt_reg(void)
+{
+	if(usb_test_mode_ehci_interrupt != 0)
+	{
+		if(inl(VENUS_USB_EHCI_USBINTR) == 0)
+		{
+			printk("[cfyeh] %s(%d) VENUS_USB_EHCI_USBINTR = 0x%x\n", __func__, __LINE__, inl(VENUS_USB_EHCI_USBINTR));
+			outl(usb_test_mode_ehci_interrupt, VENUS_USB_EHCI_USBINTR);
+			printk("[cfyeh] %s(%d) VENUS_USB_EHCI_USBINTR = 0x%x\n", __func__, __LINE__, inl(VENUS_USB_EHCI_USBINTR));
+		}
+		else
+		{
+			printk("[cfyeh] %s(%d) VENUS_USB_EHCI_USBINTR = 0x%x\n", __func__, __LINE__, inl(VENUS_USB_EHCI_USBINTR));
+		}
+		usb_test_mode_ehci_interrupt = 0;
+	}
+
+	return usb_test_mode_ehci_interrupt;
+}
+
+#ifdef USB_MARS_HOST_TEST_MODE_JK
+static int bCall_USBPHY_SetReg_Default_3A_for_JK = 0;
+extern void USBPHY_SetReg_Default_3A(void);
+extern void USBPHY_SetReg_Default_3A_for_JK(int port);
+#endif /* USB_MARS_HOST_TEST_MODE_JK */
+
 static int ehci_root_hub_test_mode(struct usb_device *udev, int port1, int test_mode)
 {
 #define USB_TEST_FORCE_HS_MODE(x)	((x)<<16) //1 bit
@@ -328,9 +376,13 @@ static int ehci_root_hub_test_mode(struct usb_device *udev, int port1, int test_
 
 	if(0 != test_mode)
 	{
+#ifdef USB_TEST_MODE_DISABLE_IRQ_2
 		//disable irq
 		printk("disable irq 2 ...\n");
 		disable_irq(2);
+#else
+		ehci_disable_interrupt_reg();
+#endif /* USB_TEST_MODE_DISABLE_IRQ_2 */
 		mdelay(2000);
 	}
 	
@@ -343,7 +395,8 @@ static int ehci_root_hub_test_mode(struct usb_device *udev, int port1, int test_
 
 	if (5 == test_mode){ // occupy this mode
 		unsigned int volatile tmp1, tmp0;
-			
+
+#if 0 // remove codes for test mode 5			
 		// reset host controller
 		printk("reset host controller\n");
 			printk("...Clear RUN = 0\n");
@@ -419,6 +472,7 @@ static int ehci_root_hub_test_mode(struct usb_device *udev, int port1, int test_
 			printk("...ok\n");
 
 			mdelay(100);
+#endif
 			
 		// Enter test mode TEST_FORCE_ENABLE (Fake)
 		printk("Enter test mode TEST_FORCE_ENABLE (Fake)\n");
@@ -453,11 +507,21 @@ static int ehci_root_hub_test_mode(struct usb_device *udev, int port1, int test_
 					
 	if(test_mode == 0)//HCReset
 	{
+#ifdef USB_MARS_HOST_TEST_MODE_JK
+		if(is_mars_cpu())// for mars
+		{
+			if(bCall_USBPHY_SetReg_Default_3A_for_JK == 1)
+			{
+				printk("calling USBPHY_SetReg_Default_3A()\n");
+				USBPHY_SetReg_Default_3A();
+			}
+		}
+#endif /* USB_MARS_HOST_TEST_MODE_JK */
 		//step 0 force hs mode turn off 
 		tmp = inl(usb_host_self_loop_back_offset) & ~USB_TEST_FORCE_HS_MODE(0x1) & ~USB_TEST_SIM_MODE(0x1);
 		tmp |= USB_TEST_SIM_MODE(0) | USB_TEST_FORCE_HS_MODE(0);
 		outl(tmp, usb_host_self_loop_back_offset);
-		printk("Step 0:  clear gUsbForceHsMode 0xb8013810 = 0x%.8x -> 0x%.8x\n",tmp, inl(usb_host_self_loop_back_offset));
+		printk("Step 0:  clear gUsbForceHsMode 0x%.8x -> 0x%.8x\n",tmp, inl(usb_host_self_loop_back_offset));
 
 		do
 		{
@@ -486,10 +550,15 @@ static int ehci_root_hub_test_mode(struct usb_device *udev, int port1, int test_
 		tmp = inl(usb_host_self_loop_back_offset) & ~USB_TEST_FORCE_HS_MODE(0x1) & ~USB_TEST_SIM_MODE(0x1);
 		outl(tmp, usb_host_self_loop_back_offset);
 		
-		//enable irq
 		mdelay(2000);
+
+#ifdef USB_TEST_MODE_DISABLE_IRQ_2
+		//enable irq
 		printk("enable irq 2 ...\n");
 		enable_irq(2);
+#else
+		ehci_enable_interrupt_reg();
+#endif /* USB_TEST_MODE_DISABLE_IRQ_2 */
 	}
 	else
 	{
@@ -563,6 +632,18 @@ static int ehci_root_hub_test_mode(struct usb_device *udev, int port1, int test_
 			printk("Step 2: ehci regs (port status) = 0x%.8x -> 0x%.8x\n",tmp,inl(port_address));
 		}
 		
+#ifdef USB_MARS_HOST_TEST_MODE_JK
+		if(is_mars_cpu())// for mars
+		{
+			if((test_mode == 1) || (test_mode == 2))
+			{
+				printk("calling USBPHY_SetReg_Default_3A_for_JK()\n");
+				USBPHY_SetReg_Default_3A_for_JK(port1);
+				bCall_USBPHY_SetReg_Default_3A_for_JK = 1;
+			}
+		}
+#endif /* USB_MARS_HOST_TEST_MODE_JK */
+
 		//step 4
 		tmp = inl(port_address);
 		tmp &= ~(0xf << 16);
@@ -580,7 +661,6 @@ static ssize_t  show_bDescriptor (struct device *dev, struct device_attribute *a
 	struct usb_host_config *actconfig;
 	unsigned char *data;
 	int length = 0x12;
-	unsigned int bRequestType = USB_DIR_IN;
 
 	udev = to_usb_device (dev);
 	actconfig = udev->actconfig;
@@ -590,7 +670,7 @@ static ssize_t  show_bDescriptor (struct device *dev, struct device_attribute *a
 		return sprintf (buf, "%d\n", -1);
 	memset(data, 0, length);
 	usb_control_msg(udev, usb_rcvctrlpipe(udev, 0),
-			USB_REQ_GET_DESCRIPTOR, bRequestType,
+			USB_REQ_GET_DESCRIPTOR, USB_DIR_IN | USB_RECIP_DEVICE,
 			USB_DT_DEVICE << 8, 0, data, length, 1000);
 	length = sprintf (buf, "%.2x %.2x %.2x %.2x %.2x %.2x %.2x %.2x\n" \
 		       "%.2x %.2x %.2x %.2x %.2x %.2x %.2x %.2x\n"
@@ -635,7 +715,7 @@ set_bPortDescriptor (struct device *dev, struct device_attribute *attr, const ch
 
 	if((udev->descriptor.bDeviceClass != USB_CLASS_HUB) || 
 			(udev->speed != USB_SPEED_HIGH))
-		return sprintf (buf, "%d\n", -1);
+		return sprintf ((char *)buf, "%d\n", -1);
 
 	if((config == 0) || (gUsbGetDescriptor != config))
 	{
@@ -781,7 +861,8 @@ static ssize_t  show_bPortSuspendResume (struct device *dev, struct device_attri
 
 	if(udev->parent == NULL) // ehci root hub
 	{
-		return sprintf (buf, "%d\n", gUsbEhciHubSuspendResume);
+		return sprintf (buf, "%d %d %d %d\n", gUsbEhciHubSuspendResume[0], \
+				gUsbEhciHubSuspendResume[1], gUsbEhciHubSuspendResume[2], gUsbEhciHubSuspendResume[3]);
 	}
 	else // ehci hub which is not root hub
 	{
@@ -802,6 +883,7 @@ set_bPortSuspendResume (struct device *dev, struct device_attribute *attr, const
 	struct usb_device	*udev = udev = to_usb_device (dev);
 	struct usb_hcd		*ehci_hcd = container_of(udev->bus, struct usb_hcd, self);
 	int			config, value;
+	unsigned int		port1, port_address = 0;
 
 	if ((value = sscanf (buf, "%u", &config)) != 1 || config > UsbSuspendResume)
 		return -EINVAL;
@@ -812,27 +894,76 @@ set_bPortSuspendResume (struct device *dev, struct device_attribute *attr, const
 
 	if(udev->parent == NULL) // ehci root hub
 	{
-		if(gUsbEhciHubSuspendResume != config)
+		port1 = (unsigned int) gUsbEhciRootHubPort;
+		if(gUsbEhciHubSuspendResume[port1 - 1] != config)
 		{
-			gUsbEhciHubSuspendResume = config;
-			if(gUsbEhciHubSuspendResume == 1) //Suspend
+			port_address = VENUS_USB_EHCI_PORTSC_0 + (port1 - 1) * 0x4;
+			gUsbEhciHubSuspendResume[port1 - 1] = config;
+			printk("Root Hub port %d - %s\n", port1, (gUsbEhciHubSuspendResume[port1 - 1] == 1) ? "Suspend" : "Resume");
+			if(gUsbEhciHubSuspendResume[port1 - 1] == 1) //Suspend
 			{
 				usb_ehci_suspend_flag = 1;
+
+#ifdef USB_ROOT_PORT_SUSPEND_RESUEM_BY_REGS
+				usb_lock_device (ehci_hcd->self.root_hub);
+				//ehci_disable_interrupt_reg();
+
+				printk("Value of reg(0x%.8x) = 0x%.8x\n", port_address, inl(port_address));
+				printk(" Set Suspend bit!!!!\n");
+				if(is_mars_cpu() && ((port1 - 1) == 0))
+				{
+					printk(" For port 0 only !!!!\n");
+					printk(" before Value of reg(0x%.8x) = 0x%.8x\n", VENUS_USB_HOST_BASE, inl(VENUS_USB_HOST_BASE));
+					outl(0x41, VENUS_USB_HOST_BASE);
+					printk("  after Value of reg(0x%.8x) = 0x%.8x\n", VENUS_USB_HOST_BASE, inl(VENUS_USB_HOST_BASE));
+				}
+				outl(inl(port_address) | (1 << 7), port_address);
+				do{
+					printk("Value of reg(0x%.8x) = 0x%.8x\n", port_address, inl(port_address));
+				}while((inl(port_address) & (1 << 7)) != (1 << 7));
+				printk("Value of reg(0x%.8x) = 0x%.8x\n", port_address, inl(port_address));
+				usb_unlock_device (ehci_hcd->self.root_hub);
+#else
 				printk("call ehci_hub_suspend() to the root hub port %d...\n", gUsbEhciRootHubPort);
 				usb_lock_device (ehci_hcd->self.root_hub);
-				
+
 				//printk("disable irq 2 ...\n");
 				//disable_irq(2);
 				//mdelay(1000);
-										
+
 				ehci_hcd->driver->hub_suspend(ehci_hcd);
-				
+
 				usb_unlock_device (ehci_hcd->self.root_hub);
 				printk("call ehci_hub_suspend() OK !!!\n");
+#endif /* USB_ROOT_PORT_SUSPEND_RESUEM_BY_REGS */
+
 			}
 			else //Resume
 			{
 				usb_ehci_suspend_flag = 0;
+
+#ifdef USB_ROOT_PORT_SUSPEND_RESUEM_BY_REGS
+				usb_lock_device (ehci_hcd->self.root_hub);
+
+				printk("Value of reg(0x%.8x) = 0x%.8x\n", port_address, inl(port_address));
+				printk(" Set Resume bit!!!!\n");
+				outl(inl(port_address) | (1 << 6), port_address);
+				msleep(20);
+				do{
+					printk("Value of reg(0x%.8x) = 0x%.8x\n", port_address, inl(port_address));
+				}while((inl(port_address) & (1 << 6)) != (1 << 6));
+				printk("Value of reg(0x%.8x) = 0x%.8x\n", port_address, inl(port_address));
+				printk(" Clear Resume bit!!!!\n");
+				outl(inl(port_address) & ~(1 << 6), port_address);
+
+				do{
+					printk("Value of reg(0x%.8x) = 0x%.8x\n", port_address, inl(port_address));
+				}while((inl(port_address) & (1 << 6)) == (1 << 6));
+				printk("Value of reg(0x%.8x) = 0x%.8x\n", port_address, inl(port_address));
+
+				//ehci_enable_interrupt_reg();
+				usb_unlock_device (ehci_hcd->self.root_hub);
+#else
 				printk("call ehci_hub_resume() to the root hub port %d...\n", gUsbEhciRootHubPort);
 				usb_lock_device (ehci_hcd->self.root_hub);
 				
@@ -844,6 +975,8 @@ set_bPortSuspendResume (struct device *dev, struct device_attribute *attr, const
 				
 				usb_unlock_device (ehci_hcd->self.root_hub);
 				printk("call ehci_hub_resume() OK !!!\n");
+#endif /* USB_ROOT_PORT_SUSPEND_RESUEM_BY_REGS */
+
 			}
 			msleep(1000);
 		}
@@ -914,19 +1047,20 @@ set_bPortReset (struct device *dev, struct device_attribute *attr, const char *b
 
 	if(udev->parent == NULL) // ehci root hub
 	{
-		unsigned int volatile tmp;
+		unsigned int volatile tmp, port_address;
+		port_address = VENUS_USB_EHCI_PORTSC_0 + (gUsbEhciRootHubPort - 1) * 0x4;
 		//disable irq
 		printk("disable irq\n");
 		disable_irq(2);
 		mdelay(2000);
 
 		//set port reset=1 & port enable=0
-		tmp = inl(VENUS_USB_EHCI_PORTSC_0);		
+		tmp = inl(port_address);		
 		printk("Step 0: before ehci regs (port status) = 0x%.8x\n",tmp);
 		
 		tmp |= (1<<8);
 		tmp &= ~(1<<2);
-		outl(tmp, VENUS_USB_EHCI_PORTSC_0);
+		outl(tmp, port_address);
 		printk("Step 1: ehci regs (port status) = 0x%.8x\n",tmp);
 		
 		//wait 50ms
@@ -935,9 +1069,9 @@ set_bPortReset (struct device *dev, struct device_attribute *attr, const char *b
 		//clear port reset
 		do
 		{
-			tmp = inl(VENUS_USB_EHCI_PORTSC_0);		
+			tmp = inl(port_address);		
 			tmp &= ~(1<<8);
-			outl(tmp, VENUS_USB_EHCI_PORTSC_0);
+			outl(tmp, port_address);
 			printk("Step 2: ehci regs (port status) = 0x%.8x\n",tmp);	
 		}while (tmp & (1<<8));
 
@@ -1010,7 +1144,7 @@ set_bDebugForLA (struct device *dev, struct device_attribute *attr, const char *
 	if(udev->parent == NULL) // ehci root hub
 	{
 		//change to usb debug mode
-		writel(0x5ad, (void __iomem *)0xb80000ac);
+		writel(0x5ad, (void __iomem *)VENUS_0_SYS_DEBUG);
 		//set usb wrapper
 		outl(inl(VENUS_USB_HOST_WRAPPER) & ~(0x1f << 1), VENUS_USB_HOST_WRAPPER);
 		outl(inl(VENUS_USB_HOST_WRAPPER) | (config << 1), VENUS_USB_HOST_WRAPPER);
@@ -1072,7 +1206,6 @@ static ssize_t
 set_bEnableHubOnBoard (struct device *dev, struct device_attribute *attr, const char *buf, size_t count)
 {
 	struct usb_device		*udev = udev = to_usb_device (dev);
-	struct usb_hub			*root_hub;
 	struct usb_hub_descriptor	descriptor;
 	int				config, value, ret;
 
@@ -1093,8 +1226,6 @@ set_bEnableHubOnBoard (struct device *dev, struct device_attribute *attr, const 
 		///////////////////////////////////////////////////////////////
 		// use hub control 
 		///////////////////////////////////////////////////////////////
-
-		root_hub = container_of(udev, struct usb_hub, hdev);
 
 		// device on root port 1
 		if(udev->children[0])
@@ -1172,34 +1303,25 @@ set_bEnableHubOnBoard (struct device *dev, struct device_attribute *attr, const 
 		{
 			
 			gEnableHubOnBoard = config;
-#if 1 //new setting 2007/03/05
+			if(is_venus_cpu())
+			{	
 			// gEnableHubOnBoard = 0 for gpio output pin
 			// gEnableHubOnBoard = 1 for gpio input pin
 			if(usb_check_gpio20_board())
 			{
 				if (gEnableHubOnBoard)
-					writel(readl(0xb801b108) & ~(0x1 << 20), 0xb801b108); // output latch = 0
+					outl(inl(VENUS_MIS_GP0DATO) & ~(0x1 << 20), VENUS_MIS_GP0DATO); // output latch = 0
 				else
-					writel(readl(0xb801b108) | (0x1 << 20), 0xb801b108); // output latch = 1
+					outl(inl(VENUS_MIS_GP0DATO) | (0x1 << 20), VENUS_MIS_GP0DATO); // output latch = 1
 			}
 			else if(usb_check_gpio6_board())
 			{
 				if (gEnableHubOnBoard)
-					writel(readl(0xb801b108) & ~(0x1 << 6), 0xb801b108); // output latch = 0
+					outl(inl(VENUS_MIS_GP0DATO) & ~(0x1 << 6), VENUS_MIS_GP0DATO); // output latch = 0
 				else
-					writel(readl(0xb801b108) | (0x1 << 6), 0xb801b108); // output latch = 1
+					outl(inl(VENUS_MIS_GP0DATO) | (0x1 << 6), VENUS_MIS_GP0DATO); // output latch = 1
 			}
-
-#else // older setting
-			writel(readl(0xb801b108) & ~(0x1 << 20), 0xb801b108); // output latch
-			writel(readl(0xb801b000) & ~(0x3 << 8), 0xb801b000); // GPIO 20
-			// gEnableHubOnBoard = 0 for gpio output pin
-			// gEnableHubOnBoard = 1 for gpio input pin
-			if (gEnableHubOnBoard)
-				writel(readl(0xb801b100) & ~(0x1 << 20), 0xb801b100);
-			else
-				writel(readl(0xb801b100) | (0x1 << 20), 0xb801b100);
-#endif
+			}
 			printk("[cfyeh] %s port 1 of Hub on board OK !\n", (gEnableHubOnBoard) ? "Enable" : "Disable");
 		}
 	}
@@ -1231,17 +1353,25 @@ static ssize_t  show_bEnableHubOnBoard_woone (struct device *dev, struct device_
 	return 0;
 }
 
+#ifdef USB_HACK_DISABLE_PORT_POWER
+extern int usb_disable_port_power_status;
+#endif /* USB_HACK_DISABLE_PORT_POWER */
+
 static ssize_t
 set_bEnableHubOnBoard_woone (struct device *dev, struct device_attribute *attr, const char *buf, size_t count)
 {
 	struct usb_device		*udev = udev = to_usb_device (dev);
-	struct usb_hub			*root_hub;
 	struct usb_hub_descriptor	descriptor;
 	int				config, value, ret;
 	int				i = 2;
 
 	if ((value = sscanf (buf, "%u", &config)) != 1)
 		return -EINVAL;
+
+#ifdef USB_HACK_DISABLE_PORT_POWER
+	if(usb_disable_port_power_status == 0)
+		return value;
+#endif /* USB_HACK_DISABLE_PORT_POWER */
 
 	if((udev->descriptor.bDeviceClass != USB_CLASS_HUB) || 
 			(udev->speed != USB_SPEED_HIGH))
@@ -1257,8 +1387,6 @@ set_bEnableHubOnBoard_woone (struct device *dev, struct device_attribute *attr, 
 		///////////////////////////////////////////////////////////////
 		// use hub control 
 		///////////////////////////////////////////////////////////////
-
-		root_hub = container_of(udev, struct usb_hub, hdev);
 
 		// device on root port 1
 		if(udev->children[0])
@@ -1346,10 +1474,9 @@ static ssize_t  show_bHubLEDControl (struct device *dev, struct device_attribute
 static ssize_t
 set_bHubLEDControl (struct device *dev, struct device_attribute *attr, const char *buf, size_t count)
 {
-	struct usb_device		*udev = udev = to_usb_device (dev);
-	struct usb_hub			*hub;
-	struct usb_hub_descriptor	descriptor;
-	int				config, value, ret;
+	struct usb_device		*udev = to_usb_device (dev);
+	struct usb_hub			*hub = (struct usb_hub *)container_of(udev, struct usb_hub, hdev);
+	int				config, value;
 	int				i = 2;
 
 	if ((value = sscanf (buf, "%u", &config)) != 1)
@@ -1358,8 +1485,6 @@ set_bHubLEDControl (struct device *dev, struct device_attribute *attr, const cha
 	if((udev->descriptor.bDeviceClass != USB_CLASS_HUB) || 
 			(udev->speed != USB_SPEED_HIGH))
 		return value;
-
-	hub = container_of(udev, struct usb_hub, hdev);
 
 	if(udev->parent == NULL) // ehci root hub
 	{
@@ -1454,7 +1579,6 @@ static ssize_t
 set_bHubPPE (struct device *dev, struct device_attribute *attr, const char *buf, size_t count)
 {
 	struct usb_device	*udev = udev = to_usb_device (dev);
-	struct usb_hcd		*ehci_hcd = container_of(udev->bus, struct usb_hcd, self);
 	int			config, value;
 
 	if ((value = sscanf (buf, "%u", &config)) != 1 || config > udev->maxchild)
@@ -1467,11 +1591,11 @@ set_bHubPPE (struct device *dev, struct device_attribute *attr, const char *buf,
 	if(udev->parent == NULL) // ehci root hub
 	{
 		printk("[cfyeh] set PPE=0 to the root hub ...\n");
-                writel(0x2001001, 0xb8013448); // clear bit 9
-                writel(0x8001, 0xb8013450); // set bit 0
-                writel(0x0, 0xb8013054); // clear bit 12
+                outl(0x2001001, VENUS_USB_OHCI_RH_DESC_A); // clear bit 9
+                outl(0x8001, VENUS_USB_OHCI_RH_STATUS); // set bit 0
+                outl(0x0, VENUS_USB_EHCI_PORTSC_0); // clear bit 12
                 mdelay(10);
-                writel(0x1000, 0xb8013054); // set bit 12
+                outl(0x1000, VENUS_USB_EHCI_PORTSC_0); // set bit 12
 	}
 
 	return (value < 0) ? value : count;
@@ -1577,9 +1701,9 @@ static int usb_readwrite_blocks (struct device *dev, unsigned int lba_addr,
 
 	rbuf = kmalloc(rbuf_len, GFP_KERNEL);
 	if (!rbuf)
-		return rbuf;
-	cmd = ((unsigned int)rbuf + (0x100 - 1) & ~(0x100 -1));
-	status = ((unsigned int)rbuf + (0x200 - 1) & ~(0x100 -1));
+		return (int)rbuf;
+	cmd = (unsigned char *)(((unsigned int)rbuf + (0x100 - 1)) & ~(0x100 -1));
+	status = (unsigned char *)(((unsigned int)rbuf + (0x200 - 1)) & ~(0x100 -1));
 	memcpy(cmd, pcmd, cmd_len);
 	
 	if ((ret = down_interruptible(&udev->serialize)))
@@ -1673,18 +1797,18 @@ static ssize_t  show_bAddressOffsetTest (struct device *dev, struct device_attri
 
 	rbuf = kmalloc(test_buf_size, GFP_KERNEL);
 	if (!rbuf)
-		return rbuf;
+		return (ssize_t)rbuf;
 #ifdef USB_TEST_COUNT_DOWN //count down
-	pbuf = ((unsigned int)rbuf + (0x2000 - 1)) & ~(0x1000 - 1) - usb_test_offset;
+	pbuf = (unsigned char *)(((unsigned int)rbuf + (0x2000 - 1)) & ~(0x1000 - 1)) - usb_test_offset;
 	end_address = (unsigned int)pbuf - 0x1000;
 #else
-	pbuf = ((unsigned int)rbuf + (0x1000 - 1)) & ~(0x1000 - 1) + usb_test_offset;
+	pbuf = (unsigned char *)(((unsigned int)rbuf + (0x1000 - 1)) & ~(0x1000 - 1)) + usb_test_offset;
 	end_address = (unsigned int)pbuf + 0x1000;
 #endif
 	addr = lba_addr;
 	do
 	{
-		printk("buffer address = 0x%.8x\n", pbuf);
+		printk("buffer address = 0x%.8x\n", (unsigned int)pbuf);
 		printk("lba address = 0x%.8x\n", addr);
 		ret = usb_readwrite_blocks(dev, addr, pbuf, test_setcor_len, 1);
 #ifdef USB_TEST_COUNT_DOWN //count down
@@ -1736,22 +1860,22 @@ set_bAddressOffsetTest (struct device *dev, struct device_attribute *attr, const
 
 	rbuf = kmalloc(test_buf_size, GFP_KERNEL);
 	if (!rbuf)
-		return rbuf;
+		return (ssize_t)rbuf;
 
 	for(i=0;i<test_buf_size; i++)
 		rbuf[i] = i & 0xff;
 	
 #ifdef USB_TEST_COUNT_DOWN //count down
-	pbuf = ((unsigned int)rbuf + (0x2000 - 1)) & ~(0x1000 - 1) - usb_test_offset;
+	pbuf = (unsigned char *)(((unsigned int)rbuf + (0x2000 - 1)) & ~(0x1000 - 1)) - usb_test_offset;
 	end_address = (unsigned int)pbuf - 0x1000;
 #else
-	pbuf = ((unsigned int)rbuf + (0x1000 - 1)) & ~(0x1000 - 1) + usb_test_offset;
+	pbuf = (unsigned char *)(((unsigned int)rbuf + (0x1000 - 1)) & ~(0x1000 - 1)) + usb_test_offset;
 	end_address = (unsigned int)pbuf + 0x1000;
 #endif
 	addr = lba_addr;
 	do
 	{
-		printk("buffer address = 0x%.8x\n", pbuf);
+		printk("buffer address = 0x%.8x\n", (unsigned int)pbuf);
 		printk("lba address = 0x%.8x\n", addr);
 		ret = usb_readwrite_blocks(dev, addr, pbuf, test_setcor_len, 0);
 #ifdef USB_TEST_COUNT_DOWN //count down
@@ -1866,7 +1990,11 @@ set_bPortTestMode (struct device *dev, struct device_attribute *attr, const char
 	{
 		gUsbTestModeChanged = 0;
 		
-		usb_lock_device(udev);
+		if(config != 0)
+		{
+			printk("Call usb_lock_device().\n");
+			usb_lock_device(udev);
+		}
 
 		if(udev->parent == NULL) // ehci root hub
 		{
@@ -1915,9 +2043,12 @@ set_bPortTestMode (struct device *dev, struct device_attribute *attr, const char
 				printk("Enter test mode , OK !!!\n");
 			}
 		}
-	
 
-		usb_unlock_device(udev);
+		if(config == 0)
+		{
+			printk("Call usb_unlock_device().\n");
+			usb_unlock_device(udev);
+		}
 	}
 
 	return (value < 0) ? value : count;
@@ -1930,7 +2061,7 @@ static ssize_t
 set_bDeviceTestMode (struct device *dev, struct device_attribute *attr, const char *buf, size_t count)
 {
 	struct usb_device	*udev = udev = to_usb_device (dev);
-	int			config, value, i, prev_config = -1;
+	int			config, value;
 	unsigned int		port1 = 0;
 	
 	if ((value = sscanf (buf, "%u", &config)) != 1 || config > (UsbTestModeNumber - 1))
@@ -1959,7 +2090,7 @@ static ssize_t  show_usbRegister (struct device *dev, struct device_attribute *a
 {
 	struct usb_device *udev;
 	struct usb_host_config *actconfig;
-	u32 regs=0xb8013000;
+	u32 regs;
 	int i;
 	int regs_num;
 
@@ -1969,42 +2100,65 @@ static ssize_t  show_usbRegister (struct device *dev, struct device_attribute *a
 	udev = to_usb_device (dev);
 	actconfig = udev->actconfig;
 
+	printk("\n EHCI regs\n");
+	regs=VENUS_USB_EHCI_USBBASE;
 	for(i=0;i<regs_num;i++)
 	{
 		if((i%4)==0)
 			printk("0x%.8x : ", regs);
-		printk("%.8x ", readl((void __iomem *)regs));
+		printk("%.8x ", inl(regs));
 		regs+=4;
 		if((i%4)==3)
 			printk("\n");		
 	}
 	printk("\n");		
 
-	regs=0xb8013400;
-
+	printk("\n OHCI regs\n");
+	regs=VENUS_USB_OHCI_USBBASE;
 	for(i=0;i<regs_num;i++)
 	{
 		if((i%4)==0)
 			printk("0x%.8x : ", regs);
-		printk("%.8x ", readl((void __iomem *)regs));
+		printk("%.8x ", inl(regs));
 		regs+=4;
 		if((i%4)==3)
 			printk("\n");		
 	}
 	printk("\n");		
 
-	regs=0xb8013800;
-	
-	for(i=0;i<5;i++)
+	printk("\n WARPPER regs\n");
+	regs=VENUS_USB_HOST_BASE;
+	if(is_venus_cpu() || is_neptune_cpu())
+		regs_num= 8 * HCS_N_PORTS(inl(VENUS_USB_EHCI_HCSPARAMS)); 
+	else if(is_mars_cpu())
+		regs_num= 14;
+	for(i=0;i<regs_num;i++)
 	{
 		if((i%4)==0)
 			printk("0x%.8x : ", regs);
-		printk("%.8x ", readl((void __iomem *)regs));
+		printk("%.8x ", inl(regs));
 		regs+=4;
 		if((i%4)==3)
 			printk("\n");		
 	}
 	printk("\n");
+
+	if(is_mars_cpu())
+	{
+		printk("\n OTG Device regs\n");
+		regs=0xb8038800;
+		regs_num= (0xb8038900 - 0xb8038800) / 4; 
+		for(i=0;i<regs_num;i++)
+		{
+			if((i%4)==0)
+				printk("0x%.8x : ", regs);
+			printk("%.8x ", readl((void __iomem *)regs));
+			regs+=4;
+			if((i%4)==3)
+				printk("\n");		
+		}
+		printk("\n");
+	}
 
 	return 0;
 }
@@ -2061,9 +2215,9 @@ static ssize_t  show_bBoundaryTest (struct device *dev, struct device_attribute 
 	int ret;
 
 #if 0
-	printk("#### 0xb8013814 = 0x%.8x\n", readl(0xb8013814));
-	writel(0x0, 0xb8013814);
-	printk("#### 0xb8013814 = 0x%.8x\n", readl(0xb8013814));
+	printk("#### MARS_USB_HOST_VERSION = 0x%.8x\n", inl(MARS_USB_HOST_VERSION));
+	outl(0x0, MARS_USB_HOST_VERSION);
+	printk("#### MARS_USB_HOST_VERSION = 0x%.8x\n", inl(MARS_USB_HOST_VERSION));
 #endif
 
 	printk("####       data address = 0x%x - 0x%x\n", data, data + sizeof(data));
@@ -2227,6 +2381,36 @@ set_bPortPower (struct device *dev, struct device_attribute *attr, const char *b
 
 static DEVICE_ATTR(bPortPower, S_IRUGO | S_IWUSR, 
 		show_bPortPower, set_bPortPower);
+
+static ssize_t  show_bForEhciDebug (struct device *dev, struct device_attribute *attr, char *buf)
+{
+	struct usb_device *udev;
+	struct usb_host_config *actconfig;
+
+	udev = to_usb_device (dev);
+	actconfig = udev->actconfig;
+
+	return sprintf (buf, "%d\n", bForEhciDebug);
+}
+
+static ssize_t
+set_bForEhciDebug (struct device *dev, struct device_attribute *attr, const char *buf, size_t count)
+{
+	struct usb_device	*udev = udev = to_usb_device (dev);
+	int			config, value;
+
+	if ((value = sscanf (buf, "%u", &config)) != 1)
+		return -EINVAL;
+
+	if(config != 0)
+		config = 1;
+	bForEhciDebug = config;
+
+	return (value < 0) ? value : count;
+}
+
+static DEVICE_ATTR(bForEhciDebug, S_IRUGO | S_IWUSR, 
+		show_bForEhciDebug, set_bForEhciDebug);
 
 //#endif /* CONFIG_REALTEK_VENUS_USB_TEST_MODE */ //cfyeh+ 2006/08/22
 
@@ -2408,6 +2592,7 @@ show_##field (struct device *dev, struct device_attribute *attr, char *buf)				\
 }									\
 static DEVICE_ATTR(field, S_IRUGO, show_##field, NULL);
 
+#ifdef USB_TO_NOTIFY_TIER
 unsigned int usb_bHubOverTier = 0;
 
 static ssize_t  show_bHubOverTier (struct device *dev, struct device_attribute *attr, char *buf)
@@ -2423,7 +2608,81 @@ static ssize_t  show_bHubOverTier (struct device *dev, struct device_attribute *
 
 static DEVICE_ATTR(bHubOverTier, S_IRUGO, show_bHubOverTier, NULL);
 
-static ssize_t  show_bForTestUse (struct device *dev, struct device_attribute *attr, char *buf)
+static ssize_t  show_bHubTierNumber (struct device *dev, struct device_attribute *attr, char *buf)
+{
+	struct usb_device *udev;
+	struct usb_host_config *actconfig;
+
+	udev = to_usb_device (dev);
+	actconfig = udev->actconfig;
+
+	return sprintf(buf, "%d\n", udev->tier);
+}
+
+static DEVICE_ATTR(bHubTierNumber, S_IRUGO, show_bHubTierNumber, NULL);
+
+#endif /* USB_TO_NOTIFY_TIER */
+
+#ifdef USB_MARS_OTG_VERIFY_TEST_CODE
+static int OTGTestSpeedLoop = 1;
+static ssize_t  show_bOTGTestSpeedLoop (struct device *dev, struct device_attribute *attr, char *buf)
+{
+	struct usb_device *udev;
+	struct usb_host_config *actconfig;
+
+	udev = to_usb_device (dev);
+	actconfig = udev->actconfig;
+
+	return sprintf(buf, "%d\n", OTGTestSpeedLoop);
+}
+
+static ssize_t
+set_bOTGTestSpeedLoop (struct device *dev, struct device_attribute *attr, const char *buf, size_t count)
+{
+	struct usb_device	*udev = udev = to_usb_device (dev);
+	int			config, value;
+
+	if ((value = sscanf (buf, "%u", &config)) != 1 || config < 0)
+		return -EINVAL;
+
+	OTGTestSpeedLoop = config;
+
+	return (value < 0) ? value : count;
+}
+
+static DEVICE_ATTR(bOTGTestSpeedLoop, S_IRUGO | S_IWUSR, 
+		show_bOTGTestSpeedLoop, set_bOTGTestSpeedLoop);
+
+static int OTGTestSpeedSize = 4096;
+static ssize_t  show_bOTGTestSpeedSize (struct device *dev, struct device_attribute *attr, char *buf)
+{
+	struct usb_device *udev;
+	struct usb_host_config *actconfig;
+
+	udev = to_usb_device (dev);
+	actconfig = udev->actconfig;
+
+	return sprintf(buf, "%d\n", OTGTestSpeedSize);
+}
+
+static ssize_t
+set_bOTGTestSpeedSize (struct device *dev, struct device_attribute *attr, const char *buf, size_t count)
+{
+	struct usb_device	*udev = udev = to_usb_device (dev);
+	int			config, value;
+
+	if ((value = sscanf (buf, "%u", &config)) != 1 || config < 0)
+		return -EINVAL;
+
+	OTGTestSpeedSize = config;
+
+	return (value < 0) ? value : count;
+}
+
+static DEVICE_ATTR(bOTGTestSpeedSize, S_IRUGO | S_IWUSR, 
+		show_bOTGTestSpeedSize, set_bOTGTestSpeedSize);
+
+static ssize_t  show_bOTGTestSpeed (struct device *dev, struct device_attribute *attr, char *buf)
 {
 	struct usb_device *udev;
 	struct usb_host_config *actconfig;
@@ -2435,21 +2694,98 @@ static ssize_t  show_bForTestUse (struct device *dev, struct device_attribute *a
 }
 
 static ssize_t
-set_bForTestUse (struct device *dev, struct device_attribute *attr, const char *buf, size_t count)
+set_bOTGTestSpeed (struct device *dev, struct device_attribute *attr, const char *buf, size_t count)
 {
 	struct usb_device	*udev = udev = to_usb_device (dev);
 	int			config, value;
 	unsigned char		*data;
-	int			size, i, port;
+	int			size, i;
+	struct			timeval time1, time2;
+	int			usec,sec;
 
-	if ((value = sscanf (buf, "%u", &config)) != 1)
+	if ((value = sscanf (buf, "%u", &config)) != 1 || config > 2)
 		return -EINVAL;
+
+	size = OTGTestSpeedSize;
+	data = (unsigned char*)kmalloc(size, GFP_KERNEL);
+	memset (data, 0, size);
+	usb_lock_device(udev);
+#if 0 // bulk
+	if(config == 0) // for write
+	{
+		printk("### bulk write ###\n");
+		do_gettimeofday(&time1);
+		for(i = 0; i < OTGTestSpeedLoop; i++)
+		{
+		usb_control_msg(udev, usb_sndbulkpipe(udev, 0),
+				0x5b, (USB_DIR_OUT|USB_TYPE_VENDOR),
+				0, 0, data, size,
+				USB_CTRL_GET_TIMEOUT);
+		}
+		do_gettimeofday(&time2);
+	}
+	else // for read
+	{
+		printk("### bulk read ###\n");
+		do_gettimeofday(&time1);
+		for(i = 0; i < OTGTestSpeedLoop; i++)
+		{
+		usb_control_msg(udev, usb_rcvbulkpipe(udev, 0),
+				0x5c, (USB_DIR_IN|USB_TYPE_VENDOR),
+				0, 0, data, size,
+				USB_CTRL_GET_TIMEOUT);
+		}
+		do_gettimeofday(&time2);
+	}
+#else // ctrl
+	if(config == 0) // for write
+	{
+		printk("### ctrl write ###\n");
+		do_gettimeofday(&time1);
+		for(i = 0; i < OTGTestSpeedLoop; i++)
+		{
+		usb_control_msg(udev, usb_sndctrlpipe(udev, 0),
+				0x5b, (USB_DIR_OUT|USB_TYPE_VENDOR),
+				0, 0, data, size,
+				USB_CTRL_GET_TIMEOUT);
+		}
+		do_gettimeofday(&time2);
+	}
+	else // for read
+	{
+		printk("### ctrl read ###\n");
+		do_gettimeofday(&time1);
+		for(i = 0; i < OTGTestSpeedLoop; i++)
+		{
+		usb_control_msg(udev, usb_rcvctrlpipe(udev, 0),
+				0x5c, (USB_DIR_IN|USB_TYPE_VENDOR),
+				0, 0, data, size,
+				USB_CTRL_GET_TIMEOUT);
+		}
+		do_gettimeofday(&time2);
+	}
+#endif
+	printk("### loop = 0x%x, size = 0x%x, totalsize = 0x%x\n", OTGTestSpeedLoop, OTGTestSpeedSize, OTGTestSpeedLoop * OTGTestSpeedSize);
+	
+	sec = time2.tv_sec - time1.tv_sec;
+	usec = time2.tv_usec - time1.tv_usec;
+	if(usec < 0)
+	{
+		sec--;
+		usec+=1000000;
+	}
+	printk("### time : %d sec %d usec\n", sec, usec);
+
+	usb_unlock_device(udev);
+
+	kfree(data);
 
 	return (value < 0) ? value : count;
 }
 
-static DEVICE_ATTR(bForTestUse, S_IRUGO | S_IWUSR, 
-		show_bForTestUse, set_bForTestUse);
+static DEVICE_ATTR(bOTGTestSpeed, S_IRUGO | S_IWUSR, 
+		show_bOTGTestSpeed, set_bOTGTestSpeed);
+#endif /* USB_MARS_OTG_VERIFY_TEST_CODE */
 
 usb_descriptor_attr (bDeviceClass, "%02x\n")
 usb_descriptor_attr (bDeviceSubClass, "%02x\n")
@@ -2497,10 +2833,18 @@ static struct attribute *dev_attrs[] = {
 	&dev_attr_bBoundaryTest.attr,
 	&dev_attr_bPortPower.attr,
 	&dev_attr_usbRegister.attr,
+	&dev_attr_bForEhciDebug.attr,
 //#endif /* CONFIG_REALTEK_VENUS_USB_TEST_MODE */ //cfyeh+ 2006/08/22
 	&dev_attr_bDeviceSpeed.attr,
-	&dev_attr_bForTestUse.attr,
+#ifdef USB_MARS_OTG_VERIFY_TEST_CODE
+	&dev_attr_bOTGTestSpeedLoop.attr,
+	&dev_attr_bOTGTestSpeedSize.attr,
+	&dev_attr_bOTGTestSpeed.attr,
+#endif /* USB_MARS_OTG_VERIFY_TEST_CODE */
+#ifdef USB_TO_NOTIFY_TIER
 	&dev_attr_bHubOverTier.attr,
+	&dev_attr_bHubTierNumber.attr,
+#endif /* USB_TO_NOTIFY_TIER */
 	NULL,
 };
 static struct attribute_group dev_attr_grp = {

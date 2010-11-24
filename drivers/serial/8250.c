@@ -1148,7 +1148,9 @@ receive_chars(struct uart_8250_port *up, int *status, struct pt_regs *regs)
 		if (uart_handle_sysrq_char(&up->port, ch, regs))
 			goto ignore_char;
 
+#ifndef CONFIG_REALTEK_SYSTEM_UART_BE_READONLY
 		uart_insert_char(&up->port, lsr, UART_LSR_OE, ch, flag);
+#endif
 
 	ignore_char:
 		lsr = serial_inp(up, UART_LSR);
@@ -1263,7 +1265,11 @@ static irqreturn_t serial8250_interrupt(int irq, void *dev_id, struct pt_regs *r
 		up = list_entry(l, struct uart_8250_port, list);
 
 		iir = serial_in(up, UART_IIR);
+#ifdef CONFIG_REALTEK_VENUS_SERIAL_PORT
+		if (!(iir & UART_IIR_NO_INT) || (inl(VENUS_MIS_ISR) & 0xc)) {
+#else
 		if (!(iir & UART_IIR_NO_INT)) {
+#endif
 			spin_lock(&up->port.lock);
 			serial8250_handle_port(up, regs);
 			spin_unlock(&up->port.lock);
@@ -1271,8 +1277,6 @@ static irqreturn_t serial8250_interrupt(int irq, void *dev_id, struct pt_regs *r
 			handled = 1;
 
 			end = NULL;
-		} else if (end == NULL)
-			end = l;
 
 #ifdef CONFIG_REALTEK_VENUS_SERIAL_PORT
 		if(old_serial_port[0].iomem_base == up->port.membase)
@@ -1280,6 +1284,8 @@ static irqreturn_t serial8250_interrupt(int irq, void *dev_id, struct pt_regs *r
 		else if(old_serial_port[1].iomem_base == up->port.membase)
 			outl(0x8, VENUS_MIS_ISR);
 #endif
+		} else if (end == NULL)
+			end = l;
 
 		l = l->next;
 

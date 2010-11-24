@@ -70,6 +70,10 @@ static struct device_driver usb_generic_driver = {
 
 static int usb_generic_driver_data;
 
+#ifdef USB_WARNING_WHEN_DEVICE_NOT_SUPPORT
+extern int usb_probe_match_id;
+#endif /* USB_WARNING_WHEN_DEVICE_NOT_SUPPORT */
+
 /* called from driver core with usb_bus_type.subsys writelock */
 static int usb_probe_interface(struct device *dev)
 {
@@ -88,6 +92,9 @@ static int usb_probe_interface(struct device *dev)
 
 	id = usb_match_id (intf, driver->id_table);
 	if (id) {
+#ifdef USB_WARNING_WHEN_DEVICE_NOT_SUPPORT
+		usb_probe_match_id = (int)id;
+#endif /* USB_WARNING_WHEN_DEVICE_NOT_SUPPORT */
 		dev_dbg (dev, "%s - got id\n", __FUNCTION__);
 		intf->condition = USB_INTERFACE_BINDING;
 		error = driver->probe (intf, id);
@@ -1505,6 +1512,9 @@ module_exit(usb_exit);
  * These symbols are exported for device (or host controller)
  * driver modules to use.
  */
+
+EXPORT_SYMBOL(usb_get_intf);
+EXPORT_SYMBOL(usb_put_intf);
 
 EXPORT_SYMBOL(usb_register);
 EXPORT_SYMBOL(usb_deregister);

@@ -30,6 +30,9 @@
 #include <scsi/scsi.h>
 #include <scsi/scsi_ioctl.h>
 #include <scsi/scsi_cmnd.h>
+#include <scsi/scsi_device.h>
+#include "../scsi/sr.h"
+
 
 /* Command group 3 is reserved and should never be used.  */
 const unsigned char scsi_command_size[8] =
@@ -300,6 +303,19 @@ static int sg_io(struct file *file, request_queue_t *q,
 	 */
 	blk_execute_rq(q, bd_disk, rq);
 
+	if(1){  /*record unit_attention status -- fixed for mini_BD -- alex*/
+        int err;
+        struct scsi_cd *cd = container_of(bd_disk->private_data, struct scsi_cd, driver);
+        err = rq->errors & 0xff;
+        if (err) {
+		    if (rq->sense_len && rq->sense) {
+			    if((sense[2] &0x0f )==UNIT_ATTENTION)
+			        cd->device->changed = 1;
+
+		    }
+	    }
+	}
+
 	/* write to all output members */
 	hdr->status = 0xff & rq->errors;
 	hdr->masked_status = status_byte(rq->errors);
@@ -421,7 +437,7 @@ static int sg_scsi_ioctl(struct file *file, request_queue_t *q,
 		if (copy_to_user(sic->data, buffer, out_len))
 			err = -EFAULT;
 	}
-	
+
 error:
 	kfree(buffer);
 	blk_put_request(rq);

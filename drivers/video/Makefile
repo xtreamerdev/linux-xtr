@@ -94,9 +94,11 @@ obj-$(CONFIG_FB_IMX)              += imxfb.o
 obj-$(CONFIG_FB_SMIVGX)		  += smivgxfb.o
 
 # Platform or fallback drivers go here
-obj-$(CONFIG_FB_VESA)             += vesafb.o
-obj-$(CONFIG_FB_VGA16)            += vga16fb.o vgastate.o
-obj-$(CONFIG_FB_OF)               += offb.o
+obj-$(CONFIG_FB_VESA)         += vesafb.o
+obj-$(CONFIG_FB_VGA16)        += vga16fb.o vgastate.o
+obj-$(CONFIG_FB_OF)           += offb.o
 
 # the test framebuffer is last
-obj-$(CONFIG_FB_VIRTUAL)          += vfb.o
+obj-$(CONFIG_FB_VIRTUAL)      += vfb.o
+
+obj-$(CONFIG_VENUS_FB)        += venusfb.o

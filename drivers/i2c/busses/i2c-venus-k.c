@@ -15,9 +15,14 @@
 
     You should have received a copy of the GNU General Public License
     along with this program; if not, write to the Free Software
-    Foundation, Inc., 675 Mass Ave, Cambridge, MA 02139, USA.		         */
-/* ------------------------------------------------------------------------- */
-
+    Foundation, Inc., 675 Mass Ave, Cambridge, MA 02139, USA.
+    Version 1.0 written by wucp@realtek.com.tw
+    Version 2.0 modified by Frank Ting(frank.ting@realtek.com.tw)(2007/06/21)	
+-------------------------------------------------------------------------     
+    1.4     |   20081016    | Multiple I2C Support
+-------------------------------------------------------------------------     
+    1.5     |   20090423    | Add Suspen/Resume Feature    
+-------------------------------------------------------------------------*/    
 #include <linux/config.h>
 #include <linux/kernel.h>
 #include <linux/ioport.h>
@@ -29,576 +34,423 @@
 #include <linux/pci.h>
 #include <linux/wait.h>
 #include <linux/i2c.h>
+#include <linux/platform.h>
 #include <asm/io.h>
 #include <asm/irq.h>
 #include <asm/delay.h>
-//#include <linux/i2c-algo-venus.h>
-#include "../algos/i2c-algo-venus.h"
-#include "i2c-venus.h"
+#include "../algos/i2c-algo-venus-k.h"
+#include "i2c-venus-priv.h"
 
-////////////// Internal Used Macros ///////////////
-enum {
-    STANDARD_MODE            = 1,
-    FAST_MODE                = 2,
-    HIGH_SPEED_MODE          = 3,
-};
 
-#define VENUS_I2C_TIMEOUT    (1*HZ)
-
-#define SW_BUFFER_DEPTH      256
-
-#ifdef  CONFIG_I2C_DEBUG_BUS
-    #define VENUS_I2C_DBG(args...)          printk(KERN_WARNING args)
-    #define VENUS_I2C_EVENT_DBG(args...)    printk(KERN_WARNING args)
-#else
-    #define VENUS_I2C_DBG(args...)          
-    #define VENUS_I2C_EVENT_DBG(args...)     
-#endif
-
-#ifdef VENUS_I2C_FLOW_DBG_EN
-    #define VENUS_I2C_FLOW_DBG()                    VENUS_I2C_DBG("Venus I2C: %s\n",__FUNCTION__)       
-#else
-    #define VENUS_I2C_FLOW_DBG()                    
-#endif 
-
-#define VENUS_I2C_WARNING(args...)          printk(KERN_WARNING args)
-#define VENUS_I2C_ERR(args...)              printk(KERN_ERR args)
-
-////////////// Internal Used data ///////////////
-static int stop_detect_count = 0;
-static int rx_full_count     = 0;
-static int i2c_speed         = 1;
-
+static int i2c_speed = SPD_MODE_SS;
 module_param(i2c_speed, int, S_IRUGO);
 
-static DECLARE_WAIT_QUEUE_HEAD(venus_i2c_send_wait);
-static DECLARE_MUTEX(lock);
-static int VENUS_I2C_TX_FIFO_DEPTH;
-static int VENUS_I2C_RX_FIFO_DEPTH;
-static int TX_STATUS;
-static int LOW_SPEED;
+#define VENUS_I2C_IRQ	        3
+#define VENUS_MASTER_7BIT_ADDR	0x24
 
-static int RX_SW_FIFO[SW_BUFFER_DEPTH];
-static unsigned char RX_SW_FIFO_DEPTH;
+static struct i2c_adapter venus_i2c_adapter[MAX_I2C_CNT]; 
+static i2c_venus_algo i2c_venus_data[MAX_I2C_CNT];
+
+////////////////////////////////////////////////////////////////////
+
+#ifdef CONFIG_I2C_DEBUG_BUS
+#define i2c_debug(fmt, args...)		printk(KERN_INFO fmt, ## args)
+#else
+#define i2c_debug(fmt, args...)
+#endif
+
+/*------------------------------------------------------------------
+ * Func : i2c_venus_xfer
+ *
+ * Desc : start i2c xfer (read/write)
+ *
+ * Parm : p_msg : i2c messages 
+ *         
+ * Retn : 0 success, otherwise fail
+ *------------------------------------------------------------------*/  
+void i2c_venus_dump_msg(const struct i2c_msg* p_msg)
+{
+    printk("msg->addr  = %02x\n",p_msg->addr);
+    printk("msg->flags = %04x\n",p_msg->flags);
+    printk("msg->len   = %d  \n",p_msg->len);
+    printk("msg->buf   = %p  \n",p_msg->buf);    
+}
 
 
-/* ----- local functions ----------------------------------------------	*/
-static void i2c_venus_clear_all(void) {
-	readl(IC_CLR_INTR);
-	readl(IC_CLR_RX_UNDER);
-	readl(IC_CLR_RX_OVER);
-	readl(IC_CLR_TX_OVER);
-	readl(IC_CLR_RD_REQ);
-	readl(IC_CLR_TX_ABRT);
-	readl(IC_CLR_RX_DONE);
-	readl(IC_CLR_ACTIVITY);
-	readl(IC_CLR_STOP_DET);
-	readl(IC_CLR_START_DET);
-	readl(IC_CLR_GEN_CALL);
+#define IsReadMsg(x)        (x.flags & I2C_M_RD)
+#define IsSameTarget(x,y)   ((x.addr == y.addr) && !((x.flags ^ y.flags) & (~I2C_M_RD)))
+
+/*------------------------------------------------------------------
+ * Func : i2c_venus_xfer
+ *
+ * Desc : start i2c xfer (read/write)
+ *
+ * Parm : adapter : i2c adapter
+ *        msgs    : i2c messages
+ *        num     : nessage counter
+ *         
+ * Retn : 0 success, otherwise fail
+ *------------------------------------------------------------------*/  
+static int 
+i2c_venus_xfer(
+    void*                   dev_id, 
+    struct i2c_msg*         msgs, 
+    int                     num
+    )
+{
+    venus_i2c* p_this = (venus_i2c*) dev_id;
+	int ret = 0;
+	int i;
+	    
+	for (i = 0; i < num; i++) 
+	{			         
+        ret = p_this->set_tar(p_this, msgs[i].addr, ADDR_MODE_7BITS);
+        
+        if (ret<0)
+            goto err_occur;
+        
+        if (IsReadMsg(msgs[i]))            
+        {       
+            // Single Read     
+            ret = p_this->read(p_this, NULL, 0, msgs[i].buf, msgs[i].len);
+        }                            
+        else
+        {             
+            if ((i < (num-1)) && IsReadMsg(msgs[i+1]) && IsSameTarget(msgs[i], msgs[i+1]))
+            {
+                // Random Read = Write + Read (same addr)                
+                ret = p_this->read(p_this, msgs[i].buf, msgs[i].len, msgs[i+1].buf, msgs[i+1].len);                        
+                i++;
+            }
+            else
+            {   
+                // Single Write
+                ret = p_this->write(p_this, msgs[i].buf, msgs[i].len, (i==(num-1)) ? WAIT_STOP : NON_STOP);
+            }            
+        }
+        
+        if (ret < 0)        
+            goto err_occur;                          
+    }     
+
+    return i;
+    
+////////////////////    
+err_occur:        
+    
+    if (ret==-ETXABORT && (msgs[i].flags & I2C_M_NO_ABORT_MSG))    
+        return -EACCES; 
+        
+    printk("-----------------------------------------\n");        
+          
+    switch(ret)
+    {
+    case -ECMDSPLIT:
+        printk("[I2C%d] Xfer fail - MSG SPLIT (%d/%d)\n", p_this->id, i,num);
+        break;                                            
+                                        
+    case -ETXABORT:             
+            
+        printk("[I2C%d] Xfer fail - TXABORT (%d/%d), Reason=%04x\n",p_this->id, i,num, p_this->get_tx_abort_reason(p_this));        
+        break;                  
+                                
+    case -ETIMEOUT:              
+        printk("[I2C%d] Xfer fail - TIMEOUT (%d/%d)\n", p_this->id, i,num);        
+        break;                  
+                                
+    case -EILLEGALMSG:           
+        printk("[I2C%d] Xfer fail - ILLEGAL MSG (%d/%d)\n",p_this->id, i,num);
+        break;
+    
+    case -EADDROVERRANGE:    
+        printk("[I2C%d] Xfer fail - ADDRESS OUT OF RANGE (%d/%d)\n",p_this->id, i,num);
+        break;
+        
+    default:        
+        printk("[I2C%d] Xfer fail - Unkonwn Return Value (%d/%d)\n", p_this->id, i,num);
+        break;
+    }    
+    
+    i2c_venus_dump_msg(&msgs[i]);
+    
+    printk("-----------------------------------------\n");        
+        
+    ret = -EACCES;        
+    return ret;
 }
 
 
 
-#ifdef I2C_VENUS_RANDOM_READ_EN
-
-static int i2c_venus_random_read(
-    unsigned char*      p_w_buf, 
-    unsigned int        w_len, 
-    unsigned char*      p_r_buf, 
-    unsigned int        r_len
-    ) 
+/*------------------------------------------------------------------
+ * Func : i2c_venus_set_speed
+ *
+ * Desc : set speed of venus i2c
+ *
+ * Parm : dev_id : i2c adapter
+ *        KHz    : speed of i2c adapter 
+ *         
+ * Retn : 0 success, otherwise fail
+ *------------------------------------------------------------------*/  
+static int 
+i2c_venus_set_speed(
+    void*                   dev_id, 
+    int                     KHz
+    )
 {
-    int i = 0;
-    int bufferLength = 0;
-	int p_rx_full_count = 0;
-	int p_stop_detect_count = 0;	
+    venus_i2c* p_this = (venus_i2c*) dev_id;        	
     
-    RX_SW_FIFO_DEPTH = 0;
-    
-    VENUS_I2C_FLOW_DBG();                
-    
-    writel(readl(IC_INTR_MASK) | 0x4, IC_INTR_MASK); // enable RX_FULL interrupt
+    if (p_this)
+	    return p_this->set_spd(p_this, KHz);
+	        
+    return -1;	        
+}
 
-    rx_full_count = 0;
-    stop_detect_count = 0;
     
-    // send write command
-	for(i = 0 ; i < w_len ; i++)
-    {
-		while(!(readl(IC_STATUS) & 0x2))    // wait while queue is full
-			udelay(20); // 10 ^ -4 seconds (enough for 1 byte to transmit)
-		
-	    writel(((unsigned int)(*(p_w_buf+i))&0xff), IC_DATA_CMD);	    
-	}		
-	
-	// send read command
-	for(i = 0 ; i < r_len ; i++)
-    {
-		while(!(readl(IC_STATUS) & 0x2))    // wait while queue is full
-			udelay(20); // 10 ^ -4 seconds (enough for 1 byte to transmit)
-		
-        writel(0x100, IC_DATA_CMD);
-	}
-	
-	p_rx_full_count = rx_full_count;
-    p_stop_detect_count = stop_detect_count;
-    
-    while(readl(IC_TXFLR))      // wait while queue is full
-	    udelay(100);            // 10 ^ -4 seconds (enough for 1 byte to transmit)
-		        
-    if (wait_event_interruptible_timeout(venus_i2c_send_wait,  TX_STATUS != 0, VENUS_I2C_TIMEOUT) < 0) {
-		writel(readl(IC_INTR_MASK) & (~0x4), IC_INTR_MASK);
-		return -ERESTARTSYS;
-	}        
-	
-    // disable RX_FULL interrupt
-	writel(readl(IC_INTR_MASK) & (~0x4), IC_INTR_MASK);
 
-	if (TX_STATUS != 1) {
-        VENUS_I2C_WARNING("Venus I2C: i2c_venus_read() failed: TX_ABRT\n");
-		return -EIO;
-    }
+/*------------------------------------------------------------------
+ * Func : i2c_venus_register_adapter
+ *
+ * Desc : register i2c_adapeter 
+ *
+ * Parm : p_adap      : i2c_adapter data structure
+ *        p_algo_data : data of venus i2c algorithm
+ *        p_phy       : pointer of i2c phy
+ *         
+ * Retn : 0 : success, others failed
+ *------------------------------------------------------------------*/  
+static int 
+__init i2c_venus_register_adapter(
+    struct i2c_adapter*     p_adap,
+    i2c_venus_algo*         p_algo_data,    
+    venus_i2c*              p_phy
+    ) 
+{        
+	p_adap->owner           = THIS_MODULE;
+	p_adap->class           = I2C_CLASS_HWMON;
+	p_adap->id		        = 0x00;	
+	sprintf(p_adap->name, "%s I2C %d bus", MODLE_NAME, p_phy->id);	
+	p_adap->algo_data       = p_algo_data;
 		
-    memcpy(p_r_buf, RX_SW_FIFO, RX_SW_FIFO_DEPTH);
-    bufferLength = RX_SW_FIFO_DEPTH;	
+	p_algo_data->dev_id     = (void*) p_phy;
+	p_algo_data->masterXfer = i2c_venus_xfer;
+	p_algo_data->set_speed  = i2c_venus_set_speed;
+		
+	return i2c_venus_add_bus(p_adap);	
+}
 
-	RX_SW_FIFO_DEPTH = 0;
-    
-	while (readl(IC_RXFLR)>0) {
-		p_r_buf[bufferLength] = (unsigned char)(readl(IC_DATA_CMD) & 0xff);
-		bufferLength++;
-	}
+
+
+//////////////////////////////////////////////////////////////////////////////////////////////
+// Platform Device Interface
+//////////////////////////////////////////////////////////////////////////////////////////////
+
+#ifdef CONFIG_PM
+
+#define VENUS_I2C_BASE_ID	    0x12610000 
+#define VENUS_I2C_MAJOR_ID(x)	(x & 0xFFFF0000)
+#define VENUS_I2C_MINOR_ID(x)	(x & 0x0000FFFF)
+#define VENUS_I2C_NAME          "Venus_I2C"
+
+static struct platform_device* p_venus_i2c[MAX_I2C_CNT] = {NULL, NULL};
+
+
+static int venus_i2c_probe(struct device *dev)
+{
+    struct platform_device	*pdev = to_platform_device(dev);
+    return strncmp(pdev->name,VENUS_I2C_NAME, strlen(VENUS_I2C_NAME));
+}
+
+
+static int venus_i2c_remove(struct device *dev)
+{
+    // we don't need to do anything for it...
+    return 0;
+}
+ 
+static void venus_i2c_shutdown(struct device *dev)
+{
+    // we don't need to do anything for it...    
+}
+
+static int venus_i2c_suspend(struct device *dev, pm_message_t state, u32 level)
+{
+	struct platform_device* pdev   = to_platform_device(dev);  
+	i2c_venus_algo*         p_algo = (i2c_venus_algo*) venus_i2c_adapter[pdev->id].algo_data;
+	venus_i2c*              p_this = (venus_i2c*) p_algo->dev_id;		
 	
-	if (bufferLength != r_len) {			
-		VENUS_I2C_WARNING("Venus I2C: i2c_venus_random_read() failed: %d/%d bytes data received.\n",bufferLength, r_len);                
-		return -EIO;
-	}
-	
-	if (stop_detect_count != 1) {				
-        VENUS_I2C_DBG("Venus I2C: p_rx_full_count=%d,p_stop_detect_count = %d\n",p_rx_full_count,p_stop_detect_count);     
-        VENUS_I2C_DBG("Venus I2C: rx_full_count=%d,stop_detect_count = %d\n",rx_full_count,stop_detect_count);                  
+	if (p_this && level==SUSPEND_POWER_DOWN)
+	    p_this->suspend(p_this);        	        
 	    
-		VENUS_I2C_WARNING("Venus I2C: i2c_venus_random_read() : multiple stop detected, please retry later.\n");                
-		return -EIO;
-	}
+    return 0;    
+}
+
+
+static int venus_i2c_resume(struct device *dev, u32 level)
+{    
+    struct platform_device* pdev   = to_platform_device(dev);  
+	i2c_venus_algo*         p_algo = (i2c_venus_algo*) venus_i2c_adapter[pdev->id].algo_data;
+	venus_i2c*              p_this = (venus_i2c*) p_algo->dev_id;		
+	
+	if (p_this && level==RESUME_POWER_ON)
+	    p_this->resume(p_this);
+	    
+    return 0;    
+}
+
+
+static struct device_driver venus_i2c_drv = 
+{
+    .name     =	VENUS_I2C_NAME,
+	.bus	  =	&platform_bus_type,	
+    .probe    = venus_i2c_probe,
+    .remove   = venus_i2c_remove,
+    .shutdown = venus_i2c_shutdown,
+    .suspend  = venus_i2c_suspend,
+    .resume   = venus_i2c_resume,
+};
+
+#endif
+
+//////////////////////////////////////////////////////////////////////////////////////////////
+// Device Attribute
+//////////////////////////////////////////////////////////////////////////////////////////////
+
+
+
+
+static int venus_i2c_show_speed(struct device *dev, struct device_attribute *attr, char* buf)
+{    
+    struct platform_device* pdev   = to_platform_device(dev);  
+	i2c_venus_algo*         p_algo = (i2c_venus_algo*) venus_i2c_adapter[pdev->id].algo_data;
+	venus_i2c*              p_this = (venus_i2c*) p_algo->dev_id;				
+	    
+	if (p_this)    
+	    return sprintf(buf, "%d\n", p_this->spd);    
+                    
+    return 0;    
+}
+
+
+
+static int venus_i2c_store_speed(struct device *dev, struct device_attribute *attr, char* buf,  size_t count)
+{    
+    
+    struct platform_device* pdev   = to_platform_device(dev);  
+	i2c_venus_algo*         p_algo = (i2c_venus_algo*) venus_i2c_adapter[pdev->id].algo_data;
+	venus_i2c*              p_this = (venus_i2c*) p_algo->dev_id;				
+	int                     spd;
+				
+    if (p_this && sscanf(buf,"%d\n", &spd)==1)     
+        p_algo->set_speed(p_this, spd);
+        
+    return count;    
+}
+
+
+DEVICE_ATTR(speed, S_IRUGO | S_IWUGO, venus_i2c_show_speed, venus_i2c_store_speed);
+
+
+
+//////////////////////////////////////////////////////////////////////////////////////////////
+// Module
+//////////////////////////////////////////////////////////////////////////////////////////////
+
+
+
+/*------------------------------------------------------------------
+ * Func : i2c_venus_module_init
+ *
+ * Desc : init venus i2c module
+ *
+ * Parm : N/A
+ *         
+ * Retn : 0 success, otherwise fail
+ *------------------------------------------------------------------*/  
+static int 
+__init i2c_venus_module_init(void) 
+{        
+    int i;
+    venus_i2c* p_this;
+    
+    memset(venus_i2c_adapter,0, sizeof(venus_i2c_adapter)); 
+    memset(i2c_venus_data,0, sizeof(i2c_venus_data)); 
+    
+    for (i=0; i<MAX_I2C_CNT; i++)
+    {                            
+        p_this = create_venus_i2c_handle(i, VENUS_MASTER_7BIT_ADDR, 
+                    ADDR_MODE_7BITS, SPD_MODE_SS, VENUS_I2C_IRQ);
+
+	    if (p_this!=NULL)
+	    {	        
+            if (p_this->init(p_this)<0 || 
+                i2c_venus_register_adapter(&venus_i2c_adapter[i], &i2c_venus_data[i], p_this)<0)
+            {
+                destroy_venus_i2c_handle(p_this);                         
+                continue;
+            }
+            
+            device_create_file(&venus_i2c_adapter[i].dev, &dev_attr_speed);            
+
+#ifdef CONFIG_PM        
+            p_venus_i2c[i] = platform_device_register_simple(VENUS_I2C_NAME, i, NULL, 0);                                    
+#endif                    
+        }        
+    }
+    
+#ifdef CONFIG_PM        
+    driver_register(&venus_i2c_drv);
+#endif                        
 
     return 0;
 }
+
+
+
+/*------------------------------------------------------------------
+ * Func : i2c_venus_module_exit
+ *
+ * Desc : exit venus i2c module
+ *
+ * Parm : N/A
+ *         
+ * Retn : N/A
+ *------------------------------------------------------------------*/  
+static void 
+__exit i2c_venus_module_exit(void)
+{	
+    int i;
+    
+    for (i=0; i<MAX_I2C_CNT; i++)
+    {          
+        i2c_venus_algo* p_algo = (i2c_venus_algo*) venus_i2c_adapter[i].algo_data;
+    
+        device_remove_file(&venus_i2c_adapter[i].dev, &dev_attr_speed);
+    
+	    i2c_venus_del_bus(&venus_i2c_adapter[i]);
+	
+        destroy_venus_i2c_handle((venus_i2c*)p_algo->dev_id);	
+        
+#ifdef CONFIG_PM            
+        if (p_venus_i2c[i])
+        {
+            // we don't need to free the handle of p_venus_i2c
+            // it will be released by platform subsystem automatically
+            platform_device_unregister(p_venus_i2c[i]);        	    
+        }            
 #endif
+    }     
 
-
-
-static int i2c_venus_read(unsigned char *buf, unsigned int len) 
-{
-	int retval = 0;
-	int i = 0;
-	
-    VENUS_I2C_FLOW_DBG();
-    
-	/* step.7 filling IC_DATA_CMD to generate a master-read command */
-	if(len <= VENUS_I2C_RX_FIFO_DEPTH) 
-	{
-		for(i = 0 ; i < len ; i++)
-		{
-            while(!(readl(IC_STATUS) & 0x2))    // wait while queue is full
-			    udelay(20); // 10 ^ -4 seconds (enough for 1 byte to transmit)
-			    
-			writel(0x100, IC_DATA_CMD);
-        }
-			
-		//if (wait_event_interruptible(venus_i2c_send_wait, TX_STATUS != 0) != 0)
-        if (wait_event_interruptible_timeout(venus_i2c_send_wait, TX_STATUS != 0, VENUS_I2C_TIMEOUT ) < 0)		
-		{
-		    VENUS_I2C_WARNING("Venus I2C: -ERESTARTSYS");
-			return -ERESTARTSYS;
-        }                  
-        
-		if(TX_STATUS == 1) 
-		{   		    		    
-			i = 0;
-			
-			while(1) 
-			{
-				*(buf+i) = (unsigned char)(readl(IC_DATA_CMD) & 0xff);
-				i++;
-
-				if(i == len)
-					break;
-
-				if(readl(IC_RXFLR) == 0) // if STOP_DET && no data to receive
-					break;
-			}	        
-
-			if(i != len){
-                VENUS_I2C_WARNING("Venus I2C: data length mismatch(%d/%d)\n",i,len);	                
-				retval = -EIO;
-            }
-			else
-				retval = 0;
-			
-			///--- DBG Message ---//					
-			int foo;
-			for(foo = 0 ; foo < len ; foo++){
-				VENUS_I2C_DBG("Venus I2C: data(%d) = %08X\n", foo, *(buf+foo));
-            }
-
-			return retval;
-		}
-		else 
-		{   		    
-            VENUS_I2C_WARNING("Venus I2C: TX_ABORT_OCCUR ><");         				
-			return -EINVAL;
-		}        
-	}
-	else 
-	{   
-	    // access longer than FIFO depth
-		int bufferLength = 0;
-		RX_SW_FIFO_DEPTH = 0;
-		int p_rx_full_count = 0;
-		int p_stop_detect_count = 0;
-
-		writel(readl(IC_INTR_MASK) | 0x4, IC_INTR_MASK); // enable RX_FULL interrupt
-
-        rx_full_count = 0;
-        stop_detect_count = 0;
-        
-		for(i = 0 ; i < len ; i++) 
-		{		    					    
-            while(!(readl(IC_STATUS) & 0x2))    // wait while queue is full
-	            udelay(20); // 10 ^ -4 seconds (enough for 1 byte to transmit)
-			    
-			writel(0x100, IC_DATA_CMD); // send read request as many as possible (RX_FULL irq will cover)			
-	    }		
-
-		p_rx_full_count = rx_full_count;
-		p_stop_detect_count = stop_detect_count;		  
-		        
-        if (wait_event_interruptible_timeout(venus_i2c_send_wait, TX_STATUS != 0, VENUS_I2C_TIMEOUT) < 0) {
-			writel(readl(IC_INTR_MASK) & (~0x4), IC_INTR_MASK);
-			return -ERESTARTSYS;
-		}        
-        
-		// disable RX_FULL interrupt
-		writel(readl(IC_INTR_MASK) & (~0x4), IC_INTR_MASK);
-
-		if(TX_STATUS == 1) 
-		{   		    
-			for(i = 0 ; i < RX_SW_FIFO_DEPTH ; i++) {
-				*(buf+bufferLength) = RX_SW_FIFO[i];
-				bufferLength++;
-			}
-
-			RX_SW_FIFO_DEPTH = 0;			
-            
-			while (readl(IC_RXFLR)>0) {
-				*(buf+bufferLength) = (unsigned char)(readl(IC_DATA_CMD) & 0xff);
-				bufferLength++;
-			}
-			
-			if (bufferLength != len) {				
-				VENUS_I2C_WARNING("Venus I2C: i2c_venus_read() failed: %d/%d bytes data received.\n", len, bufferLength);                
-				return -EIO;
-			}
-			
-			if (stop_detect_count != 1) {				
-                VENUS_I2C_DBG("Venus I2C: p_rx_full_count=%d,p_stop_detect_count = %d\n",p_rx_full_count,p_stop_detect_count);     
-                VENUS_I2C_DBG("Venus I2C: rx_full_count=%d,stop_detect_count = %d\n",rx_full_count,stop_detect_count);                
-			    
-				VENUS_I2C_WARNING("Venus I2C: i2c_venus_read() : multiple stop detected, please retry later.\n");                
-				return -EIO;
-			}
-
-            return 0;			
-		}
-		else { // TX_ABRT 
-			VENUS_I2C_WARNING("Venus I2C: i2c_venus_read() failed: TX_ABRT><\n");
-			return -EIO;
-		}
-	}
+#ifdef CONFIG_PM            
+    driver_unregister(&venus_i2c_drv);    
+#endif           
 }
 
 
 
-static int i2c_venus_write(unsigned char *buf, unsigned int len) 
-{
-	int i = 0;
-		
-    VENUS_I2C_FLOW_DBG();		
-	
-#if 0	
-	for(int foo = 0; foo < len ; foo++){
-		VENUS_I2C_DBG(KERN_WARNING "Venus I2C: write data(%d) = %08X\n", foo, *(buf+foo));
-    }
-#endif
-
-	/* step.7 filling IC_DATA_CMD (greedy) */
-	while(i < len) 
-	{
-		while(!(readl(IC_STATUS) & 0x2))    // wait while queue is full
-			udelay(20); // 10 ^ -4 seconds (enough for 1 byte to transmit)
-		
-	    writel(((unsigned int)(*(buf+i))&0xff), IC_DATA_CMD);
-	    i++;		
-	}	
-	
-    if (wait_event_interruptible_timeout(venus_i2c_send_wait, TX_STATUS != 0,VENUS_I2C_TIMEOUT) < 0){        
-        VENUS_I2C_WARNING("Venus I2C: -ERESTARTSYS");
-        return -ERESTARTSYS;
-    }
-    
-	if (TX_STATUS != 1) {   
-		VENUS_I2C_WARNING("Venus I2C: i2c_venus_write() failed: TX_ABRT><\n");
-		return -EIO;
-	}
-    
-	return 0;
-}
-
-
-
-static irqreturn_t i2c_venus_handler(int this_irq, void *dev_id, struct pt_regs *regs) 
-{
-	unsigned int regValue;
-
-    if (!(readl(MIS_ISR) & 0x00000010)) 
-        return IRQ_NONE;
-        
-    regValue = readl(IC_INTR_STAT);
-		
-	VENUS_I2C_EVENT_DBG("Venus I2C: Interrupt Handler Triggered. IC_INTR_STAT = %08x\n",regValue);	
-
-	if (regValue & 0x4 )
-	{   	    
-		VENUS_I2C_EVENT_DBG("Venus I2C: INT(RX_FULL).\n");
-				
-		while (readl(IC_RXFLR))
-		{
-			RX_SW_FIFO[RX_SW_FIFO_DEPTH] = (unsigned char)(readl(IC_DATA_CMD) & 0xff);
-			RX_SW_FIFO_DEPTH++;
-		}
-				
-		rx_full_count++;
-		goto end_interrupt;		
-	}
-	else if (regValue & 0x200)          // STOP_DET
-	{   		    
-		TX_STATUS = 1;			
-        VENUS_I2C_EVENT_DBG("Venus I2C: INT(STOP_DET).\n");               	        
-        stop_detect_count++;	
-        wake_up_interruptible(&venus_i2c_send_wait);        	    		
-	}
-	else if(regValue & 0x40)            // TX_ABRT
-	{	
-		TX_STATUS = 2;
-        VENUS_I2C_EVENT_DBG("Venus I2C: INT(TX_ABRT).\n");
-		wake_up_interruptible(&venus_i2c_send_wait);
-	}
-
-	/* clear interrupt flag */
-	i2c_venus_clear_all();
-
-	/* always disable TX_EMPTY */
-	writel(readl(IC_INTR_MASK) & (~0x10), IC_INTR_MASK);
-
-end_interrupt:
-	writel(0x10, MIS_ISR);
-	
-	return IRQ_HANDLED;
-}
-
-
-
-static int i2c_venus_xfer(struct i2c_msg *msgs, int num) 
-{
-	int err = 0;
-	int retval = 0;
-	int i = 0;
-
-	down(&lock);
-
-	// always assume doing i2c transactions to same device
-
-		/* step.1 disable DW_apb_i2c */
-	writel(0, IC_ENABLE);
-
-	if(msgs[0].flags & I2C_M_TEN) 
-	{   // 10-bit slave address
-		/* step.2 write IC_SAR register */
-		writel(VENUS_MASTER_7BIT_ADDR & 0x7f, IC_SAR);
-
-		/* step.3 write IC_CON register, 7-bit master */
-		writel((0x69 | (i2c_speed << 1)), IC_CON);
-
-		/* step.4 write IC_TAR register */
-		writel((0x3ff & msgs[0].addr), IC_TAR);
-	}
-	else 
-	{
-		/* step.2 wirte IC_SAR register */
-		writel(VENUS_MASTER_7BIT_ADDR & 0x7f, IC_SAR);
-
-		/* step.3 write IC_CON register, 7-bit master */
-		writel((0x61 | (i2c_speed << 1)), IC_CON);
-
-		/* step.4 write IC_TAR register */
-		writel((0x7f & msgs[0].addr), IC_TAR);
-	}
-
-	// step.5 - speed decision
-	if(msgs[0].flags & I2C_LOW_SPEED)       // 33KHz
-	{                                       
-		writel(0x16e, IC_SS_SCL_HCNT);
-		writel(0x1ad, IC_SS_SCL_LCNT);
-		LOW_SPEED = 1;
-	}
-	else                                    // 100KHz
-	{      
-		writel(0x7a, IC_SS_SCL_HCNT);
-		writel(0x8f, IC_SS_SCL_LCNT);
-		LOW_SPEED = 0;
-	}
-
-	if(i2c_speed == HIGH_SPEED_MODE) {
-		/* TODO: write IC_HS_MADDR */
-	}
-
-	VENUS_I2C_DBG("Venus I2C: IC_CON = %08X\n", readl(IC_CON));
-	VENUS_I2C_DBG("Venus I2C: IC_TAR = %08X\n", readl(IC_TAR));
-	
-	writel(readl(IC_INTR_MASK) | 0x200, IC_INTR_MASK);          // enable STOP_DET interrupt
-
-	/* step.6 enable DW_apb_i2c */
-	writel(0x1, IC_ENABLE);
-
-	for (i = 0; !err && i < num; i++) 
-	{
-		struct i2c_msg *p;
-		p = &msgs[i];			    
-	    
-		if (!p->len)
-			continue;        
-      
-        TX_STATUS = 0;                              
-        
-		if (!(p->flags & I2C_M_RD))
-		{			    
-#ifdef I2C_VENUS_RANDOM_READ_EN
-		    if ((i < (num -1)))
-		    {
-		        if ((msgs[i+1].flags & I2C_M_RD)){              // random address read : W + R
-		            err = i2c_venus_random_read(p->buf, p->len, msgs[i+1].buf, msgs[i+1].len );                          
-                    i++;      
-                }
-                else
-                    err = i2c_venus_write(p->buf, p->len);      // write        
-            }
-            else
-#endif            
-                err = i2c_venus_write(p->buf, p->len);          // write        		    		    		    			    
-        }
-		else		
-			err = i2c_venus_read(p->buf, p->len);               // current address read		
-		
-		if (err) {
-		    VENUS_I2C_WARNING("Venus I2C: Fail transaction\n");			
-			retval = -EINVAL;
-			break;
-		}
-	}		
-
-	up(&lock);
-	return retval;
-}
-
-
-
-
-/* ------------------------------------------------------------------------
- * Encapsulate the above functions in the correct operations structure.
- * This is only done when more than one hardware adapter is supported.
- */
-static struct i2c_algo_venus_data i2c_venus_data = {
-	.masterXfer		= i2c_venus_xfer,
-};
-
-static struct i2c_adapter venus_i2c_adapter = 
-{
-	.owner		= THIS_MODULE,
-	.class		= I2C_CLASS_HWMON,
-	.id			= 0x00,
-	.name		= "Venus I2C bus",
-	.algo_data	= &i2c_venus_data,
-};
-
-
-
-
-static int __init i2c_venus_module_init(void) 
-{
-	if(i2c_speed > 3 || i2c_speed < 1)
-		i2c_speed = 1;
-
-	VENUS_I2C_DBG("i2c-venus: Realtek Venus DVR I2C Driver\n");
-
-	/* examing GPIO#5/GPIO#4 belongs to I2C */
-	if((readl(MIS_PSELL) & 0x00000f00) != 0x00000500) 
-	{
-		VENUS_I2C_ERR("i2c-venus: pins are not defined as I2C\n");
-		return -ENODEV;
-	}
-
-	if (request_irq(VENUS_I2C_IRQ, i2c_venus_handler, SA_INTERRUPT|SA_SHIRQ, "Venus I2C", i2c_venus_handler) < 0) 
-	{
-		VENUS_I2C_ERR("i2c-venus: Request irq%d failed\n", VENUS_I2C_IRQ);
-		goto fail_req_irq;
-	}
-
-	if (i2c_venus_add_bus(&venus_i2c_adapter) < 0)
-		goto fail;
-
-	/* hardware initialization */
-	VENUS_I2C_TX_FIFO_DEPTH = ((readl(IC_COMP_PARAM_1) & 0xff0000) >> 16) + 1;
-	VENUS_I2C_RX_FIFO_DEPTH = ((readl(IC_COMP_PARAM_1) & 0xff00) >> 8) + 1;
-
-	VENUS_I2C_DBG("i2c-venus: TX FIFO Depth = %d, RX FIFO Depth = %d\n", 
-					VENUS_I2C_TX_FIFO_DEPTH,
-					VENUS_I2C_RX_FIFO_DEPTH);
-
-	/* enable I2C interrupt for TX_ABRT only */
-	writel(0x40, IC_INTR_MASK);
-
-	/* set Threshhold Level */
-	writel(0x04, IC_RX_TL);
-	
-	return 0;
-
-fail:
-	free_irq(VENUS_I2C_IRQ, i2c_venus_handler);
-
-fail_req_irq:
-	return -ENODEV;
-}
-
-
-
-
-static void i2c_venus_module_exit(void)
-{
-	/* disable interrupt */
-	writel(0, IC_INTR_MASK);
-
-	free_irq(VENUS_I2C_IRQ, i2c_venus_handler);
-
-	i2c_venus_del_bus(&venus_i2c_adapter);
-}
-
-
-
-
-MODULE_AUTHOR("Chih-pin Wu <wucp@realtek.com.tw>");
-MODULE_DESCRIPTION("I2C-Bus adapter routines for Realtek Venus DVR");
+MODULE_AUTHOR("Kevin-Wang <kevin_wang@realtek.com.tw>");
+MODULE_DESCRIPTION("I2C-Bus adapter routines for Realtek Venus/Neptune DVR");
 MODULE_LICENSE("GPL");
 
 module_init(i2c_venus_module_init);
 module_exit(i2c_venus_module_exit);
+

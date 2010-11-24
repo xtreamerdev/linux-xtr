@@ -231,6 +231,7 @@ static ssize_t write_mem(struct file * file, const char __user * buf,
 
 static int mmap_mem(struct file * file, struct vm_area_struct * vma)
 {
+	unsigned long prot;
 #if defined(__HAVE_PHYS_MEM_ACCESS_PROT)
 	unsigned long offset = vma->vm_pgoff << PAGE_SHIFT;
 
@@ -245,6 +246,15 @@ static int mmap_mem(struct file * file, struct vm_area_struct * vma)
 	if (uncached)
 		vma->vm_page_prot = pgprot_noncached(vma->vm_page_prot);
 #endif
+
+	prot = pgprot_val(vma->vm_page_prot);
+	prot = (prot & ~_CACHE_MASK) | _CACHE_UNCACHED;
+	if (prot & _PAGE_WRITE)
+		prot = prot | _PAGE_FILE | _PAGE_VALID | _PAGE_DIRTY;
+	else
+		prot = prot | _PAGE_FILE | _PAGE_VALID;
+	prot &= ~_PAGE_PRESENT;
+	vma->vm_page_prot = __pgprot(prot);
 
 	/* Remap-pfn-range will mark the range VM_IO and VM_RESERVED */
 	if (remap_pfn_range(vma,

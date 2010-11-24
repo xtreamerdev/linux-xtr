@@ -105,7 +105,7 @@ MODULE_PARM_DESC(max_report_luns,
 static unsigned int scsi_inq_timeout = SCSI_TIMEOUT/HZ+3;
 
 module_param_named(inq_timeout, scsi_inq_timeout, int, S_IRUGO|S_IWUSR);
-MODULE_PARM_DESC(inq_timeout, 
+MODULE_PARM_DESC(inq_timeout,
 		 "Timeout (in seconds) waiting for devices to answer INQUIRY."
 		 " Default is 5. Some non-compliant devices need more.");
 
@@ -461,7 +461,7 @@ static void scsi_probe_lun(struct scsi_request *sreq, char *inq_result,
 			 * not-ready to ready transition [asc/ascq=0x28/0x0]
 			 * or power-on, reset [asc/ascq=0x29/0x0], continue.
 			 * INQUIRY should not yield UNIT_ATTENTION
-			 * but many buggy devices do so anyway. 
+			 * but many buggy devices do so anyway.
 			 */
 			if ((driver_byte(sreq->sr_result) & DRIVER_SENSE) &&
 			    scsi_request_normalize_sense(sreq, &sshdr)) {
@@ -651,7 +651,7 @@ static int scsi_add_lun(struct scsi_device *sdev, char *inq_result, int *bflags)
 	 * Don't set the device offline here; rather let the upper
 	 * level drivers eval the PQ to decide whether they should
 	 * attach. So remove ((inq_result[0] >> 5) & 7) == 1 check.
-	 */ 
+	 */
 
 	sdev->inq_periph_qual = (inq_result[0] >> 5) & 7;
 	sdev->removable = (0x80 & inq_result[1]) >> 7;
@@ -742,6 +742,117 @@ static int scsi_add_lun(struct scsi_device *sdev, char *inq_result, int *bflags)
 	return SCSI_SCAN_LUN_PRESENT;
 }
 
+#ifdef USB_STORAGE_POWER_CONDITION_MODE // test for power condition mode page
+/**
+ * scsi_set_power_condition - set power condition to the given adapter
+ * @shost:	adapter to scan
+ **/
+void scsi_set_power_condition(struct Scsi_Host *shost)
+{
+#define SD_TIMEOUT		(30 * HZ)
+#define SD_MAX_RETRIES		5
+
+	struct scsi_device *sdev = NULL;
+	struct scsi_request *sreq;
+	struct scsi_sense_hdr sshdr;
+	unsigned char *buffer;
+	unsigned char scsi_cmd[MAX_COMMAND_SIZE];
+	unsigned int alloc_length = 512;
+	int count;
+
+	shost_for_each_device(sdev, shost) {
+		if (sdev->lun == 0)
+			break;
+	}
+
+	if(sdev == NULL)
+		goto out;
+
+	sreq = scsi_allocate_request(sdev, GFP_KERNEL);
+	if (!sreq) {
+		printk(KERN_WARNING "(sd_revalidate_disk:) Request allocation "
+		       "failure.\n");
+		goto out;
+	}
+
+#ifdef USB_512B_ALIGNMENT
+	buffer = kmalloc(USB_512B_ALIGNMENT_SIZE, GFP_KERNEL | __GFP_DMA);
+#else
+	buffer = kmalloc(alloc_length, GFP_KERNEL | __GFP_DMA);
+#endif /* USB_512B_ALIGNMENT */
+	if (!buffer) {
+		printk(KERN_WARNING "(scsi_read_format_capacities:) Memory allocation "
+		       "failure.\n");
+		goto out_release_request;
+	}
+
+	/* Each pass gets up to three chances to ignore Unit Attention */
+	for (count = 0; count < 3; ++count) {
+		#define MODE_PARAMETER_HEAD_LENGTH	0x4
+		memset(scsi_cmd, 0, MAX_COMMAND_SIZE);
+		scsi_cmd[0] = MODE_SELECT;
+		scsi_cmd[1] = (1 << 4);
+		scsi_cmd[2] = 0;
+		scsi_cmd[3] = 0;
+		scsi_cmd[4] = MODE_PARAMETER_HEAD_LENGTH + 0xc; // mode parameter head length + power condition mode page length
+		scsi_cmd[5] = 0;
+		sreq->sr_cmd_len = 0;
+		sreq->sr_data_direction = DMA_TO_DEVICE;
+
+		memset(buffer, 0, alloc_length);
+		// mode parameter head
+		buffer[0] = scsi_cmd[4] - 1;
+		buffer[1] = 0x0; /* Medium Type - ignoring */
+		buffer[2] = 0x0; /* Reserved */
+		buffer[3] = 0x0; /* Block Descriptor Length */
+		// power condition mode page
+		buffer[MODE_PARAMETER_HEAD_LENGTH + 0] = 0x1a; // page code
+		buffer[MODE_PARAMETER_HEAD_LENGTH + 1] = 0x0a; // page lentgh
+		buffer[MODE_PARAMETER_HEAD_LENGTH + 2] = 0; // reserved
+		buffer[MODE_PARAMETER_HEAD_LENGTH + 3] = 0; // bit1=idel, bit0=standy
+		buffer[MODE_PARAMETER_HEAD_LENGTH + 4] = 0; // idle condition timer
+		buffer[MODE_PARAMETER_HEAD_LENGTH + 5] = 0;
+		buffer[MODE_PARAMETER_HEAD_LENGTH + 6] = 0;
+		buffer[MODE_PARAMETER_HEAD_LENGTH + 7] = 0;
+		buffer[MODE_PARAMETER_HEAD_LENGTH + 8] = 0; // standby condition timer
+		buffer[MODE_PARAMETER_HEAD_LENGTH + 9] = 0;
+		buffer[MODE_PARAMETER_HEAD_LENGTH + 10] = 0;
+		buffer[MODE_PARAMETER_HEAD_LENGTH + 11] = 0;
+
+		scsi_wait_req(sreq, (void *) scsi_cmd, (void *) buffer,
+				scsi_cmd[4],
+				SD_TIMEOUT, 3);
+
+		if (sreq->sr_result) {
+			/*
+			 * not-ready to ready transition [asc/ascq=0x28/0x0]
+			 * or power-on, reset [asc/ascq=0x29/0x0], continue.
+			 * INQUIRY should not yield UNIT_ATTENTION
+			 * but many buggy devices do so anyway.
+			 */
+			if ((driver_byte(sreq->sr_result) & DRIVER_SENSE) &&
+					scsi_request_normalize_sense(sreq, &sshdr)) {
+
+				if ((sshdr.sense_key == UNIT_ATTENTION) &&
+						((sshdr.asc == 0x28) ||
+						 (sshdr.asc == 0x29)) &&
+						(sshdr.ascq == 0))
+					continue;
+			}
+		}
+		break;
+	}
+
+	kfree(buffer);
+
+ out_release_request:
+	scsi_release_request(sreq);
+ out:
+	return;
+}
+EXPORT_SYMBOL(scsi_set_power_condition);
+#endif /* USB_STORAGE_POWER_CONDITION_MODE */ // test for power condition mode page
+
 #ifdef USB_TEST_SCSI_READ_FORMAT_CAPACITITES /* cfyeh test */
 
 int scsi_read_format_capacities(struct scsi_device *sdev)
@@ -782,22 +893,22 @@ int scsi_read_format_capacities(struct scsi_device *sdev)
 		scsi_cmd[8] = alloc_length & 0xff;
 		sreq->sr_cmd_len = 0;
 		sreq->sr_data_direction = DMA_FROM_DEVICE;
-		
+
 		memset(buffer, 0, alloc_length);
 		scsi_wait_req(sreq, (void *) scsi_cmd, (void *) buffer,
 				alloc_length,
 				SD_TIMEOUT, 3);
-		
+
 		if (sreq->sr_result) {
 			/*
-			 * not-ready to ready transition [asc/ascq=0x28/0x0] 
+			 * not-ready to ready transition [asc/ascq=0x28/0x0]
 			 * or power-on, reset [asc/ascq=0x29/0x0], continue.
 			 * INQUIRY should not yield UNIT_ATTENTION
-			 * but many buggy devices do so anyway. 
+			 * but many buggy devices do so anyway.
 			 */
 			if ((driver_byte(sreq->sr_result) & DRIVER_SENSE) &&
 					scsi_request_normalize_sense(sreq, &sshdr)) {
-				
+
 				if ((sshdr.sense_key == UNIT_ATTENTION) &&
 						((sshdr.asc == 0x28) ||
 						 (sshdr.asc == 0x29)) &&
@@ -810,7 +921,7 @@ int scsi_read_format_capacities(struct scsi_device *sdev)
 
 	kfree(buffer);
 
- out_release_request: 
+ out_release_request:
 	scsi_release_request(sreq);
  out:
 	return 0;
@@ -1103,9 +1214,9 @@ static int scsi_report_lun_scan(struct scsi_device *sdev, int bflags,
 	 * Also allow SCSI-2 if BLIST_REPORTLUN2 is set and host adapter does
 	 * support more than 8 LUNs.
 	 */
-	if ((bflags & BLIST_NOREPORTLUN) || 
+	if ((bflags & BLIST_NOREPORTLUN) ||
 	     sdev->scsi_level < SCSI_2 ||
-	    (sdev->scsi_level < SCSI_3 && 
+	    (sdev->scsi_level < SCSI_3 &&
 	     (!(bflags & BLIST_REPORTLUN2) || sdev->host->max_lun <= 8)) )
 		return 1;
 	if (bflags & BLIST_NOLUN)
@@ -1304,7 +1415,7 @@ EXPORT_SYMBOL(__scsi_add_device);
 void scsi_rescan_device(struct device *dev)
 {
 	struct scsi_driver *drv;
-	
+
 	if (!dev->driver)
 		return;
 
@@ -1331,10 +1442,10 @@ int sd_media_present(struct device *dev)
 		if(sdkp->capacity == 0)
 		{
 			printk("###### [cfyeh] sdkp->media_present == 1, sdkp->capacity == 0\n");
-			return sdkp->capacity;				
+			return sdkp->capacity;
 		}
 	}
-	return sdkp->media_present;				
+	return sdkp->media_present;
 }
 EXPORT_SYMBOL(sd_media_present);
 
@@ -1383,36 +1494,36 @@ int sd_media_check_changed(struct device *dev)
 		unsigned int the_result;
 		struct scsi_sense_hdr sshdr;
 		int sense_valid = 0;
-	
+
 		spintime = 0;
-	
+
 		/* Spin up drives, as required.  Only do this at boot time */
 		/* Spinup needs to be done for module loads too. */
 		do {
 			retries = 0;
-	
+
 			do {
 				cmd[0] = TEST_UNIT_READY;
 				memset((void *) &cmd[1], 0, 9);
-	
+
 				sreq->sr_cmd_len = 0;
 				memset(sreq->sr_sense_buffer, 0,
 				       SCSI_SENSE_BUFFERSIZE);
 				sreq->sr_data_direction = DMA_NONE;
-	
+
 				scsi_wait_req (sreq, (void *) cmd, (void *) buffer,
 					       0/*512*/, SD_TIMEOUT, SD_MAX_RETRIES);
-	
+
 				the_result = sreq->sr_result;
 				if (the_result)
 					sense_valid = scsi_request_normalize_sense(
 								sreq, &sshdr);
 				retries++;
-			} while (retries < 3 && 
+			} while (retries < 3 &&
 				 (!scsi_status_is_good(the_result) ||
 				  ((driver_byte(the_result) & DRIVER_SENSE) &&
 				  sense_valid && sshdr.sense_key == UNIT_ATTENTION)));
-	
+
 			if (!sreq->sr_result)
 				goto out_media_not_present;
 			if (!(driver_byte(sreq->sr_result) & DRIVER_SENSE))
@@ -1434,9 +1545,9 @@ int sd_media_check_changed(struct device *dev)
 #endif
 			ret = 0;
 			goto out_spinup_disk;
-	
+
  out_media_not_present:
-	
+
 			if ((driver_byte(the_result) & DRIVER_SENSE) == 0) {
 				/* no sense, TUR either succeeded or failed
 				 * with a status error */
@@ -1445,14 +1556,14 @@ int sd_media_check_changed(struct device *dev)
 					       "error = 0x%x\n", disk->disk_name, the_result);
 				break;
 			}
-						
+
 			/*
 			 * The device does not want the automatic start to be issued.
 			 */
 			if (sdkp->device->no_start_on_add) {
 				break;
 			}
-	
+
 			/*
 			 * If manual intervention is required, or this is an
 			 * absent USB storage device, a spinup is meaningless.
@@ -1461,7 +1572,7 @@ int sd_media_check_changed(struct device *dev)
 			    sshdr.sense_key == NOT_READY &&
 			    sshdr.asc == 4 && sshdr.ascq == 3) {
 				break;		/* manual intervention required */
-	
+
 			/*
 			 * Issue command to spin up drive when not ready
 			 */
@@ -1476,10 +1587,10 @@ int sd_media_check_changed(struct device *dev)
 					sreq->sr_cmd_len = 0;
 					memset(sreq->sr_sense_buffer, 0,
 						SCSI_SENSE_BUFFERSIZE);
-	
+
 					sreq->sr_data_direction = DMA_NONE;
-					scsi_wait_req(sreq, (void *)cmd, 
-						      (void *) buffer, 0/*512*/, 
+					scsi_wait_req(sreq, (void *)cmd,
+						      (void *) buffer, 0/*512*/,
 						      SD_TIMEOUT, SD_MAX_RETRIES);
 					spintime_expire = jiffies + 100 * HZ;
 					spintime = 1;
@@ -1487,7 +1598,7 @@ int sd_media_check_changed(struct device *dev)
 				/* Wait 1 second for next try */
 				msleep(1000);
 				printk(".");
-	
+
 			/*
 			 * Wait for USB flash devices with slow firmware.
 			 * Yes, this sense key/ASC combination shouldn't
@@ -1512,9 +1623,9 @@ int sd_media_check_changed(struct device *dev)
 				}
 				break;
 			}
-					
+
 		} while (spintime && time_before_eq(jiffies, spintime_expire));
-	
+
 		if (spintime) {
 			if (scsi_status_is_good(the_result))
 				printk("ready\n");
@@ -1526,13 +1637,13 @@ int sd_media_check_changed(struct device *dev)
  out_spinup_disk:
 	kfree(buffer);
 
- out_release_request: 
+ out_release_request:
 	scsi_release_request(sreq);
  out:
 	return ret;
 }
 
-int scsi_force_check_device_change(struct device *dev)
+int scsi_device_check_change_force(struct device *dev)
 {
 	struct scsi_device *sdev = container_of(dev, struct scsi_device, sdev_gendev);
 	struct scsi_target *starget = sdev->sdev_target;
@@ -1548,14 +1659,14 @@ int scsi_force_check_device_change(struct device *dev)
 
 	media_present_before = sd_media_present(dev);
 	//printk("############# before media_present = %d!!\n", media_present_before);
-	
+
 	drv = to_scsi_driver(dev->driver);
 	if (try_module_get(drv->owner)) {
 		if (drv->rescan)
 			media_present_after = sd_media_check_changed(dev);
 		module_put(drv->owner);
 	}
-	
+
 	//media_present_after = sd_media_present(dev);
 	//printk("############# after media_present = %d!!\n", media_present_after);
 
@@ -1608,7 +1719,7 @@ int scsi_force_check_device_change(struct device *dev)
 			res = SCSI_SCAN_TARGET_PRESENT;
 			goto out_free_result;
 		}
-		
+
 		res = scsi_add_lun(sdev, result, &bflags);
 		if (res == SCSI_SCAN_LUN_PRESENT) {
 			if (bflags & BLIST_KEY) {
@@ -1633,7 +1744,7 @@ out:
 	}
 	return ret;
 }
-EXPORT_SYMBOL(scsi_force_check_device_change);
+EXPORT_SYMBOL(scsi_device_check_change_force);
 
 int scsi_check_device_change(struct device *dev)
 {
@@ -1651,14 +1762,14 @@ int scsi_check_device_change(struct device *dev)
 
 	media_present_before = sd_media_present(dev);
 	//printk("############# before media_present = %d!!\n", media_present_before);
-	
+
 	drv = to_scsi_driver(dev->driver);
 	if (try_module_get(drv->owner)) {
 		if (drv->rescan)
 			media_present_after = sd_media_check_changed(dev);
 		module_put(drv->owner);
 	}
-	
+
 	//media_present_after = sd_media_present(dev);
 	//printk("############# after media_present = %d!!\n", media_present_after);
 
@@ -1711,7 +1822,7 @@ int scsi_check_device_change(struct device *dev)
 			res = SCSI_SCAN_TARGET_PRESENT;
 			goto out_free_result;
 		}
-		
+
 		res = scsi_add_lun(sdev, result, &bflags);
 		if (res == SCSI_SCAN_LUN_PRESENT) {
 			if (bflags & BLIST_KEY) {
@@ -1895,7 +2006,7 @@ EXPORT_SYMBOL(scsi_scan_host);
  * @chan:          channel to scan
  * @id:            target id to scan
  **/
-void scsi_scan_single_target(struct Scsi_Host *shost, 
+void scsi_scan_single_target(struct Scsi_Host *shost,
 	unsigned int chan, unsigned int id)
 {
 	scsi_scan_host_selected(shost, chan, id, SCAN_WILD_CARD, 1);
@@ -1918,6 +2029,7 @@ restart:
 	}
 	spin_unlock_irqrestore(shost->host_lock, flags);
 }
+EXPORT_SYMBOL_GPL(scsi_forget_host);
 
 /*
  * Function:    scsi_get_host_dev()
@@ -1937,7 +2049,7 @@ restart:
  *
  *	Note - this device is not accessible from any high-level
  *	drivers (including generics), which is probably not
- *	optimal.  We can add hooks later to attach 
+ *	optimal.  We can add hooks later to attach
  */
 struct scsi_device *scsi_get_host_dev(struct Scsi_Host *shost)
 {

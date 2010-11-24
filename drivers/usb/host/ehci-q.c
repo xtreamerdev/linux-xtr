@@ -40,6 +40,7 @@
 
 /*-------------------------------------------------------------------------*/
 
+#ifdef USB_EHCI_DEBUG_QH_QTD
 static void ehci_debug_qh(struct ehci_qh *qh)
 {
 	printk("====================================\n");
@@ -106,6 +107,7 @@ static void ehci_debug_qtd(struct ehci_qtd *qtd)
 
 	return;
 }
+#endif /* USB_EHCI_DEBUG_QH_QTD */
 
 /* fill a qtd, returning how much of the buffer we were able to queue up */
 
@@ -145,19 +147,18 @@ qtd_fill (struct ehci_qtd *qtd, dma_addr_t buf, size_t len,
 	qtd->hw_token = cpu_to_le32 ((count << 16) | token);
 	qtd->length = count;
 
-#ifdef USB_EHCI_CHECK_512B_ALIGNMENT
-	if ((unsigned int)qtd->hw_buf[0] & (0x200 - 1))
+#ifdef USB_EHCI_CHECK_ALIGNMENT
+	if(is_venus_cpu() || is_neptune_cpu())
+	if ((unsigned int)qtd->hw_buf[0] & (USB_EHCI_CHECK_ALIGNMENT_SIZE - 1))
 	{
-		// ehci qtd buffer is not 512 byte boundary
-		//printk("#### Not 512B alignment : qtd->hw_buf[0] = %p, qtd->length = %d\n", qtd->hw_buf[0], count);
-		if(count > (int)(0x400 - ((unsigned int)qtd->hw_buf[0] & (0x400 - 1))))
+		if(count > (int)(USB_EHCI_CHECK_ALIGNMENT_SIZE - ((unsigned int)qtd->hw_buf[0] & (USB_EHCI_CHECK_ALIGNMENT_SIZE - 1))))
 		{
 			// ehci qtd hw buffer cross 1k byte boundary
-			printk("#### [cfyeh] Cross 1KB : qtd->hw_buf[0] = %p, qtd->length = %d\n", qtd->hw_buf[0], count);
+			printk("#### [cfyeh] EHCI Cross 0x%x Bytes : qtd->hw_buf[0] = 0x%x, qtd->length = 0x%x\n", USB_EHCI_CHECK_ALIGNMENT_SIZE, qtd->hw_buf[0], count);
 			WARN_ON(1);
 		}
 	}
-#endif /* USB_EHCI_CHECK_512B_ALIGNMENT */
+#endif /* USB_EHCI_CHECK_ALIGNMENT */
 
 	return count;
 }
@@ -294,6 +295,8 @@ static void qtd_copy_status (
 	}
 }
 
+extern int bForEhciDebug;
+
 static void
 ehci_urb_done (struct ehci_hcd *ehci, struct urb *urb, struct pt_regs *regs)
 __releases(ehci->lock)
@@ -339,6 +342,15 @@ __acquires(ehci->lock)
 		usb_pipein (urb->pipe) ? "in" : "out",
 		urb->status,
 		urb->actual_length, urb->transfer_buffer_length);
+#else
+	if(bForEhciDebug)
+	ehci_force_dbg (ehci,
+		"%s %s urb %p ep%d%s status %d len %d/%d\n",
+		__FUNCTION__, urb->dev->devpath, urb,
+		usb_pipeendpoint (urb->pipe),
+		usb_pipein (urb->pipe) ? "in" : "out",
+		urb->status,
+		urb->actual_length, urb->transfer_buffer_length);
 #endif
 
 	/* complete() can reenter this HCD */
@@ -352,6 +364,47 @@ static void unlink_async (struct ehci_hcd *ehci, struct ehci_qh *qh);
 
 static void intr_deschedule (struct ehci_hcd *ehci, struct ehci_qh *qh);
 static int qh_schedule (struct ehci_hcd *ehci, struct ehci_qh *qh);
+
+
+#ifdef USB_MARS_EHCI_CONNECTION_STATE_POLLING
+static inline void ehci_connection_stat_polling(struct ehci_qtd	*_qtd)
+{
+	struct usb_device *dev;
+	struct urb	*urb;
+	int port = 0;
+			
+	if(!is_mars_cpu()) // for mars
+		return;
+	// VENUS_SB2_CHIP_INFO: bit[31,16]
+	// 0xa0 => A version
+	// 0xb0 => B version
+	if((inl(VENUS_SB2_CHIP_INFO) >> 16) == 0xa0)
+		return;
+
+	if (!_qtd)
+		return;
+	
+	urb = _qtd->urb;				
+	dev = urb->dev;
+	
+	if ((!urb) || (!dev))
+		return;
+						
+	port = dev->devpath[0] - '1';			
+	// printk("devpath = %s\n",dev->devpath);	
+	
+	if ((port > 2) || (port < 0)) {			
+		printk("%s [Error] : devpath = %s\n",__func__,dev->devpath);	
+		return;
+	}
+				
+	// printk("urb->status = 0x%x\n",urb->status);	
+	// printk("port = %d\n", port);					
+				
+	if (urb->status == 0)
+		ehci_port_jiffies[port] = jiffies;
+}
+#endif // #ifdef USB_MARS_EHCI_CONNECTION_STATE_POLLING
 
 /*
  * Process and free completed qtds for a qh, returning URBs to drivers.
@@ -399,6 +452,9 @@ qh_completions (struct ehci_hcd *ehci, struct ehci_qh *qh, struct pt_regs *regs)
 		if (last) {
 			if (likely (last->urb != urb)) {
 				ehci_urb_done (ehci, last->urb, regs);
+#ifdef USB_MARS_EHCI_CONNECTION_STATE_POLLING
+				ehci_connection_stat_polling(last);		
+#endif /* USB_MARS_EHCI_CONNECTION_STATE_POLLING */
 				count++;
 			}
 			ehci_qtd_free (ehci, last);
@@ -474,7 +530,7 @@ halt:
 		spin_lock (&urb->lock);
 		qtd_copy_status (ehci, urb, qtd->length, token);
 		do_status = (urb->status == -EREMOTEIO)
-				&& usb_pipecontrol (urb->pipe);
+				&& usb_pipecontrol (urb->pipe);				
 		spin_unlock (&urb->lock);
 
 		if (stopped && qtd->qtd_list.prev != &qh->qtd_list) {
@@ -489,6 +545,9 @@ halt:
 	/* last urb's completion might still need calling */
 	if (likely (last != NULL)) {
 		ehci_urb_done (ehci, last->urb, regs);
+#ifdef USB_MARS_EHCI_CONNECTION_STATE_POLLING
+		ehci_connection_stat_polling(last);		
+#endif /* USB_MARS_EHCI_CONNECTION_STATE_POLLING */
 		count++;
 		ehci_qtd_free (ehci, last);
 	}
@@ -991,6 +1050,14 @@ submit_async (
 
 #ifdef EHCI_URB_TRACE
 	ehci_dbg (ehci,
+		"%s %s urb %p ep%d%s len %d, qtd %p [qh %p]\n",
+		__FUNCTION__, urb->dev->devpath, urb,
+		epnum & 0x0f, (epnum & USB_DIR_IN) ? "in" : "out",
+		urb->transfer_buffer_length,
+		qtd, ep->hcpriv);
+#else
+	if(bForEhciDebug)
+	ehci_force_dbg (ehci,
 		"%s %s urb %p ep%d%s len %d, qtd %p [qh %p]\n",
 		__FUNCTION__, urb->dev->devpath, urb,
 		epnum & 0x0f, (epnum & USB_DIR_IN) ? "in" : "out",

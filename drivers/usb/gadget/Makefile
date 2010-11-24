@@ -7,6 +7,8 @@ obj-$(CONFIG_USB_PXA2XX)	+= pxa2xx_udc.o
 obj-$(CONFIG_USB_GOKU)		+= goku_udc.o
 obj-$(CONFIG_USB_OMAP)		+= omap_udc.o
 obj-$(CONFIG_USB_LH7A40X)	+= lh7a40x_udc.o
+# cyhuang (2008/3/5) : Add OTG device
+obj-$(CONFIG_USB_OTG_REALTEK)   += realtek/
 
 #
 # USB gadget drivers
@@ -22,9 +24,14 @@ ifeq ($(CONFIG_USB_ETH_RNDIS),y)
 	g_ether-objs		+= rndis.o
 endif
  
+
 obj-$(CONFIG_USB_ZERO)		+= g_zero.o
 obj-$(CONFIG_USB_ETH)		+= g_ether.o
 obj-$(CONFIG_USB_GADGETFS)	+= gadgetfs.o
 obj-$(CONFIG_USB_FILE_STORAGE)	+= g_file_storage.o
 obj-$(CONFIG_USB_G_SERIAL)	+= g_serial.o
+
+# cyhuang (2008/3/5) : Add OTG device verify driver.
+g_realtek_verify-objs	:= realtek/verify/dwc_otg_pcd_verify.o usbstring.o config.o epautoconf.o
+obj-$(CONFIG_USB_OTG_REALTEK_DEVICE_VERIFY_DRIVER)	+= g_realtek_verify.o
 

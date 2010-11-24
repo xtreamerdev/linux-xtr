@@ -24,12 +24,12 @@ source "drivers/message/fusion/Kconfig"
 
 source "drivers/ieee1394/Kconfig"
 
-config IEEE1394_VENUS
-	tristate "IEEE1394 driver for Venus board"
-	depends on REALTEK_VENUS
-	default y
-	help
-	  If you want to enable 1394 on Venus board, say Y.
+#config IEEE1394_VENUS
+#	tristate "IEEE1394 driver for Venus board"
+#	depends on REALTEK_VENUS
+#	default y
+#	help
+#	  If you want to enable 1394 on Venus board, say Y.
 
 source "drivers/message/i2o/Kconfig"
 
@@ -64,5 +64,22 @@ source "drivers/usb/Kconfig"
 source "drivers/mmc/Kconfig"
 
 source "drivers/infiniband/Kconfig"
+
+source "drivers/cec/Kconfig"
+
+source "drivers/ci/Kconfig"
+
+source "drivers/smartcard/Kconfig"
+
+config THIRD_PARTY_DRIVER
+	bool "3 party drivers that don't reside in Linux kernel source tree"
+	help
+	  3 party drivers that don't reside in Linux kernel source tree.
+
+config THIRD_PARTY_DRIVER_LIST
+	string "The list of 3 party drivers" if THIRD_PARTY_DRIVER
+	depends on THIRD_PARTY_DRIVER
+	help
+	  We can add 3 party drivers to the list.
 
 endmenu

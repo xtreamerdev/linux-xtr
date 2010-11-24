@@ -86,41 +86,38 @@ int usb_hcd_rbus_probe (const struct hc_driver *driver,
 	}
 
 	// new setting to power up/down first device on hub for gpio 20 2007/03/6
+	if(is_venus_cpu())
+	{
 	if(usb_check_gpio20_board())
 	{
 		printk("[USB] Setup GPIO 20 !!!\n"); 
 		printk("\tfor platform_info.board_id = 0x%x\n", platform_info.board_id);
-		writel(readl((unsigned int *)0xb801b108) | (0x1 << 20), (unsigned int *)0xb801b108); // output latch = 1
-		writel(readl((unsigned int *)0xb801b000) & ~(0x3 << 8), (unsigned int *)0xb801b000); // GPIO 20 function
-		writel(readl((unsigned int *)0xb801b100) | (0x1 << 20), (unsigned int *)0xb801b100); // output enable
+		outl(inl(VENUS_MIS_GP0DATO) | (0x1 << 20), VENUS_MIS_GP0DATO); // output latch = 1
+		outl(inl(VENUS_MIS_PSELH) & ~(0x3 << 8), VENUS_MIS_PSELH); // GPIO 20 function
+		outl(inl(VENUS_MIS_GP0DIR) | (0x1 << 20), VENUS_MIS_GP0DIR); // output enable
 	}
 	else if(usb_check_gpio6_board())
 	{
 		printk("[USB] Setup GPIO 6 !!!\n"); 
 		printk("\tfor platform_info.board_id = 0x%x\n", platform_info.board_id);
-		writel(readl((unsigned int *)0xb801b108) | (0x1 << 6), (unsigned int *)0xb801b108); // output latch = 1
-		writel(readl((unsigned int *)0xb801b004) & ~(0x3 << 12), (unsigned int *)0xb801b004); // GPIO 6 function
-		writel(readl((unsigned int *)0xb801b100) | (0x1 << 6), (unsigned int *)0xb801b100); // output enable
+		outl(inl(VENUS_MIS_GP0DATO) | (0x1 << 6), VENUS_MIS_GP0DATO); // output latch = 1
+		outl(inl(VENUS_MIS_PSELL) & ~(0x3 << 12), VENUS_MIS_PSELL); // GPIO 6 function
+		outl(inl(VENUS_MIS_GP0DIR) | (0x1 << 6), VENUS_MIS_GP0DIR); // output enable
 	}
 	else
 		printk("[USB] NOT Setup GPIO yet, platform_info.board_id = 0x%x!!!\n", platform_info.board_id); 
+	}
 
 	//cfyeh+ 2005/10/05
 	//setting usb only once
 	//setup synopsy ip
-
-	printk("[cfyeh] %s before setting VENUS_USB_EHCI_INSNREG01 = 0x%.8x\n", __func__, inl(VENUS_USB_EHCI_INSNREG01));
-	printk("[cfyeh] %s before setting VENUS_USB_EHCI_INSNREG03 = 0x%.8x\n", __func__, inl(VENUS_USB_EHCI_INSNREG03));
 
 	//INSNREH03
 	outl(0x00000001, VENUS_USB_EHCI_INSNREG03);
 	//in/out packet size
 	outl(0x01000040, VENUS_USB_EHCI_INSNREG01);
 	
-	printk("[cfyeh] %s after setting VENUS_USB_EHCI_INSNREG01 = 0x%.8x\n", __func__, inl(VENUS_USB_EHCI_INSNREG01));
-	printk("[cfyeh] %s after setting VENUS_USB_EHCI_INSNREG03 = 0x%.8x\n", __func__, inl(VENUS_USB_EHCI_INSNREG03));
-
-	//set utmi_suspend_mux(0xb801x808, bit 27) to '1', default '0'
+	//SET VENUS_USB_HOST_USBIP_INPUT(BIT 27) TO '1', DEFAULT '0'
 	tmp = inl(VENUS_USB_HOST_USBIP_INPUT);
 	tmp |= 0x1 << 27; 
 	tmp |= 0x1 << 30; // bit 30 must be '1'
@@ -131,44 +128,15 @@ int usb_hcd_rbus_probe (const struct hc_driver *driver,
 	USBPHY_Register_Setting();
 	//printk("after USBPHY_Register_Setting()\n");
 
-#ifdef CONFIG_REALTEK_VENUS_USB_TEST_MODE	//cfyeh+ 2005/11/07
+#ifdef USB_MARS_IRQ_CHECK_DATA_READY
+	// cfyeh + : set MARS_USB_HOST_VERSION[1] = 1
+	if(is_mars_cpu())// for mars
+	{
+		outl(inl(MARS_USB_HOST_VERSION) & (0x1 << 1), MARS_USB_HOST_VERSION);
+	}
+	// cfyeh - : set MARS_USB_HOST_VERSION[1] = 1
+#endif /* USB_MARS_IRQ_CHECK_DATA_READY */
 
-	//cfyeh+ 2005/12/06
-	//change to usb debug mode
-	//printk("0x%.8x = 0x%.8x\n", (u32)0xb80000ac, readl((unsigned int *)0xb80000ac));
-	//writel(0x5ad, (unsigned int *)0xb80000ac);
-	
-	//enable pad?
-	//writel(0xc00a,(unsigned int *)0xb801a144);
-	//debug mode 0xf
-	//outl(inl(VENUS_USB_HOST_WRAPPER) & ~(0x1f << 1), VENUS_USB_HOST_WRAPPER);
-	//outl(inl(VENUS_USB_HOST_WRAPPER) | (0xf << 1), VENUS_USB_HOST_WRAPPER);
-
-	//for debug SB2
-	//printk("0x%.8x = 0x%.8x\n", (u32)0xb80000ac, readl((unsigned int *)0xb80000ac));
-	//writel(0x631, (unsigned int *)0xb80000ac);
-	//writel(0x6, (unsigned int *)0xb801a024);//debug mode for SB2
-
-	//cfyeh+ 2005/12/06
-	//for enable GPIO4
-	//writel(readl((unsigned int *)0xb801b004) & ~((u32)(0x3<<8)), (unsigned int *)0xb801b004);
-	//set GPIO4 output pin
-	//writel(readl((unsigned int *)0xb801b100)| 1<<4, (unsigned int *)0xb801b100);//cfyeh test GPIO4 high
-	//clear GPIO4 pin
-	//writel(0x0, (unsigned int *)0xb801b108);//cfyeh test GPIO4 low
-	//cfyeh- 2005/12/06
-
-        //for enable GPIO5
-	//writel(readl((unsigned int *)0xb801b004) & ~((u32)(0x3<<10)), (unsigned int *)0xb801b004);
-	//set GPIO5 output pin
-	//writel(readl((unsigned int *)0xb801b100)| 1<<5, (unsigned int *)0xb801b100);
-	//clear GPIO5 pin
-	//writel(0x0, (unsigned int *)0xb801b108);
-	//writel(1<<5, (unsigned int *)0xb801b108);
-	//writel(0x0, (unsigned int *)0xb801b108);
-
-#endif /* CONFIG_REALTEK_VENUS_USB_TEST_MODE */	//cfyeh+ 2005/11/07
-	
 	//check EHCI or OHCI
 	sprintf (buf, "%s", pdev->name);
 	if(strstr(buf, "ehci_hcd")){	//EHCI
@@ -191,13 +159,16 @@ int usb_hcd_rbus_probe (const struct hc_driver *driver,
 	retval = usb_add_hcd (hcd, VENUS_INT_USB, SA_SHIRQ);
 	
 	// new setting to power up/down first device on hub for gpio 20 2007/03/6 
+	if(is_venus_cpu())
+	{
 	if(usb_check_gpio20_board())
 	{
-		writel(readl((unsigned int *)0xb801b108) & ~(0x1 << 20), (unsigned int *)0xb801b108); // output latch = 0
+		outl(inl(VENUS_MIS_GP0DATO) & ~(0x1 << 20), VENUS_MIS_GP0DATO); // output latch = 0
 	}
 	else if(usb_check_gpio6_board())
 	{
-		writel(readl((unsigned int *)0xb801b108) & ~(0x1 << 6), (unsigned int *)0xb801b108); // output latch = 0
+		outl(inl(VENUS_MIS_GP0DATO) & ~(0x1 << 6), VENUS_MIS_GP0DATO); // output latch = 0
+	}
 	}
 
 	if (retval != 0)
@@ -207,15 +178,15 @@ int usb_hcd_rbus_probe (const struct hc_driver *driver,
 	if(strstr(buf, "ehci_hcd")){	//EHCI
 		printk("[cfyeh] set PPE = 0\n");
 #if 0 // old setting which didn't work
-		writel(0x1, (unsigned int *)0xb8013450); // ohci ClearGlobalPower
-		writel(0x5, (unsigned int *)0xb8013054); // ehci clear Port Power
-		writel(0x10000, (unsigned int *)0xb8013450); // ohci SetGlobalPower
+		outl(0x1, VENUS_USB_OHCI_RH_STATUS); // ohci ClearGlobalPower
+		outl(0x5, VENUS_USB_EHCI_PORTSC_0); // ehci clear Port Power
+		outl(0x10000, VENUS_USB_OHCI_RH_STATUS); // ohci SetGlobalPower
 #else // set setting
-		writel(0x2001001, (unsigned int *)0xb8013448); // clear bit 9
-		writel(0x8001, (unsigned int *)0xb8013450); // set bit 0
-		writel(0x0, (unsigned int *)0xb8013054); // clear bit 12
+		outl(0x2001001, VENUS_USB_OHCI_RH_DESC_A); // clear bit 9
+		outl(0x8001, VENUS_USB_OHCI_RH_STATUS); // set bit 0
+		outl(0x0, VENUS_USB_EHCI_PORTSC_0); // clear bit 12
 		mdelay(10);
-		writel(0x1000, (unsigned int *)0xb8013054); // set bit 12
+		outl(0x1000, VENUS_USB_EHCI_PORTSC_0); // set bit 12
 #endif
 	}
 #endif // cfyeh : add PPE for to port power down and up about 70ms
@@ -298,6 +269,14 @@ int usb_hcd_rbus_suspend (struct usb_hcd *hcd, struct platform_device *pdev,
 	 * have been called, otherwise root hub timers still run ...
 	 */
 	case HC_STATE_SUSPENDED:
+#ifdef USB_FREE_IRQ_AT_SUSPEND_MODE
+		if(hcd->irq)
+		{
+			retval = hcd->driver->suspend (hcd, state);
+			free_irq(hcd->irq, hcd);
+			hcd->irq = 0;
+		}
+#endif /* USB_FREE_IRQ_AT_SUSPEND_MODE */
 		dev_dbg (hcd->self.controller, "hcd state %d; already suspended\n",
 			hcd->state);
 		break;
@@ -328,7 +307,7 @@ int usb_hcd_rbus_resume (struct usb_hcd *hcd, struct platform_device *pdev, u32 
 
 #if 1 //cfyeh test
 	unsigned int		tmp;
-        //set suspend_r(0xb801x800, bit 6) to '1', default '0'
+        //set VENUS_USB_HOST_WRAPPER(bit 6) to '1', default '0'
 	tmp = inl(VENUS_USB_HOST_WRAPPER);
 	tmp |= 0x1 << 6;
 	outl(tmp, VENUS_USB_HOST_WRAPPER);

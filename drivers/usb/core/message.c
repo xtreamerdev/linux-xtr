@@ -17,6 +17,7 @@
 #include <linux/ctype.h>
 #include <linux/device.h>
 #include <asm/byteorder.h>
+#include <linux/kobject_uevent.h> // for send a hotplug signal for usb unknown device
 
 #include "hcd.h"	/* for usbcore internals */
 #include "usb.h"
@@ -566,10 +567,6 @@ void usb_sg_cancel (struct usb_sg_request *io)
  * Returns the number of bytes received on success, or else the status code
  * returned by the underlying usb_control_msg() call.
  */
-#ifdef CONFIG_REALTEK_VENUS_USB_TEST_MODE	//cfyeh+ 2005/11/07
-char ehci_get_desc_code = '0';
-EXPORT_SYMBOL (ehci_get_desc_code);
-#endif /* CONFIG_REALTEK_VENUS_USB_TEST_MODE */	//cfyeh- 2005/11/07
 int usb_get_descriptor(struct usb_device *dev, unsigned char type, unsigned char index, void *buf, int size)
 {
 	int i;
@@ -577,9 +574,6 @@ int usb_get_descriptor(struct usb_device *dev, unsigned char type, unsigned char
 	
 	memset(buf,0,size);	// Make sure we parse really received data
 
-#ifdef CONFIG_REALTEK_VENUS_USB_TEST_MODE	//cfyeh+ 2005/11/07
-	if(ehci_get_desc_code == '0'){
-#endif /* CONFIG_REALTEK_VENUS_USB_TEST_MODE */	//cfyeh- 2005/11/07
 	for (i = 0; i < 3; ++i) {
 		/* retry on length 0 or stall; some devices are flakey */
 		result = usb_control_msg(dev, usb_rcvctrlpipe(dev, 0),
@@ -594,17 +588,6 @@ int usb_get_descriptor(struct usb_device *dev, unsigned char type, unsigned char
 		}
 		break;
 	}
-#ifdef CONFIG_REALTEK_VENUS_USB_TEST_MODE	//cfyeh+ 2005/11/07
-	}
-	else
-	{
-		result = usb_control_msg(dev, usb_rcvctrlpipe(dev, 0),
-				USB_REQ_GET_DESCRIPTOR, USB_DIR_IN,
-				(type << 8) + index, 0, buf, size,
-				USB_CTRL_GET_TIMEOUT);
-	}
-#endif /* CONFIG_REALTEK_VENUS_USB_TEST_MODE */	//cfyeh- 2005/11/07
-
 	return result;
 }
 
@@ -1292,6 +1275,9 @@ static void release_interface(struct device *dev)
 	kfree(intf);
 }
 
+#ifdef USB_WARNING_WHEN_DEVICE_NOT_SUPPORT
+int usb_probe_match_id = 0;
+#endif /* USB_WARNING_WHEN_DEVICE_NOT_SUPPORT */
 /*
  * usb_set_configuration - Makes a particular device setting be current
  * @dev: the device whose configuration is being updated
@@ -1456,7 +1442,24 @@ free_interfaces:
 				intf->dev.bus_id, configuration,
 				alt->desc.bInterfaceNumber);
 			
+#ifdef USB_WARNING_WHEN_DEVICE_NOT_SUPPORT
+			usb_probe_match_id = 0;
+#endif /* USB_WARNING_WHEN_DEVICE_NOT_SUPPORT */
 			ret = device_add (&intf->dev);
+#ifdef USB_WARNING_WHEN_DEVICE_NOT_SUPPORT
+			if(!usb_probe_match_id)
+			{
+				kobject_hotplug(&intf->dev.kobj, KOBJ_UNKNOWN);
+				printk ("###################################################################\n"); //cfyeh-debug
+				printk ("[cfyeh-test] %s(%d)\n", __func__, __LINE__); //cfyeh-debug
+				printk ("Don't support this usb device or don't insert correct module yet!!!\n"); //cfyeh-debug
+				printk ("bus_id %s (config #%d, interface %d)\n",
+					intf->dev.bus_id, configuration,
+					alt->desc.bInterfaceNumber); //cfyeh-debug
+				printk ("###################################################################\n"); //cfyeh-debug
+			}
+#endif /* USB_WARNING_WHEN_DEVICE_NOT_SUPPORT */
+
 			if (ret != 0) {
 				dev_err(&dev->dev,
 					"device_add(%s) --> %d\n",

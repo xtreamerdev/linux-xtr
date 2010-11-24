@@ -7,7 +7,7 @@ usbcore-objs	:= usb.o hub.o hcd.o urb.o message.o \
 
 CFLAGS_hub.o	+= -mno-explicit-relocs -mno-split-addresses
 
-ifeq ($(CONFIG_PCI),y)
+ifeq ($(_CONFIG_PCI),y)
 	usbcore-objs	+= hcd-pci.o
 endif
 

@@ -1,0 +1,38 @@
+#
+# Character device configuration
+#
+
+menu "Common interface(CI) options"
+
+config MARS_PCMCIA
+	tristate "PCMCIA support"
+	---help---
+	  Say Y here if you want to enable the PCMCIA interface and driver. 
+
+config MARS_PCMCIA_SLOT_NUM
+        int "PCMCIA slot number (1, 2)"
+        depends on MARS_PCMCIA
+        default "1"
+        ---help---
+          Determines how many PCMCIA interfaces exist.
+
+config MARS_DEBUG_PC
+        bool "PCMCIA debugging messages"
+        depends on MARS_PCMCIA
+        ---help---
+          Say Y here if you want the PCMCIA driver to produce the debug messages to console.
+
+config EN50221
+	bool "CI driver support (EN50221)"
+	depends on MARS_PCMCIA
+	help
+	  Say Y here if you want to enable Common Interface driver.
+
+config MARS_DEBUG_CI
+        bool "CI driver debugging messages"
+        depends on MARS_PCMCIA
+        ---help---
+          Say Y here if you want the EN50221 driver to produce the debug messages to console.
+
+endmenu
+

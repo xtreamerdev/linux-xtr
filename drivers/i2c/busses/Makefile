@@ -41,12 +41,24 @@ obj-$(CONFIG_I2C_VIAPRO)	+= i2c-viapro.o
 obj-$(CONFIG_I2C_VOODOO3)	+= i2c-voodoo3.o
 obj-$(CONFIG_SCx200_ACB)	+= scx200_acb.o
 obj-$(CONFIG_SCx200_I2C)	+= scx200_i2c.o
-obj-$(CONFIG_I2C_VENUS)		+= i2c-venus.o
+
+
+ifeq ($(CONFIG_I2C_VENUS_INT_MODE_XFER),y)
+
+  obj-$(CONFIG_I2C_VENUS)		+= i2c-venus-k.o i2c-venus-priv.o
+
+else
+
+  obj-$(CONFIG_I2C_VENUS)	    += i2c-venus.o
+
+  ifeq ($(CONFIG_I2C_VENUS_WAIT_COMPLETE_AT_END),y)
+     EXTRA_CFLAGS += -DI2C_VENUS_WAIT_COMPLETE_AT_END
+  endif
+  
+endif
 
 ifeq ($(CONFIG_I2C_DEBUG_BUS),y)
 EXTRA_CFLAGS += -DDEBUG
 endif
 
-ifeq ($(CONFIG_I2C_VENUS_WAIT_COMPLETE_AT_END),y)
-EXTRA_CFLAGS += -DI2C_VENUS_WAIT_COMPLETE_AT_END
-endif
+

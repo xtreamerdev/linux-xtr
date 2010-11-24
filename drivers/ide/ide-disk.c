@@ -70,6 +70,7 @@
 #include <asm/uaccess.h>
 #include <asm/io.h>
 #include <asm/div64.h>
+#include <platform.h>
 
 #include "debug.h"
 
@@ -1297,6 +1298,10 @@ static void __exit idedisk_exit (void)
 static int idedisk_init (void)
 {
 	idediskinfo("idedisk_init\n");
+
+	if(is_mars_cpu())
+		return 0;
+	
 	return driver_register(&idedisk_driver.gen_driver);
 }
 

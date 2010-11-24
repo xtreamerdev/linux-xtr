@@ -440,4 +440,21 @@ config SENSORS_M41T00
 	  This driver can also be built as a module.  If so, the module
 	  will be called m41t00.
 
+config SENSORS_STFPC320
+	tristate "ST STFPC320 chip"
+	depends on I2C && REALTEK_VENUS
+	help
+	  If you say yes here you get support for the ST STFPC320 chip.
+	  Now only RTC function is available for it.
+
+	  This driver can also be built as a module.  If so, the module
+	  will be called stfpc320.
+
+config SENSORS_STFPC320_ADDR
+	hex "I2C address of STFPC320"
+	depends on SENSORS_STFPC320
+	default "0x29"
+	help
+	  The I2C address of SENSORS_STFPC320.
+
 endmenu
