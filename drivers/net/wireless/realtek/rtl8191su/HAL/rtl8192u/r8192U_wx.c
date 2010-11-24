@@ -15,7 +15,7 @@
  * file called LICENSE.
  *
  * Contact Information:
- * Jerry chuang <wlanfae@realtek.com>
+ * wlanfae <wlanfae@realtek.com>
 ******************************************************************************/
 
 #ifdef RTL8192SU
@@ -41,13 +41,18 @@ u32 rtl8180_rates[] = {1000000,2000000,5500000,11000000,
 #define ENETDOWN 1
 #endif
 
+#if defined(ENABLE_UNASSOCIATED_USB_SUSPEND) && !defined(ENABLE_UNASSOCIATED_USB_AUTOSUSPEND)
+extern int rtl8192U_resume (struct usb_interface *intf);
+#endif
+
+
 static int r8192_wx_get_freq(struct net_device *dev,
 			     struct iw_request_info *a,
 			     union iwreq_data *wrqu, char *b)
 {
-	struct r8192_priv *priv = ieee80211_priv(dev);
+	struct r8192_priv *priv = rtllib_priv(dev);
 	
-	return ieee80211_wx_get_freq(priv->ieee80211,a,wrqu,b);
+	return rtllib_wx_get_freq(priv->rtllib,a,wrqu,b);
 }
 
 
@@ -59,12 +64,12 @@ static int r8192_wx_set_beaconinterval(struct net_device *dev, struct iw_request
 	int *parms = (int *)b;
 	int bi = parms[0];
 	
-	struct r8192_priv *priv = ieee80211_priv(dev);
+	struct r8192_priv *priv = rtllib_priv(dev);
 	
 	down(&priv->wx_sem);
 	DMESG("setting beacon interval to %x",bi);
 	
-	priv->ieee80211->beacon_interval=bi;
+	priv->rtllib->beacon_interval=bi;
 	rtl8180_commit(dev);
 	up(&priv->wx_sem);
 		
@@ -75,10 +80,10 @@ static int r8192_wx_set_beaconinterval(struct net_device *dev, struct iw_request
 static int r8192_wx_set_forceassociate(struct net_device *dev, struct iw_request_info *aa,
 			  union iwreq_data *wrqu, char *extra)
 {
-	struct r8192_priv *priv=ieee80211_priv(dev);	
+	struct r8192_priv *priv=rtllib_priv(dev);	
 	int *parms = (int *)extra;
 	
-	priv->ieee80211->force_associate = (parms[0] > 0);
+	priv->rtllib->force_associate = (parms[0] > 0);
 	
 
 	return 0;
@@ -88,9 +93,9 @@ static int r8192_wx_set_forceassociate(struct net_device *dev, struct iw_request
 static int r8192_wx_get_mode(struct net_device *dev, struct iw_request_info *a,
 			     union iwreq_data *wrqu, char *b)
 {
-	struct r8192_priv *priv=ieee80211_priv(dev);	
+	struct r8192_priv *priv=rtllib_priv(dev);	
 
-	return ieee80211_wx_get_mode(priv->ieee80211,a,wrqu,b);
+	return rtllib_wx_get_mode(priv->rtllib,a,wrqu,b);
 }
 
 
@@ -99,8 +104,8 @@ static int r8192_wx_get_rate(struct net_device *dev,
 			     struct iw_request_info *info, 
 			     union iwreq_data *wrqu, char *extra)
 {
-	struct r8192_priv *priv = ieee80211_priv(dev);
-	return ieee80211_wx_get_rate(priv->ieee80211,info,wrqu,extra);
+	struct r8192_priv *priv = rtllib_priv(dev);
+	return rtllib_wx_get_rate(priv->rtllib,info,wrqu,extra);
 }
 
 
@@ -110,11 +115,11 @@ static int r8192_wx_set_rate(struct net_device *dev,
 			     union iwreq_data *wrqu, char *extra)
 {
 	int ret;
-	struct r8192_priv *priv = ieee80211_priv(dev);	
+	struct r8192_priv *priv = rtllib_priv(dev);	
 	
 	down(&priv->wx_sem);
 
-	ret = ieee80211_wx_set_rate(priv->ieee80211,info,wrqu,extra);
+	ret = rtllib_wx_set_rate(priv->rtllib,info,wrqu,extra);
 	
 	up(&priv->wx_sem);
 	
@@ -127,11 +132,11 @@ static int r8192_wx_set_rts(struct net_device *dev,
 			     union iwreq_data *wrqu, char *extra)
 {
 	int ret;
-	struct r8192_priv *priv = ieee80211_priv(dev);	
+	struct r8192_priv *priv = rtllib_priv(dev);	
 	
 	down(&priv->wx_sem);
 
-	ret = ieee80211_wx_set_rts(priv->ieee80211,info,wrqu,extra);
+	ret = rtllib_wx_set_rts(priv->rtllib,info,wrqu,extra);
 	
 	up(&priv->wx_sem);
 	
@@ -142,8 +147,8 @@ static int r8192_wx_get_rts(struct net_device *dev,
 			     struct iw_request_info *info, 
 			     union iwreq_data *wrqu, char *extra)
 {
-	struct r8192_priv *priv = ieee80211_priv(dev);
-	return ieee80211_wx_get_rts(priv->ieee80211,info,wrqu,extra);
+	struct r8192_priv *priv = rtllib_priv(dev);
+	return rtllib_wx_get_rts(priv->rtllib,info,wrqu,extra);
 }
 
 static int r8192_wx_set_power(struct net_device *dev, 
@@ -151,11 +156,11 @@ static int r8192_wx_set_power(struct net_device *dev,
 			     union iwreq_data *wrqu, char *extra)
 {
 	int ret;
-	struct r8192_priv *priv = ieee80211_priv(dev);	
+	struct r8192_priv *priv = rtllib_priv(dev);	
 	
 	down(&priv->wx_sem);
 
-	ret = ieee80211_wx_set_power(priv->ieee80211,info,wrqu,extra);
+	ret = rtllib_wx_set_power(priv->rtllib,info,wrqu,extra);
 	
 	up(&priv->wx_sem);
 	
@@ -166,21 +171,21 @@ static int r8192_wx_get_power(struct net_device *dev,
 			     struct iw_request_info *info, 
 			     union iwreq_data *wrqu, char *extra)
 {
-	struct r8192_priv *priv = ieee80211_priv(dev);
-	return ieee80211_wx_get_power(priv->ieee80211,info,wrqu,extra);
+	struct r8192_priv *priv = rtllib_priv(dev);
+	return rtllib_wx_get_power(priv->rtllib,info,wrqu,extra);
 }
 
 
 
-#ifdef RTK_DMP_PLATFORM
+//#ifdef RTK_DMP_PLATFORM
 static int r8192_wx_get_ap_status(struct net_device *dev,
                                struct iw_request_info *info,
                                union iwreq_data *wrqu, char *extra)
 {
-        struct r8192_priv *priv = ieee80211_priv(dev);
-        struct ieee80211_device *ieee = priv->ieee80211;
-        struct ieee80211_network *target;
-	struct ieee80211_network *latest = NULL;
+        struct r8192_priv *priv = rtllib_priv(dev);
+        struct rtllib_device *ieee = priv->rtllib;
+        struct rtllib_network *target;
+	struct rtllib_network *latest = NULL;
 	int name_len;
 
         down(&priv->wx_sem);
@@ -195,7 +200,7 @@ static int r8192_wx_get_ap_status(struct net_device *dev,
 			if ((latest == NULL) ||(target->last_scanned > latest->last_scanned))
 				latest = target;
 #if 0
-			//if( ((jiffies-target->last_scanned)/HZ > 1) && (ieee->state == IEEE80211_LINKED) && (is_same_network(&ieee->current_network,target)) )
+			//if( ((jiffies-target->last_scanned)/HZ > 1) && (ieee->state == RTLLIB_LINKED) && (is_same_network(&ieee->current_network,target)) )
 			//	wrqu->data.length = 999;
 			//else
 				wrqu->data.length = target->SignalStrength;
@@ -206,7 +211,7 @@ static int r8192_wx_get_ap_status(struct net_device *dev,
 			} else {
 				wrqu->data.flags = 0;
 			}
-			break;
+		break;
 #endif
 		}
         }
@@ -232,7 +237,7 @@ static int r8192_wx_set_countrycode(struct net_device *dev,
                                struct iw_request_info *info,
                                union iwreq_data *wrqu, char *extra)
 {
-        struct r8192_priv *priv = ieee80211_priv(dev);
+        struct r8192_priv *priv = rtllib_priv(dev);
 	int	countrycode=0;
 
         down(&priv->wx_sem);
@@ -245,7 +250,7 @@ static int r8192_wx_set_countrycode(struct net_device *dev,
         up(&priv->wx_sem);
         return 0;
 }
-#endif
+//#endif
 
 static int r8192_wx_null(struct net_device *dev,
 		struct iw_request_info *info,
@@ -258,7 +263,7 @@ static int r8192_wx_force_reset(struct net_device *dev,
 		struct iw_request_info *info,
 		union iwreq_data *wrqu, char *extra)
 {
-	struct r8192_priv *priv = ieee80211_priv(dev);
+	struct r8192_priv *priv = rtllib_priv(dev);
 	
 	down(&priv->wx_sem);
 
@@ -274,7 +279,7 @@ static int r8191su_wx_get_firm_version(struct net_device *dev,
 		struct iw_request_info *info,
 		struct iw_param *wrqu, char *extra)
 {
-	struct r8192_priv *priv = ieee80211_priv(dev);
+	struct r8192_priv *priv = rtllib_priv(dev);
 	u16 firmware_version;
 
 	down(&priv->wx_sem);
@@ -291,8 +296,8 @@ static int r8192_wx_force_mic_error(struct net_device *dev,
 		struct iw_request_info *info,
 		union iwreq_data *wrqu, char *extra)
 {
-	struct r8192_priv *priv = ieee80211_priv(dev);
-	struct ieee80211_device* ieee = priv->ieee80211;
+	struct r8192_priv *priv = rtllib_priv(dev);
+	struct rtllib_device* ieee = priv->rtllib;
 	
 	down(&priv->wx_sem);
 
@@ -303,7 +308,7 @@ static int r8192_wx_force_mic_error(struct net_device *dev,
 
 }
 
-#ifdef RTL8192U
+
 #define MAX_ADHOC_PEER_NUM 64 //YJ,modified,090304
 typedef struct 
 {
@@ -320,7 +325,7 @@ int r8192_wx_get_adhoc_peers(struct net_device *dev,
 			       struct iw_request_info *info, 
 			       union iwreq_data *wrqu, char *extra)
 {
-	struct r8192_priv *priv = ieee80211_priv(dev);
+	struct r8192_priv *priv = rtllib_priv(dev);
 	struct sta_info * psta = NULL;
 	adhoc_peers_info_t adhoc_peers_info;
 	p_adhoc_peers_info_t  padhoc_peers_info = &adhoc_peers_info; //(p_adhoc_peers_info_t)extra;
@@ -334,7 +339,7 @@ int r8192_wx_get_adhoc_peers(struct net_device *dev,
 
 	for(k=0; k<PEER_MAX_ASSOC; k++)
 	{
-		psta = priv->ieee80211->peer_assoc_list[k];
+		psta = priv->rtllib->peer_assoc_list[k];
 		if(NULL != psta)
 		{
 			padhoc_peer_entry = &padhoc_peers_info->Entry[padhoc_peers_info->num];
@@ -357,17 +362,17 @@ int r8192_wx_get_adhoc_peers(struct net_device *dev,
 	return 0;
 
 }
-#endif
+
 static int r8192_wx_set_rawtx(struct net_device *dev, 
 			       struct iw_request_info *info, 
 			       union iwreq_data *wrqu, char *extra)
 {
-	struct r8192_priv *priv = ieee80211_priv(dev);
+	struct r8192_priv *priv = rtllib_priv(dev);
 	int ret;
 	
 	down(&priv->wx_sem);
 	
-	ret = ieee80211_wx_set_rawtx(priv->ieee80211, info, wrqu, extra);
+	ret = rtllib_wx_set_rawtx(priv->rtllib, info, wrqu, extra);
 	
 	up(&priv->wx_sem);
 	
@@ -379,7 +384,7 @@ static int r8192_wx_set_crcmon(struct net_device *dev,
 			       struct iw_request_info *info, 
 			       union iwreq_data *wrqu, char *extra)
 {
-	struct r8192_priv *priv = ieee80211_priv(dev);
+	struct r8192_priv *priv = rtllib_priv(dev);
 	int *parms = (int *)extra;
 	int enable = (parms[0] > 0);
 	short prev = priv->crcmon;
@@ -404,14 +409,118 @@ static int r8192_wx_set_crcmon(struct net_device *dev,
 	return 0;
 }
 
+// check ac/dc status with the help of user space application */
+static int r8192_wx_adapter_power_status(struct net_device *dev,
+		struct iw_request_info *info,
+		union iwreq_data *wrqu, char *extra)
+{
+	struct r8192_priv *priv = rtllib_priv(dev);
+#ifdef ENABLE_LPS
+	PRT_POWER_SAVE_CONTROL pPSC = (PRT_POWER_SAVE_CONTROL)(&(priv->rtllib->PowerSaveControl));
+	struct rtllib_device* ieee = priv->rtllib;
+#endif
+	down(&priv->wx_sem);
+
+#ifdef ENABLE_LPS
+	RT_TRACE(COMP_POWER, "%s(): %s\n",__FUNCTION__, (*extra ==  6)?"DC power":"AC power");
+    // ieee->ps shall not be set under DC mode, otherwise it conflict 
+    // with Leisure power save mode setting.
+    //
+	if(*extra || priv->force_lps) {
+		priv->ps_force = false;
+		pPSC->bLeisurePs = true;
+	} else {
+		priv->ps_force = true;
+		pPSC->bLeisurePs = false;
+		ieee->ps = *extra;	
+	}
+
+#endif
+	up(&priv->wx_sem);
+	return 0;
+
+}
+
+
+static int r8192se_wx_set_lps_awake_interval(struct net_device *dev,
+        struct iw_request_info *info,
+        union iwreq_data *wrqu, char *extra)
+{
+    struct r8192_priv *priv = rtllib_priv(dev);
+    PRT_POWER_SAVE_CONTROL	pPSC = (PRT_POWER_SAVE_CONTROL)(&(priv->rtllib->PowerSaveControl));
+
+    down(&priv->wx_sem);
+
+    printk("%s(): set lps awake interval ! extra is %d\n",__FUNCTION__, *extra);
+
+    pPSC->RegMaxLPSAwakeIntvl = *extra;
+    up(&priv->wx_sem);
+    return 0;
+
+}
+
+static int r8192se_wx_set_force_lps(struct net_device *dev,
+		struct iw_request_info *info,
+		union iwreq_data *wrqu, char *extra)
+{
+	struct r8192_priv *priv = rtllib_priv(dev);
+	
+	down(&priv->wx_sem);
+
+	printk("%s(): force LPS ! extra is %d (1 is open 0 is close)\n",__FUNCTION__, *extra);
+	priv->force_lps = *extra;
+	up(&priv->wx_sem);
+	return 0;
+
+}
+
 static int r8192_wx_set_mode(struct net_device *dev, struct iw_request_info *a,
 			     union iwreq_data *wrqu, char *b)
 {
-	struct r8192_priv *priv = ieee80211_priv(dev);
+	struct r8192_priv *priv = rtllib_priv(dev);
+#ifdef ENABLE_IPS	
+	RT_RF_POWER_STATE	rtState;
+#endif
 	int ret;
+
+#ifdef ENABLE_UNASSOCIATED_USB_SUSPEND
+	if (priv->is_suspended) {
+		printk("%s-%d: autoresume...\n", __FUNCTION__, __LINE__);
+#ifdef ENABLE_UNASSOCIATED_USB_AUTOSUSPEND
+		usb_autopm_disable(priv->intf);
+#else
+		rtl8192U_resume(priv->intf);
+#endif
+	}
+        priv->suspend_delay_cnt = 0;
+#endif
+
 	down(&priv->wx_sem);
+
+#ifdef ENABLE_IPS	
+	rtState = priv->rtllib->eRFPowerState;
+	if(wrqu->mode == IW_MODE_ADHOC){
 	
-	ret = ieee80211_wx_set_mode(priv->ieee80211,a,wrqu,b);
+		if(priv->rtllib->PowerSaveControl.bInactivePs){ 
+			if(rtState == eRfOff){
+				if(priv->rtllib->RfOffReason > RF_CHANGE_BY_IPS)
+				{
+					RT_TRACE(COMP_ERR, "%s(): RF is OFF.\n",__FUNCTION__);
+					up(&priv->wx_sem);
+					return -1;
+				}
+				else{
+					printk("=========>%s(): IPSLeave\n",__FUNCTION__);
+					down(&priv->rtllib->ips_sem);
+					IPSLeave(dev);
+					up(&priv->rtllib->ips_sem);
+				}
+			}
+		}
+	}
+#endif
+	
+	ret = rtllib_wx_set_mode(priv->rtllib,a,wrqu,b);
 	
 	//rtl8192_set_rxconf(dev);  //YJ,del,090414, it may cause bit RCR_CBSSID set to 1 when mode changes from managed to ad-hoc.
 	
@@ -447,7 +556,7 @@ static int rtl8180_wx_get_range(struct net_device *dev,
 {
 	struct iw_range *range = (struct iw_range *)extra;
 	struct iw_range_with_scan_capa* tmp = (struct iw_range_with_scan_capa*)range;
-	struct r8192_priv *priv = ieee80211_priv(dev);
+	struct r8192_priv *priv = rtllib_priv(dev);
 	u16 val;
 	int i;
 
@@ -522,12 +631,12 @@ static int rtl8180_wx_get_range(struct net_device *dev,
 		
 		// Include only legal frequencies for some countries
 #ifdef ENABLE_DOT11D
-		if ((GET_DOT11D_INFO(priv->ieee80211)->channel_map)[i+1]) {
+		if ((GET_DOT11D_INFO(priv->rtllib)->channel_map)[i+1]) {
 #else
-		if ((priv->ieee80211->channel_map)[i+1]) {
+		if ((priv->rtllib->channel_map)[i+1]) {
 #endif
 		        range->freq[val].i = i + 1;
-			range->freq[val].m = ieee80211_wlan_frequencies[i] * 100000;
+			range->freq[val].m = rtllib_wlan_frequencies[i] * 100000;
 			range->freq[val].e = 1;
 			val++;
 		} else {
@@ -552,13 +661,32 @@ static int rtl8180_wx_get_range(struct net_device *dev,
 static int r8192_wx_set_scan(struct net_device *dev, struct iw_request_info *a,
 			     union iwreq_data *wrqu, char *b)
 {
-	struct r8192_priv *priv = ieee80211_priv(dev);
-	struct ieee80211_device* ieee = priv->ieee80211;
+	struct r8192_priv *priv = rtllib_priv(dev);
+	struct rtllib_device* ieee = priv->rtllib;
+	RT_RF_POWER_STATE	rtState;
 	int ret = 0;
+
+#ifdef ENABLE_UNASSOCIATED_USB_SUSPEND
+	if (priv->is_suspended) {
+		printk("%s-%d: usb_autoresume...\n", __FUNCTION__, __LINE__);
+#ifdef ENABLE_UNASSOCIATED_USB_AUTOSUSPEND
+		usb_autopm_disable(priv->intf);
+#else
+		rtl8192U_resume(priv->intf);
+#endif
+	}
+        priv->suspend_delay_cnt = 0;
+#endif
+
+	if(priv->bHwRadioOff == true){
+		printk("================>%s(): hwradio off\n",__FUNCTION__);
+		return 0;
+	}
+	rtState = priv->rtllib->eRFPowerState;
 	
 	if(!priv->up) return -ENETDOWN;
 	
-	if (priv->ieee80211->LinkDetectInfo.bBusyTraffic == true)
+	if (priv->rtllib->LinkDetectInfo.bBusyTraffic == true)
 		return -EAGAIN;
 #if WIRELESS_EXT > 17
 	if (wrqu->data.flags & IW_SCAN_THIS_ESSID)
@@ -575,18 +703,48 @@ static int r8192_wx_set_scan(struct net_device *dev, struct iw_request_info *a,
 #endif	
 	
 	down(&priv->wx_sem);
-	if(priv->ieee80211->state != IEEE80211_LINKED){
+#ifdef ENABLE_IPS
+	priv->rtllib->actscanning = true;
+	if(priv->rtllib->state != RTLLIB_LINKED){
+		if(priv->rtllib->PowerSaveControl.bInactivePs){ 
+			if(rtState == eRfOff){
+				if(priv->rtllib->RfOffReason > RF_CHANGE_BY_IPS)
+				{
+					RT_TRACE(COMP_ERR, "%s(): RF is OFF.\n",__FUNCTION__);
+					up(&priv->wx_sem);
+					return -1;
+				}
+				else{
+					printk("=========>%s(): IPSLeave\n",__FUNCTION__);
+					down(&priv->rtllib->ips_sem);
+					IPSLeave(dev);
+					up(&priv->rtllib->ips_sem);				}
+			}
+		}
+		priv->rtllib->scanning = 0;
+		if(priv->rtllib->LedControlHandler)
+			priv->rtllib->LedControlHandler(dev, LED_CTL_SITE_SURVEY);
+                if(priv->rtllib->eRFPowerState != eRfOff){
+			priv->rtllib->sync_scan_hurryup = 0;
+			rtllib_softmac_scan_syncro(priv->rtllib);
+                }
+		ret = 0;
+	}
+	else
+#else	
+	if(priv->rtllib->state != RTLLIB_LINKED){
 		
-		if(priv->ieee80211->LedControlHandler != NULL)
-			priv->ieee80211->LedControlHandler(dev, LED_CTL_SITE_SURVEY);
+		if(priv->rtllib->LedControlHandler != NULL)
+			priv->rtllib->LedControlHandler(dev, LED_CTL_SITE_SURVEY);
 		
-                priv->ieee80211->scanning = 0;
-                priv->ieee80211->sync_scan_hurryup = 0;
-                ieee80211_softmac_scan_syncro(priv->ieee80211);
+                priv->rtllib->scanning = 0;
+                priv->rtllib->sync_scan_hurryup = 0;
+                rtllib_softmac_scan_syncro(priv->rtllib);
                 ret = 0;
         }
 	else
-	ret = ieee80211_wx_set_scan(priv->ieee80211,a,wrqu,b);
+#endif
+		ret = rtllib_wx_set_scan(priv->rtllib,a,wrqu,b);
 	up(&priv->wx_sem);
 	return ret;
 }
@@ -597,13 +755,13 @@ static int r8192_wx_get_scan(struct net_device *dev, struct iw_request_info *a,
 {
 
 	int ret;
-	struct r8192_priv *priv = ieee80211_priv(dev);
+	struct r8192_priv *priv = rtllib_priv(dev);
 	
 	if(!priv->up) return -ENETDOWN;
 			
 	down(&priv->wx_sem);
 
-	ret = ieee80211_wx_get_scan(priv->ieee80211,a,wrqu,b);
+	ret = rtllib_wx_get_scan(priv->rtllib,a,wrqu,b);
 		
 	up(&priv->wx_sem);
 	
@@ -614,11 +772,24 @@ static int r8192_wx_set_essid(struct net_device *dev,
 			      struct iw_request_info *a,
 			      union iwreq_data *wrqu, char *b)
 {
-	struct r8192_priv *priv = ieee80211_priv(dev);
+	struct r8192_priv *priv = rtllib_priv(dev);
 	int ret;
+
+#ifdef ENABLE_UNASSOCIATED_USB_SUSPEND
+	if (priv->is_suspended) {
+		printk("%s-%d: autoresume...\n", __FUNCTION__, __LINE__);
+#ifdef ENABLE_UNASSOCIATED_USB_AUTOSUSPEND
+		usb_autopm_disable(priv->intf);
+#else
+		rtl8192U_resume(priv->intf);
+#endif
+	}
+        priv->suspend_delay_cnt = 0;
+#endif
+	
 	down(&priv->wx_sem);
 	
-	ret = ieee80211_wx_set_essid(priv->ieee80211,a,wrqu,b);
+	ret = rtllib_wx_set_essid(priv->rtllib,a,wrqu,b);
 
 	up(&priv->wx_sem);
 
@@ -633,11 +804,11 @@ static int r8192_wx_get_essid(struct net_device *dev,
 			      union iwreq_data *wrqu, char *b)
 {
 	int ret;
-	struct r8192_priv *priv = ieee80211_priv(dev);
+	struct r8192_priv *priv = rtllib_priv(dev);
 	
 	down(&priv->wx_sem);
 	
-	ret = ieee80211_wx_get_essid(priv->ieee80211, a, wrqu, b);
+	ret = rtllib_wx_get_essid(priv->rtllib, a, wrqu, b);
 
 	up(&priv->wx_sem);
 	
@@ -649,11 +820,11 @@ static int r8192_wx_set_freq(struct net_device *dev, struct iw_request_info *a,
 			     union iwreq_data *wrqu, char *b)
 {
 	int ret;
-	struct r8192_priv *priv = ieee80211_priv(dev);
+	struct r8192_priv *priv = rtllib_priv(dev);
 	
 	down(&priv->wx_sem);
 	
-	ret = ieee80211_wx_set_freq(priv->ieee80211, a, wrqu, b);
+	ret = rtllib_wx_set_freq(priv->rtllib, a, wrqu, b);
 	
 	up(&priv->wx_sem);
 	return ret;
@@ -663,8 +834,8 @@ static int r8192_wx_get_name(struct net_device *dev,
 			     struct iw_request_info *info, 
 			     union iwreq_data *wrqu, char *extra)
 {
-	struct r8192_priv *priv = ieee80211_priv(dev);
-	return ieee80211_wx_get_name(priv->ieee80211, info, wrqu, extra);
+	struct r8192_priv *priv = rtllib_priv(dev);
+	return rtllib_wx_get_name(priv->rtllib, info, wrqu, extra);
 }
 
 
@@ -672,16 +843,16 @@ static int r8192_wx_set_frag(struct net_device *dev,
 			     struct iw_request_info *info, 
 			     union iwreq_data *wrqu, char *extra)
 {
-	struct r8192_priv *priv = ieee80211_priv(dev);
+	struct r8192_priv *priv = rtllib_priv(dev);
 
 	if (wrqu->frag.disabled)
-		priv->ieee80211->fts = DEFAULT_FRAG_THRESHOLD;
+		priv->rtllib->fts = DEFAULT_FRAG_THRESHOLD;
 	else {
 		if (wrqu->frag.value < MIN_FRAG_THRESHOLD ||
 		    wrqu->frag.value > MAX_FRAG_THRESHOLD)
 			return -EINVAL;
 		
-		priv->ieee80211->fts = wrqu->frag.value & ~0x1;
+		priv->rtllib->fts = wrqu->frag.value & ~0x1;
 	}
 
 	return 0;
@@ -692,9 +863,9 @@ static int r8192_wx_get_frag(struct net_device *dev,
 			     struct iw_request_info *info, 
 			     union iwreq_data *wrqu, char *extra)
 {
-	struct r8192_priv *priv = ieee80211_priv(dev);
+	struct r8192_priv *priv = rtllib_priv(dev);
 
-	wrqu->frag.value = priv->ieee80211->fts;
+	wrqu->frag.value = priv->rtllib->fts;
 	wrqu->frag.fixed = 0;	/* no auto select */
 	wrqu->frag.disabled = (wrqu->frag.value == DEFAULT_FRAG_THRESHOLD);
 
@@ -709,11 +880,11 @@ static int r8192_wx_set_wap(struct net_device *dev,
 {
 
 	int ret;
-	struct r8192_priv *priv = ieee80211_priv(dev);
+	struct r8192_priv *priv = rtllib_priv(dev);
 //        struct sockaddr *temp = (struct sockaddr *)awrq;
 	down(&priv->wx_sem);
 	
-	ret = ieee80211_wx_set_wap(priv->ieee80211,info,awrq,extra);
+	ret = rtllib_wx_set_wap(priv->rtllib,info,awrq,extra);
 
 	up(&priv->wx_sem);
 
@@ -726,9 +897,9 @@ static int r8192_wx_get_wap(struct net_device *dev,
 			    struct iw_request_info *info, 
 			    union iwreq_data *wrqu, char *extra)
 {
-	struct r8192_priv *priv = ieee80211_priv(dev);
+	struct r8192_priv *priv = rtllib_priv(dev);
 	
-	return ieee80211_wx_get_wap(priv->ieee80211,info,wrqu,extra);
+	return rtllib_wx_get_wap(priv->rtllib,info,wrqu,extra);
 }
 
 
@@ -736,17 +907,17 @@ static int r8192_wx_get_enc(struct net_device *dev,
 			    struct iw_request_info *info, 
 			    union iwreq_data *wrqu, char *key)
 {
-	struct r8192_priv *priv = ieee80211_priv(dev);
+	struct r8192_priv *priv = rtllib_priv(dev);
 	
-	return ieee80211_wx_get_encode(priv->ieee80211, info, wrqu, key);
+	return rtllib_wx_get_encode(priv->rtllib, info, wrqu, key);
 }
 
 static int r8192_wx_set_enc(struct net_device *dev, 
 			    struct iw_request_info *info, 
 			    union iwreq_data *wrqu, char *key)
 {
-	struct r8192_priv *priv = ieee80211_priv(dev);
-	struct ieee80211_device *ieee = priv->ieee80211;
+	struct r8192_priv *priv = rtllib_priv(dev);
+	struct rtllib_device *ieee = priv->rtllib;
 	int ret;
 
 	//u32 TargetContent;
@@ -760,18 +931,42 @@ static int r8192_wx_set_enc(struct net_device *dev,
 				{0x00,0x00,0x00,0x00,0x00,0x03} };
 	int i;
 
+#ifdef ENABLE_UNASSOCIATED_USB_SUSPEND
+	if (priv->is_suspended) {
+		printk("%s-%d: usb_autoresume...\n", __FUNCTION__, __LINE__);
+#ifdef ENABLE_UNASSOCIATED_USB_AUTOSUSPEND
+		usb_autopm_disable(priv->intf);
+#else
+		rtl8192U_resume(priv->intf);
+#endif
+	}
+        priv->suspend_delay_cnt = 0;
+#endif
+
        if(!priv->up) return -ENETDOWN;
 
+        priv->rtllib->wx_set_enc = 1;
+#ifdef ENABLE_IPS
+        down(&priv->rtllib->ips_sem);
+        IPSLeave(dev);
+        up(&priv->rtllib->ips_sem);			
+#endif
 	down(&priv->wx_sem);
 	
 	RT_TRACE(COMP_SEC, "Setting SW wep key");
-	ret = ieee80211_wx_set_encode(priv->ieee80211,info,wrqu,key);
+	ret = rtllib_wx_set_encode(priv->rtllib,info,wrqu,key);
 
 	up(&priv->wx_sem);
 
 
 
 	//sometimes, the length is zero while we do not type key value
+	if (wrqu->encoding.flags & IW_ENCODE_DISABLED) {
+		ieee->pairwise_key_type = ieee->group_key_type = KEY_TYPE_NA;
+		CamResetAllEntry(dev);
+		memset(priv->rtllib->swcamtable,0,sizeof(SW_CAM_TABLE)*32);//added by amy for silent reset 090415 
+		goto end_hw_sec;
+	}
 	if(wrqu->encoding.length!=0){
 
 		for(i=0 ; i<4 ; i++){
@@ -825,7 +1020,8 @@ static int r8192_wx_set_enc(struct net_device *dev,
 		else printk("wrong type in WEP, not WEP40 and WEP104\n");
 
 	}
-
+end_hw_sec:
+        priv->rtllib->wx_set_enc = 0;
 	return ret;
 }
 
@@ -833,11 +1029,11 @@ static int r8192_wx_set_enc(struct net_device *dev,
 static int r8192_wx_set_scan_type(struct net_device *dev, struct iw_request_info *aa, union
  iwreq_data *wrqu, char *p){
   
- 	struct r8192_priv *priv = ieee80211_priv(dev);
+ 	struct r8192_priv *priv = rtllib_priv(dev);
 	int *parms=(int*)p;
 	int mode=parms[0];
 	
-	priv->ieee80211->active_scan = mode;
+	priv->rtllib->active_scan = mode;
 	
 	return 1;
 }
@@ -848,7 +1044,7 @@ static int r8192_wx_set_retry(struct net_device *dev,
 				struct iw_request_info *info, 
 				union iwreq_data *wrqu, char *extra)
 {
-	struct r8192_priv *priv = ieee80211_priv(dev);
+	struct r8192_priv *priv = rtllib_priv(dev);
 	int err = 0;
 	
 	down(&priv->wx_sem);
@@ -901,7 +1097,7 @@ static int r8192_wx_get_retry(struct net_device *dev,
 				struct iw_request_info *info, 
 				union iwreq_data *wrqu, char *extra)
 {
-	struct r8192_priv *priv = ieee80211_priv(dev);
+	struct r8192_priv *priv = rtllib_priv(dev);
 	
 
 	wrqu->retry.disabled = 0; // can't be disabled */
@@ -927,7 +1123,7 @@ static int r8192_wx_get_sens(struct net_device *dev,
 				struct iw_request_info *info, 
 				union iwreq_data *wrqu, char *extra)
 {
-	struct r8192_priv *priv = ieee80211_priv(dev);
+	struct r8192_priv *priv = rtllib_priv(dev);
 	if(priv->rf_set_sens == NULL) 
 		return -1; // we have not this support for this radio */
 	wrqu->sens.value = priv->sens;
@@ -940,7 +1136,7 @@ static int r8192_wx_set_sens(struct net_device *dev,
 				union iwreq_data *wrqu, char *extra)
 {
 	
-	struct r8192_priv *priv = ieee80211_priv(dev);
+	struct r8192_priv *priv = rtllib_priv(dev);
 	
 	short err = 0;
 	down(&priv->wx_sem);
@@ -966,9 +1162,9 @@ static int r8192_wx_get_enc_ext(struct net_device *dev,
                                         struct iw_request_info *info,
                                         union iwreq_data *wrqu, char *extra)
 {
-	struct r8192_priv *priv = ieee80211_priv(dev);
+	struct r8192_priv *priv = rtllib_priv(dev);
 	int ret = 0;
-	ret = ieee80211_wx_get_encode_ext(priv->ieee80211, info, wrqu, extra);
+	ret = rtllib_wx_get_encode_ext(priv->rtllib, info, wrqu, extra);
 	return ret;
 }
 #endif
@@ -978,14 +1174,39 @@ static int r8192_wx_set_enc_ext(struct net_device *dev,
                                         union iwreq_data *wrqu, char *extra)
 {
 	int ret=0;
-	#if LINUX_VERSION_CODE > KERNEL_VERSION(2,5,0)
-	struct r8192_priv *priv = ieee80211_priv(dev);
-	struct ieee80211_device* ieee = priv->ieee80211;
+// Modified by Albert 2009/09/22
+// If the wireless extension version is greater than 18,
+// it means the kernel had supported.
+// The older kernel version can support more functions by
+// patching the wireless extension and the kernel version is still the same.
+
+#if (WIRELESS_EXT >= 18)
+	struct r8192_priv *priv = rtllib_priv(dev);
+	struct rtllib_device* ieee = priv->rtllib;
 	//printk("===>%s()\n", __FUNCTION__);
 
+#ifdef ENABLE_UNASSOCIATED_USB_SUSPEND
+	if (priv->is_suspended) {
+		printk("%s-%d: autoresume...\n", __FUNCTION__, __LINE__);
+#ifdef ENABLE_UNASSOCIATED_USB_AUTOSUSPEND
+		usb_autopm_disable(priv->intf);
+#else
+		rtl8192U_resume(priv->intf);
+#endif
+	}
+        priv->suspend_delay_cnt = 0;
+#endif
 	
 	down(&priv->wx_sem);
-	ret = ieee80211_wx_set_encode_ext(priv->ieee80211, info, wrqu, extra);
+
+        priv->rtllib->wx_set_enc = 1;
+#ifdef ENABLE_IPS
+        down(&priv->rtllib->ips_sem);
+        IPSLeave(dev);
+        up(&priv->rtllib->ips_sem);			
+#endif
+
+	ret = rtllib_wx_set_encode_ext(priv->rtllib, info, wrqu, extra);
 	
 	{
 		u8 broadcast_addr[6] = {0xff,0xff,0xff,0xff,0xff,0xff};
@@ -1060,7 +1281,7 @@ static int r8192_wx_set_enc_ext(struct net_device *dev,
 	}
 
 end_hw_sec:
-
+        priv->rtllib->wx_set_enc = 0;
 	up(&priv->wx_sem);
 #endif
 	return ret;	
@@ -1073,9 +1294,9 @@ static int r8192_wx_set_auth(struct net_device *dev,
 	int ret=0;
 #if LINUX_VERSION_CODE > KERNEL_VERSION(2,5,0)
 	//printk("====>%s()\n", __FUNCTION__);
-	struct r8192_priv *priv = ieee80211_priv(dev);
+	struct r8192_priv *priv = rtllib_priv(dev);
 	down(&priv->wx_sem);
-	ret = ieee80211_wx_set_auth(priv->ieee80211, info, &(data->param), extra);
+	ret = rtllib_wx_set_auth(priv->rtllib, info, &(data->param), extra);
 	up(&priv->wx_sem);
 #endif
 	return ret;
@@ -1089,26 +1310,113 @@ static int r8192_wx_set_mlme(struct net_device *dev,
 
 	int ret=0;
 #if LINUX_VERSION_CODE > KERNEL_VERSION(2,5,0)
-	struct r8192_priv *priv = ieee80211_priv(dev);
+	struct r8192_priv *priv = rtllib_priv(dev);
 	down(&priv->wx_sem);
-	ret = ieee80211_wx_set_mlme(priv->ieee80211, info, wrqu, extra);
+	ret = rtllib_wx_set_mlme(priv->rtllib, info, wrqu, extra);
 
 	up(&priv->wx_sem);
 #endif
 	return ret;
 }
 #endif
+
+/*
+		for PMK cache
+		
+        struct iw_pmksa
+        {
+            __u32   cmd;
+            struct sockaddr bssid;
+            __u8    pmkid[IW_PMKID_LEN];   //IW_PMKID_LEN=16
+        }
+        There are the BSSID information in the bssid.sa_data array.
+        If cmd is IW_PMKSA_FLUSH, it means the wpa_suppplicant wants to clear all the PMKID information.
+        If cmd is IW_PMKSA_ADD, it means the wpa_supplicant wants to add a PMKID/BSSID to driver.
+        If cmd is IW_PMKSA_REMOVE, it means the wpa_supplicant wants to remove a PMKID/BSSID from driver.
+*/
+
+#if (WIRELESS_EXT >= 18)
+static int r8192_wx_set_pmkid(struct net_device *dev,
+                                        struct iw_request_info *info,
+                                        union iwreq_data *wrqu, char *extra)
+{
+	int i;
+	struct r8192_priv *priv = rtllib_priv(dev);
+	struct rtllib_device* ieee = priv->rtllib;
+	struct iw_pmksa*  pPMK = (struct iw_pmksa*)extra;
+	int	intReturn = false;
+	
+	switch (pPMK->cmd)
+	{
+		case IW_PMKSA_ADD:	
+			for (i = 0; i < NUM_PMKID_CACHE; i++)
+			{
+				if (memcmp(ieee->PMKIDList[i].Bssid, pPMK->bssid.sa_data, ETH_ALEN) == 0)
+				{ 
+					// BSSID is matched, the same AP => rewrite with new PMKID.
+                    			memcpy(ieee->PMKIDList[i].PMKID, pPMK->pmkid, IW_PMKID_LEN);
+					memcpy(ieee->PMKIDList[i].Bssid, pPMK->bssid.sa_data, ETH_ALEN);
+					ieee->PMKIDList[i].bUsed = true;
+					intReturn = true;
+					goto __EXIT__;
+				}	
+			}
+			
+			// Find a new entry
+			for (i = 0; i < NUM_PMKID_CACHE; i++)
+			{
+				if (ieee->PMKIDList[i].bUsed == false)
+				{ 
+					// BSSID is matched, the same AP => rewrite with new PMKID.
+					memcpy(ieee->PMKIDList[i].PMKID, pPMK->pmkid, IW_PMKID_LEN);
+					memcpy(ieee->PMKIDList[i].Bssid, pPMK->bssid.sa_data, ETH_ALEN);
+					ieee->PMKIDList[i].bUsed = true;
+					intReturn = true;
+					goto __EXIT__;
+				}	
+			}
+			break;
+				
+		case IW_PMKSA_REMOVE:
+			for (i = 0; i < NUM_PMKID_CACHE; i++)
+			{
+				if (memcmp(ieee->PMKIDList[i].Bssid, pPMK->bssid.sa_data, ETH_ALEN) == true)
+				{
+					// BSSID is matched, the same AP => Remove this PMKID information and reset it. 
+					memset(&ieee->PMKIDList[i], 0x00, sizeof(RT_PMKID_LIST));
+					intReturn = true;
+					break;
+				}	
+	        }
+			break;
+			
+		case IW_PMKSA_FLUSH:
+			memset(&ieee->PMKIDList[0], 0x00, (sizeof(RT_PMKID_LIST) * NUM_PMKID_CACHE));
+			//psecuritypriv->PMKIDIndex = 0;
+            intReturn = true;
+			break;
+			
+		default:	
+			break;
+	}
+	
+__EXIT__:	
+	return (intReturn);
+	
+}                                       
+#endif
+
 static int r8192_wx_set_gen_ie(struct net_device *dev,
                                         struct iw_request_info *info,
                                         union iwreq_data *data, char *extra)
 {
 	   //printk("====>%s(), len:%d\n", __FUNCTION__, data->length);
 	int ret=0;
-#if LINUX_VERSION_CODE > KERNEL_VERSION(2,5,0)
-        struct r8192_priv *priv = ieee80211_priv(dev);
+#if (WIRELESS_EXT >= 18)
+        struct r8192_priv *priv = rtllib_priv(dev);
         down(&priv->wx_sem);
 #if 1
-        ret = ieee80211_wx_set_gen_ie(priv->ieee80211, extra, data->data.length);
+        ret = rtllib_wx_set_gen_ie(priv->rtllib, extra, data->data.length);
 #endif
         up(&priv->wx_sem);
 	//printk("<======%s(), ret:%d\n", __FUNCTION__, ret);
@@ -1187,13 +1495,15 @@ static iw_handler r8192_wx_handlers[] =
 	NULL,//r8192_wx_get_auth,//NULL, 			/* SIOCSIWAUTH */
 	r8192_wx_set_enc_ext, 			/* SIOCSIWENCODEEXT */
 	NULL,//r8192_wx_get_enc_ext,//NULL, 			/* SIOCSIWENCODEEXT */
+	r8192_wx_set_pmkid, 			/* SIOCSIWPMKSA */
 #else
 	NULL,
 	NULL,
 	NULL,
 	NULL,
+	NULL, 			 /*---hole---*/
 #endif
-	NULL, 			/* SIOCSIWPMKSA */
+	r8192_wx_set_pmkid, 			/* SIOCSIWPMKSA */
 	NULL, 			 /*---hole---*/
 	
 }; 
@@ -1239,14 +1549,14 @@ static const struct iw_priv_args r8192_private_args[] = {
 		"firm_ver"
 	}
 #endif
-#ifdef RTL8192U
+
 	,
 	{
 		SIOCIWFIRSTPRIV + 0x7,
 		0, IW_PRIV_TYPE_CHAR|2047, "adhoc_peer_list"
 	}
-#endif
-#ifdef RTK_DMP_PLATFORM
+
+//#ifdef RTK_DMP_PLATFORM
         ,
         {
                 SIOCIWFIRSTPRIV + 0x9,
@@ -1257,7 +1567,25 @@ static const struct iw_priv_args r8192_private_args[] = {
                 SIOCIWFIRSTPRIV + 0xa,
                 IW_PRIV_TYPE_INT | IW_PRIV_SIZE_FIXED | 1, 0, "countrycode"
         }
-#endif	
+//#endif
+	,
+	{
+		SIOCIWFIRSTPRIV + 0xb,
+		IW_PRIV_TYPE_INT | IW_PRIV_SIZE_FIXED|1, IW_PRIV_TYPE_NONE, 
+		"set_power"
+	}
+        ,
+	{
+		SIOCIWFIRSTPRIV + 0xc,
+		IW_PRIV_TYPE_INT | IW_PRIV_SIZE_FIXED|1, IW_PRIV_TYPE_NONE, 
+		"lps_interv"
+	}
+        ,
+	{
+		SIOCIWFIRSTPRIV + 0xd,
+		IW_PRIV_TYPE_INT | IW_PRIV_SIZE_FIXED|1, IW_PRIV_TYPE_NONE, 
+		"lps_force"
+	}
 };
 
 
@@ -1270,32 +1598,35 @@ static iw_handler r8192_private_handler[] = {
 	r8192_wx_set_scan_type,
 	r8192_wx_set_rawtx,
 	r8192_wx_force_reset,
-	(iw_handler)r8192_wx_force_mic_error,
+    (iw_handler)r8192_wx_force_mic_error,
 #ifdef RTL8192SU        
-        (iw_handler)r8191su_wx_get_firm_version,
+    (iw_handler)r8191su_wx_get_firm_version,
+#else
+	r8192_wx_null,
 #endif
-        r8192_wx_null,
-        r8192_wx_null,
-#ifdef RTL8192U
-        r8192_wx_get_adhoc_peers,
-#endif
-#ifdef RTK_DMP_PLATFORM
-        r8192_wx_null,
+	r8192_wx_null,
+	r8192_wx_get_adhoc_peers,
+
+//#ifdef RTK_DMP_PLATFORM
+	r8192_wx_null,
         r8192_wx_get_ap_status, /* offset must be 9 for DMP platform*/
 	r8192_wx_set_countrycode, //Set Channel depend on the country code
-#endif
+//#endif
+    (iw_handler)r8192_wx_adapter_power_status,	    
+    (iw_handler)r8192se_wx_set_lps_awake_interval,
+    (iw_handler)r8192se_wx_set_force_lps,
 };
 
 //#if WIRELESS_EXT >= 17	
 struct iw_statistics *r8192_get_wireless_stats(struct net_device *dev)
 {
-       struct r8192_priv *priv = ieee80211_priv(dev);
-	struct ieee80211_device* ieee = priv->ieee80211;
+       struct r8192_priv *priv = rtllib_priv(dev);
+	struct rtllib_device* ieee = priv->rtllib;
 	struct iw_statistics* wstats = &priv->wstats;
 	int tmp_level = 0;
 	int tmp_qual = 0;
 	int tmp_noise = 0;
-	if(ieee->state < IEEE80211_LINKED)
+	if(ieee->state < RTLLIB_LINKED)
 	{
 		wstats->qual.qual = 0;
 		wstats->qual.level = 0;

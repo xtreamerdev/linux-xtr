@@ -14,7 +14,7 @@
  * file called LICENSE.
  *
  * Contact Information:
- * Jerry chuang <wlanfae@realtek.com>
+ * wlanfae <wlanfae@realtek.com>
 ******************************************************************************/
 #ifndef __INC_HAL8192USBLED_H
 #define __INC_HAL8192USBLED_H
@@ -64,6 +64,7 @@ typedef	enum _LED_STRATEGY_819xUsb{
 	SW_LED_MODE3, // SW control 1 LED via GPIO0, customized for Sercomm Printer Server case.
 	SW_LED_MODE4, //for Edimax / Belkin
 	SW_LED_MODE5, //for Sercomm / Belkin
+	SW_LED_MODE6, //for WNC / Corega
 	HW_LED, // HW control 2 LEDs, LED0 and LED1 (there are 4 different control modes, see MAC.CONFIG1 for details.)
 }LED_STRATEGY_819xUsb, *PLED_STRATEGY_819xUsb;
 
@@ -73,11 +74,11 @@ typedef struct _LED_819xUsb{
 	LED_PIN_819xUsb		LedPin;	// Identify how to implement this SW led.
 
 	LED_STATE_819xUsb	CurrLedState; // Current LED state.
-	bool					bLedOn; // TRUE if LED is ON, FALSE if LED is OFF.
+	bool					bLedOn; // true if LED is ON, false if LED is OFF.
 
 	bool					bSWLedCtrl;
 
-	bool					bLedBlinkInProgress; // TRUE if it is blinking, FALSE o.w..
+	bool					bLedBlinkInProgress; // true if it is blinking, false o.w..
 	// ALPHA, added by chiyoko, 20090106
 	bool					bLedNoLinkBlinkInProgress;
 	bool					bLedLinkBlinkInProgress;

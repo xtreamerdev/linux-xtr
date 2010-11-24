@@ -15,7 +15,7 @@
  * file called LICENSE.
  *
  * Contact Information:
- * Jerry chuang <wlanfae@realtek.com>
+ * wlanfae <wlanfae@realtek.com>
 ******************************************************************************/
 
 #ifdef CONFIG_RTL8192_PM
@@ -36,6 +36,9 @@ int rtl8192U_suspend(struct usb_interface *intf, pm_message_t state)
 #else
 	//struct net_device *dev = (struct net_device *)ptr;
 #endif
+#ifdef ENABLE_UNASSOCIATED_USB_SUSPEND
+	struct r8192_priv *priv = rtllib_priv(dev);
+#endif	
 	RT_TRACE(COMP_POWER, "============> r8192U suspend call.\n");
 
 	if(dev) {
@@ -44,10 +47,21 @@ int rtl8192U_suspend(struct usb_interface *intf, pm_message_t state)
 		      return 0;
 		 }
 
+#ifdef HAVE_NET_DEVICE_OPS
+		if (dev->netdev_ops->ndo_stop)
+			dev->netdev_ops->ndo_stop(dev);
+#else
 		dev->stop(dev);
+#endif
+
+#ifdef ENABLE_UNASSOCIATED_USB_SUSPEND
+		priv->is_suspended = 1;
+#endif
 		mdelay(10);
 
+#ifndef ENABLE_UNASSOCIATED_USB_SUSPEND
 		netif_device_detach(dev);
+#endif
 	}
 
 	return 0;
@@ -60,17 +74,40 @@ int rtl8192U_resume (struct usb_interface *intf)
 #else
 	//struct net_device *dev = (struct net_device *)ptr;
 #endif
-
+#ifdef ENABLE_UNASSOCIATED_USB_SUSPEND
+	struct r8192_priv *priv = rtllib_priv(dev);
+#endif
 	RT_TRACE(COMP_POWER, "================>r8192U resume call.");
 
 	if(dev) {
+#ifdef ENABLE_UNASSOCIATED_USB_SUSPEND 
+		// in case users may ifconfig down the interface during UNASSOCIATED_USB_SUSPEND period.
+		if ((priv->is_suspended != 2) && !netif_running(dev)){
+			printk(KERN_WARNING "netif not running, go out resume function\n");
+			return 0;
+		}		
+#else
 		if (!netif_running(dev)){
 			printk(KERN_WARNING "netif not running, go out resume function\n");
 			return 0;
 		}
 
 		netif_device_attach(dev);
+#endif
+
+#ifdef ENABLE_UNASSOCIATED_USB_SUSPEND
+		if ( dev->open(dev) == 0)
+			priv->is_suspended = 0;
+		else
+			printk("%s()-%d: dev->open(dev) failed\n", __FUNCTION__, __LINE__);
+#else
+#ifdef HAVE_NET_DEVICE_OPS
+		if (dev->netdev_ops->ndo_open)
+			dev->netdev_ops->ndo_open(dev);
+#else
 		dev->open(dev);
+#endif
+#endif
 	}
 		
         return 0;

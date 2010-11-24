@@ -20,7 +20,7 @@
  * file called LICENSE.
  *
  * Contact Information:
- * Jerry chuang <wlanfae@realtek.com>
+ * wlanfae <wlanfae@realtek.com>
 ******************************************************************************/
 
 #include "r8180_93cx6.h"
@@ -92,7 +92,7 @@ void eprom_send_bits_string(struct net_device *dev, short b[], int len)
 
 u32 eprom_read(struct net_device *dev, u32 addr)
 {
-	struct r8192_priv *priv = ieee80211_priv(dev);
+	struct r8192_priv *priv = rtllib_priv(dev);
 	short read_cmd[]={1,1,0};
 	short addr_str[8];
 	int i;

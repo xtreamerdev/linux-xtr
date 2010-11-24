@@ -15,7 +15,7 @@
  * file called LICENSE.
  *
  * Contact Information:
- * Jerry chuang <wlanfae@realtek.com>
+ * wlanfae <wlanfae@realtek.com>
 ******************************************************************************/
 // ******************************************************************************
 //
@@ -59,7 +59,7 @@ SendTxCommandPacket(
 	)
 {
 	bool	rtStatus = true;
-	struct r8192_priv   *priv = ieee80211_priv(dev);
+	struct r8192_priv   *priv = rtllib_priv(dev);
 	struct sk_buff	    *skb;
 	cb_desc		    *tcb_desc;	
 	unsigned char	    *ptr_buf;
@@ -96,13 +96,13 @@ SendTxCommandPacket(
 	memcpy(ptr_buf,pData,DataLen);
 	tcb_desc->txbuf_size= (u16)DataLen;
 
-	if(!priv->ieee80211->check_nic_enough_desc(dev,tcb_desc->queue_index)||
-			(!skb_queue_empty(&priv->ieee80211->skb_waitQ[tcb_desc->queue_index]))||\
-			(priv->ieee80211->queue_stop) ) {
+	if(!priv->rtllib->check_nic_enough_desc(dev,tcb_desc->queue_index)||
+			(!skb_queue_empty(&priv->rtllib->skb_waitQ[tcb_desc->queue_index]))||\
+			(priv->rtllib->queue_stop) ) {
 			RT_TRACE(COMP_FIRMWARE,"===================NULL packet==================================> tx full!\n");
-			skb_queue_tail(&priv->ieee80211->skb_waitQ[tcb_desc->queue_index], skb);
+			skb_queue_tail(&priv->rtllib->skb_waitQ[tcb_desc->queue_index], skb);
 		} else {
-			priv->ieee80211->softmac_hard_start_xmit(skb,dev);
+			priv->rtllib->softmac_hard_start_xmit(skb,dev);
 		}
 	
 	//PlatformReleaseSpinLock(Adapter, RT_TX_SPINLOCK);	
@@ -143,7 +143,7 @@ SendTxCommandPacket(
 #ifdef RTL8192U
 	return rt_status;
 #else
-	struct r8192_priv   *priv = ieee80211_priv(dev);
+	struct r8192_priv   *priv = rtllib_priv(dev);
 	u16		    frag_threshold;
 	u16		    frag_length, frag_offset = 0;
 	//u16		    total_size;
@@ -196,13 +196,13 @@ SendTxCommandPacket(
 		tcb_desc->txbuf_size= (u16)buffer_len;
 		
 
-		if(!priv->ieee80211->check_nic_enough_desc(dev,tcb_desc->queue_index)||
-			(!skb_queue_empty(&priv->ieee80211->skb_waitQ[tcb_desc->queue_index]))||\
-			(priv->ieee80211->queue_stop) ) {
+		if(!priv->rtllib->check_nic_enough_desc(dev,tcb_desc->queue_index)||
+			(!skb_queue_empty(&priv->rtllib->skb_waitQ[tcb_desc->queue_index]))||\
+			(priv->rtllib->queue_stop) ) {
 			RT_TRACE(COMP_FIRMWARE,"=====================================================> tx full!\n");
-			skb_queue_tail(&priv->ieee80211->skb_waitQ[tcb_desc->queue_index], skb);
+			skb_queue_tail(&priv->rtllib->skb_waitQ[tcb_desc->queue_index], skb);
 		} else {
-			priv->ieee80211->softmac_hard_start_xmit(skb,dev);
+			priv->rtllib->softmac_hard_start_xmit(skb,dev);
 		}
 		
 		codevirtualaddress += frag_length;
@@ -239,7 +239,7 @@ cmpk_count_txstatistic(
 	struct net_device *dev,  
 	cmpk_txfb_t	*pstx_fb)
 {
-	struct r8192_priv *priv = ieee80211_priv(dev);
+	struct r8192_priv *priv = rtllib_priv(dev);
 #ifdef ENABLE_PS
 	RT_RF_POWER_STATE	rtState;
 	
@@ -339,7 +339,7 @@ cmpk_handle_tx_feedback(
 	struct net_device *dev, 
 	u8	*	pmsg)
 {
-	struct r8192_priv *priv = ieee80211_priv(dev);
+	struct r8192_priv *priv = rtllib_priv(dev);
 	cmpk_txfb_t		rx_tx_fb;	/* */	
 	
 	priv->stats.txfeedback++;
@@ -400,15 +400,15 @@ cmdpkt_beacontimerinterrupt_819xusb(
 	struct net_device *dev
 )
 {
-	struct r8192_priv *priv = ieee80211_priv(dev);
+	struct r8192_priv *priv = rtllib_priv(dev);
 	u16 tx_rate;
 	{
 		//
 		// 070117, rcnjko: 87B have to S/W beacon for DTM encryption_cmn.
 		//
-		if(priv->ieee80211->current_network.mode == IEEE_A  || 
-			priv->ieee80211->current_network.mode == IEEE_N_5G || 
-			(priv->ieee80211->current_network.mode == IEEE_N_24G  && (!priv->ieee80211->pHTInfo->bCurSuppCCK)))
+		if(priv->rtllib->current_network.mode == IEEE_A  || 
+			priv->rtllib->current_network.mode == IEEE_N_5G || 
+			(priv->rtllib->current_network.mode == IEEE_N_24G  && (!priv->rtllib->pHTInfo->bCurSuppCCK)))
 		{
 			tx_rate = 60;
 			DMESG("send beacon frame  tx rate is 6Mbpm\n");
@@ -454,7 +454,7 @@ cmpk_handle_interrupt_status(
 	u8*	pmsg)
 {
 	cmpk_intr_sta_t		rx_intr_status;	/* */	
-	struct r8192_priv *priv = ieee80211_priv(dev);
+	struct r8192_priv *priv = rtllib_priv(dev);
 
 	DMESG("---> cmpk_Handle_Interrupt_Status()\n");
 	
@@ -476,7 +476,7 @@ cmpk_handle_interrupt_status(
 
 
 	// Statistics of beacon for ad-hoc mode.
-	if(	priv->ieee80211->iw_mode == IW_MODE_ADHOC)
+	if(	priv->rtllib->iw_mode == IW_MODE_ADHOC)
 	{
 		//2 maybe need endian transform?
 		rx_intr_status.interrupt_status = *((u32 *)(pmsg + 4));
@@ -486,12 +486,12 @@ cmpk_handle_interrupt_status(
 
 		if (rx_intr_status.interrupt_status & ISR_TxBcnOk)
 		{
-			priv->ieee80211->bibsscoordinator = true;
+			priv->rtllib->bibsscoordinator = true;
 			priv->stats.txbeaconokint++;	
 		}
 		else if (rx_intr_status.interrupt_status & ISR_TxBcnErr)
 		{
-			priv->ieee80211->bibsscoordinator = false;
+			priv->rtllib->bibsscoordinator = false;
 			priv->stats.txbeaconerr++;	
 		}
 
@@ -578,7 +578,7 @@ cmpk_handle_query_config_rx(
 static	void	cmpk_count_tx_status(	struct net_device *dev,     
 									cmpk_tx_status_t 	*pstx_status)
 {
-	struct r8192_priv *priv = ieee80211_priv(dev);
+	struct r8192_priv *priv = rtllib_priv(dev);
 	
 #ifdef ENABLE_PS
 
@@ -682,7 +682,7 @@ cmpk_handle_tx_rate_history(
 	u8				i, j;
 	u16				length = sizeof(cmpk_tx_rahis_t);
 	u32				*ptemp;
-	struct r8192_priv *priv = ieee80211_priv(dev);
+	struct r8192_priv *priv = rtllib_priv(dev);
 
 
 #ifdef ENABLE_PS
@@ -759,10 +759,10 @@ cmpk_handle_tx_rate_history(
 extern	u32	
 cmpk_message_handle_rx(
 	struct net_device *dev, 
-	struct ieee80211_rx_stats *pstats)
+	struct rtllib_rx_stats *pstats)
 {	
 //	u32			debug_level = DBG_LOUD;
-	struct r8192_priv *priv = ieee80211_priv(dev);
+	struct r8192_priv *priv = rtllib_priv(dev);
 	int			total_length;	
 	u8			cmd_length, exe_cnt = 0;
 	u8			element_id;

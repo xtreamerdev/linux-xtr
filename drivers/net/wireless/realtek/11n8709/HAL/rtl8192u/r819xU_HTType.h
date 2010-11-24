@@ -15,7 +15,7 @@
  * file called LICENSE.
  *
  * Contact Information:
- * Jerry chuang <wlanfae@realtek.com>
+ * wlanfae <wlanfae@realtek.com>
 ******************************************************************************/
 #ifndef _R819XU_HTTYPE_H_
 #define _R819XU_HTTYPE_H_
@@ -103,7 +103,7 @@ typedef enum _CHNLOP{
 
 // Determine if the Channel Operation is in progress
 #define CHHLOP_IN_PROGRESS(_pHTInfo)	\
-		((_pHTInfo)->ChnlOp > CHNLOP_NONE) ? TRUE : FALSE
+		((_pHTInfo)->ChnlOp > CHNLOP_NONE) ? true : false
 
 
 typedef enum _HT_ACTION{

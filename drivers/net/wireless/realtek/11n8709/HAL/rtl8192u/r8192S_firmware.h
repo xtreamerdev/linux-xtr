@@ -14,7 +14,7 @@
  * file called LICENSE.
  *
  * Contact Information:
- * Jerry chuang <wlanfae@realtek.com>
+ * wlanfae <wlanfae@realtek.com>
 ******************************************************************************/
 #ifndef __INC_FIRMWARE_H
 #define __INC_FIRMWARE_H
@@ -248,10 +248,10 @@ typedef struct _rt_firmware{
 //
 #define	FW_CMD_IO_CLR(_pdev, _Bit)		\
 	udelay(1000);		\
-	((struct r8192_priv *)ieee80211_priv(_pdev))->FwCmdIOMap &= (~_Bit);
+	((struct r8192_priv *)rtllib_priv(_pdev))->FwCmdIOMap &= (~_Bit);
 
 #define	FW_CMD_IO_UPDATE(_pdev, _val)		\
-	((struct r8192_priv *)ieee80211_priv(_pdev))->FwCmdIOMap = _val;
+	((struct r8192_priv *)rtllib_priv(_pdev))->FwCmdIOMap = _val;
 
 #define		FW_CMD_IO_SET(_pdev, _val) 	\
 	write_nic_word(_pdev, LBUS_MON_ADDR, (u16)_val);	\
@@ -259,10 +259,10 @@ typedef struct _rt_firmware{
 
 #define		FW_CMD_PARA_SET(_pdev, _val) 		\
 	write_nic_dword(_pdev, LBUS_ADDR_MASK, _val);	\
-	((struct r8192_priv *)ieee80211_priv(_pdev))->FwCmdIOParam = _val;
+	((struct r8192_priv *)rtllib_priv(_pdev))->FwCmdIOParam = _val;
 
-#define		FW_CMD_IO_QUERY(_pdev)	(u16)(((struct r8192_priv *)ieee80211_priv(_pdev))->FwCmdIOMap)
-#define	FW_CMD_IO_PARA_QUERY(_pdev)	(u32)(((struct r8192_priv *)ieee80211_priv(_pdev))->FwCmdIOParam)
+#define		FW_CMD_IO_QUERY(_pdev)	(u16)(((struct r8192_priv *)rtllib_priv(_pdev))->FwCmdIOMap)
+#define	FW_CMD_IO_PARA_QUERY(_pdev)	(u32)(((struct r8192_priv *)rtllib_priv(_pdev))->FwCmdIOParam)
 
 
 bool FirmwareDownload92S(struct net_device *dev);

@@ -966,10 +966,13 @@ static inline struct sk_buff *ieee80211_association_req(struct ieee80211_network
 	if (beacon->capability & WLAN_CAPABILITY_PRIVACY ) 
 		hdr->capability |= cpu_to_le16(WLAN_CAPABILITY_PRIVACY);
 	
-	if(ieee->short_slot)
+	if (beacon->capability & WLAN_CAPABILITY_SHORT_PREAMBLE)
+		hdr->capability |= cpu_to_le16(WLAN_CAPABILITY_SHORT_PREAMBLE); //add short_preamble here
+
+	if(ieee->short_slot && (beacon->capability & WLAN_CAPABILITY_SHORT_SLOT))
 		hdr->capability |= cpu_to_le16(WLAN_CAPABILITY_SHORT_SLOT);
 	
-	hdr->listen_interval = 0xa; //FIXME
+	hdr->listen_interval = beacon->listen_interval;//0xa; //FIXME
 	
 	hdr->info_element.id = MFIE_TYPE_SSID;
 

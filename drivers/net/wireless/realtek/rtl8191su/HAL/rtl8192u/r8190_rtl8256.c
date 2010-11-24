@@ -20,7 +20,7 @@
  * file called LICENSE.
  *
  * Contact Information:
- * Jerry chuang <wlanfae@realtek.com>
+ * wlanfae <wlanfae@realtek.com>
 ******************************************************************************/
 
 #include "r8192U.h"
@@ -40,7 +40,7 @@
 void PHY_SetRF8256Bandwidth(struct net_device* dev , HT_CHANNEL_WIDTH Bandwidth)	//20M or 40M
 {
 	u8	eRFPath;
-	struct r8192_priv *priv = ieee80211_priv(dev);
+	struct r8192_priv *priv = rtllib_priv(dev);
 
 	//for(eRFPath = RF90_PATH_A; eRFPath <pHalData->NumTotalRFPath; eRFPath++)
 	for(eRFPath = 0; eRFPath <RF90_PATH_MAX; eRFPath++)
@@ -102,7 +102,7 @@ void PHY_SetRF8256Bandwidth(struct net_device* dev , HT_CHANNEL_WIDTH Bandwidth)
 // *---------------------------------------------------------------------------*/
 void PHY_RF8256_Config(struct net_device* dev)
 {
-	struct r8192_priv *priv = ieee80211_priv(dev);	
+	struct r8192_priv *priv = rtllib_priv(dev);	
 	// Initialize general global value
 	//
 	// TODO: Extend RF_PATH_C and RF_PATH_D in the future
@@ -127,7 +127,7 @@ void phy_RF8256_Config_ParaFile(struct net_device* dev)
 	//static s1Byte				szRadioDFile[] = RTL819X_PHY_RADIO_D;
 	u8 	eRFPath;
 	BB_REGISTER_DEFINITION_T	*pPhyReg;
-	struct r8192_priv *priv = ieee80211_priv(dev);
+	struct r8192_priv *priv = rtllib_priv(dev);
 	u32	RegOffSetToBeCheck = 0x3;
 	u32 	RegValueToBeCheck = 0x7f1;
 	u32	RF3_Final_Value = 0;
@@ -254,12 +254,12 @@ phy_RF8256_Config_ParaFile_Fail:
 void PHY_SetRF8256CCKTxPower(struct net_device*	dev, u8	powerlevel)
 {
 	u32	TxAGC=0;
-	struct r8192_priv *priv = ieee80211_priv(dev);
+	struct r8192_priv *priv = rtllib_priv(dev);
 	//modified by vivi, 20080109
 	TxAGC = powerlevel;
 
-	if(priv->bDynamicTxLowPower == TRUE ||  //cosa 05/22/2008 for scan
-		priv->ieee80211->be_scan_inprogress == TRUE) //cosa 05/22/2008 for scan
+	if(priv->bDynamicTxLowPower == true ||  //cosa 05/22/2008 for scan
+		priv->rtllib->be_scan_inprogress == true) //cosa 05/22/2008 for scan
 	{
 		if(priv->CustomerID == RT_CID_819x_Netcore)
 			TxAGC = 0x22;
@@ -275,7 +275,7 @@ void PHY_SetRF8256CCKTxPower(struct net_device*	dev, u8	powerlevel)
 
 void PHY_SetRF8256OFDMTxPower(struct net_device* dev, u8 powerlevel)
 {
-	struct r8192_priv *priv = ieee80211_priv(dev);	
+	struct r8192_priv *priv = rtllib_priv(dev);	
 	//Joseph TxPower for 8192 testing
 	u32 writeVal, powerBase0, powerBase1, writeVal_tmp;
 	u8 index = 0;
@@ -310,7 +310,7 @@ void PHY_SetRF8256OFDMTxPower(struct net_device* dev, u8 powerlevel)
 			priv->Pwr_Track = writeVal_tmp;
 		}
 
-		if(priv->bDynamicTxHighPower == TRUE)     //Add by Jacken 2008/03/06
+		if(priv->bDynamicTxHighPower == true)     //Add by Jacken 2008/03/06
 		{
 			// Emily, 20080613. Set low tx power for both MCS and legacy OFDM
 			writeVal = 0x03030303;

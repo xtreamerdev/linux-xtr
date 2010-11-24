@@ -14,7 +14,7 @@
  * file called LICENSE.
  *
  * Contact Information:
- * Jerry chuang <wlanfae@realtek.com>
+ * wlanfae <wlanfae@realtek.com>
 ******************************************************************************/
 #ifndef __INC_HAL8192SU_FW_IMG_H
 #define __INC_HAL8192SU_FW_IMG_H

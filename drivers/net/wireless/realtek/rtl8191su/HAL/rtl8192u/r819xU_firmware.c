@@ -15,7 +15,7 @@
  * file called LICENSE.
  *
  * Contact Information:
- * Jerry chuang <wlanfae@realtek.com>
+ * wlanfae <wlanfae@realtek.com>
 ******************************************************************************/
 //*************************************************************************************************
 // Procedure:    Init boot code/firmware code/data session
@@ -30,7 +30,7 @@
 //        NDIS_STATUS_FAILURE - the following initialization process should be terminated
 //        NDIS_STATUS_SUCCESS - if firmware initialization process success
 //************************************************************************************************/
-//#include "ieee80211.h"
+//#include "rtllib.h"
 #include "r8192U.h"
 #include "r8192U_hw.h"
 #include "r819xU_firmware_img.h"
@@ -45,7 +45,7 @@
 
 void firmware_init_param(struct net_device *dev)
 {
-	struct r8192_priv 	*priv = ieee80211_priv(dev);
+	struct r8192_priv 	*priv = rtllib_priv(dev);
 	rt_firmware		*pfirmware = priv->pFirmware;
 
 	pfirmware->cmdpacket_frag_thresold = GET_COMMAND_PACKET_FRAG_THRESHOLD(MAX_TRANSMIT_BUFFER_SIZE);
@@ -57,7 +57,7 @@ void firmware_init_param(struct net_device *dev)
 //
 bool fw_download_code(struct net_device *dev, u8 *code_virtual_address, u32 buffer_len)
 {
-	struct r8192_priv   *priv = ieee80211_priv(dev);
+	struct r8192_priv   *priv = rtllib_priv(dev);
 	bool 		    rt_status = true;
 	u16		    frag_threshold;
 	u16		    frag_length, frag_offset = 0;
@@ -89,9 +89,9 @@ bool fw_download_code(struct net_device *dev, u8 *code_virtual_address, u32 buff
 		// 
 		#ifdef RTL8192U
 #ifdef USB_USE_ALIGNMENT
-		u32 Tmpaddr;
-		int alignment;
-		skb  = dev_alloc_skb(USB_HWDESC_HEADER_LEN + frag_length + 4+ USB_512B_ALIGNMENT_SIZE);
+                u32 Tmpaddr;
+                int alignment;
+                skb  = dev_alloc_skb(USB_HWDESC_HEADER_LEN + frag_length + 4+ USB_512B_ALIGNMENT_SIZE);
 #else
 		skb  = dev_alloc_skb(USB_HWDESC_HEADER_LEN + frag_length + 4); 
 #endif
@@ -134,13 +134,13 @@ bool fw_download_code(struct net_device *dev, u8 *code_virtual_address, u32 buff
 		tcb_desc->txbuf_size= (u16)i;
 		skb_put(skb, i);
 
-		if(!priv->ieee80211->check_nic_enough_desc(dev,tcb_desc->queue_index)||
-			(!skb_queue_empty(&priv->ieee80211->skb_waitQ[tcb_desc->queue_index]))||\
-			(priv->ieee80211->queue_stop) ) {
+		if(!priv->rtllib->check_nic_enough_desc(dev,tcb_desc->queue_index)||
+			(!skb_queue_empty(&priv->rtllib->skb_waitQ[tcb_desc->queue_index]))||\
+			(priv->rtllib->queue_stop) ) {
 			RT_TRACE(COMP_FIRMWARE,"=====================================================> tx full!\n");
-			skb_queue_tail(&priv->ieee80211->skb_waitQ[tcb_desc->queue_index], skb);
+			skb_queue_tail(&priv->rtllib->skb_waitQ[tcb_desc->queue_index], skb);
 		} else {
-			priv->ieee80211->softmac_hard_start_xmit(skb,dev);
+			priv->rtllib->softmac_hard_start_xmit(skb,dev);
 		}
 		
 		code_virtual_address += frag_length;
@@ -165,7 +165,7 @@ fwSendNullPacket(
 )
 {
 	bool	rtStatus = true;
-	struct r8192_priv   *priv = ieee80211_priv(dev);
+	struct r8192_priv   *priv = rtllib_priv(dev);
 	struct sk_buff	    *skb;
 	cb_desc		    *tcb_desc;	
 	unsigned char	    *ptr_buf;
@@ -197,13 +197,13 @@ fwSendNullPacket(
 	memset(ptr_buf,0,Length);
 	tcb_desc->txbuf_size= (u16)Length;
 
-	if(!priv->ieee80211->check_nic_enough_desc(dev,tcb_desc->queue_index)||
-			(!skb_queue_empty(&priv->ieee80211->skb_waitQ[tcb_desc->queue_index]))||\
-			(priv->ieee80211->queue_stop) ) {
+	if(!priv->rtllib->check_nic_enough_desc(dev,tcb_desc->queue_index)||
+			(!skb_queue_empty(&priv->rtllib->skb_waitQ[tcb_desc->queue_index]))||\
+			(priv->rtllib->queue_stop) ) {
 			RT_TRACE(COMP_FIRMWARE,"===================NULL packet==================================> tx full!\n");
-			skb_queue_tail(&priv->ieee80211->skb_waitQ[tcb_desc->queue_index], skb);
+			skb_queue_tail(&priv->rtllib->skb_waitQ[tcb_desc->queue_index], skb);
 		} else {
-			priv->ieee80211->softmac_hard_start_xmit(skb,dev);
+			priv->rtllib->softmac_hard_start_xmit(skb,dev);
 		}
 	
 	//PlatformReleaseSpinLock(Adapter, RT_TX_SPINLOCK);	
@@ -229,7 +229,7 @@ fwSendNullPacket(
 //
 bool fwsend_download_code(struct net_device *dev)
 {
-	struct r8192_priv 	*priv = ieee80211_priv(dev);
+	struct r8192_priv 	*priv = rtllib_priv(dev);
 	rt_firmware		*pfirmware = (rt_firmware*)(&priv->firmware);
 
 	bool			rt_status = true;
@@ -272,7 +272,7 @@ bool fwsend_download_code(struct net_device *dev)
 //-----------------------------------------------------------------------------
 bool CPUcheck_maincodeok_turnonCPU(struct net_device *dev)
 {
-	struct r8192_priv  *priv = ieee80211_priv(dev);
+	struct r8192_priv  *priv = rtllib_priv(dev);
 	bool rt_status = true;
 	int		check_putcodeOK_time = 20000, check_bootOk_time = 20000;
 	u32  CPU_status = 0;
@@ -316,13 +316,13 @@ bool CPUcheck_maincodeok_turnonCPU(struct net_device *dev)
 
 CPUCheckMainCodeOKAndTurnOnCPU_Fail:	
 	RT_TRACE(COMP_ERR, "ERR in %s()\n", __FUNCTION__);
-	rt_status = FALSE;
+	rt_status = false;
 	return rt_status;
 }
 
 bool CPUcheck_firmware_ready(struct net_device *dev)
 {
-	struct r8192_priv  *priv = ieee80211_priv(dev);
+	struct r8192_priv  *priv = rtllib_priv(dev);
 	bool		rt_status = true;
 	int		check_time = 200000;
 	u32		CPU_status = 0;
@@ -352,8 +352,8 @@ CPUCheckFirmwareReady_Fail:
 
 bool init_firmware(struct net_device *dev)
 {
-	struct r8192_priv 	*priv = ieee80211_priv(dev);
-	bool			rt_status = TRUE;
+	struct r8192_priv 	*priv = rtllib_priv(dev);
+	bool			rt_status = true;
 
 	u8			*firmware_img_buf[3] = { &rtl8190_fwboot_array[0], 
 						   	 &rtl8190_fwmain_array[0],
@@ -482,7 +482,7 @@ bool init_firmware(struct net_device *dev)
 		// 
 		rt_status = fw_download_code(dev,mapped_file,file_length);
 
-		if(rt_status != TRUE) {
+		if(rt_status != true) {
 			goto download_firmware_fail;
 		}
 
@@ -515,7 +515,7 @@ bool init_firmware(struct net_device *dev)
 
 				// Check Put Code OK and Turn On CPU */
 				rt_status = CPUcheck_maincodeok_turnonCPU(dev);
-				if(rt_status != TRUE) {	
+				if(rt_status != true) {	
 					RT_TRACE(COMP_ERR, "CPUcheck_maincodeok_turnonCPU fail!\n");
 					goto download_firmware_fail;
 				}
@@ -529,7 +529,7 @@ bool init_firmware(struct net_device *dev)
 				mdelay(1);
 
 				rt_status = CPUcheck_firmware_ready(dev);
-				if(rt_status != TRUE)
+				if(rt_status != true)
 				{
 					u8	i;
 					u32	reg_value;
@@ -559,7 +559,7 @@ bool init_firmware(struct net_device *dev)
 
 download_firmware_fail:	
 	RT_TRACE(COMP_ERR, "ERR in %s()\n", __FUNCTION__);
-	rt_status = FALSE;
+	rt_status = false;
 	return rt_status;
 
 }
@@ -740,7 +740,7 @@ FWSendNullPacket(
 
 	PRT_TCB					pTcb;
 	PRT_TX_LOCAL_BUFFER 	pBuf;
-	BOOLEAN					bLastInitPacket = FALSE;
+	BOOLEAN					bLastInitPacket = false;
 	
 	PlatformAcquireSpinLock(Adapter, RT_TX_SPINLOCK);
 	

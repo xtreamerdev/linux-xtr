@@ -21,7 +21,7 @@
  * file called LICENSE.
  *
  * Contact Information:
- * Jerry chuang <wlanfae@realtek.com>
+ * wlanfae <wlanfae@realtek.com>
 ******************************************************************************/
 
 #ifndef R819xU_H
@@ -51,7 +51,7 @@
 #if (LINUX_VERSION_CODE < KERNEL_VERSION(2,6,27))
 #include <asm/semaphore.h>
 #endif
-#include "../../ieee80211/ieee80211.h"
+#include "../../rtllib/rtllib.h"
 
 #ifdef RTL8192SU
 #include "r8192S_firmware.h"
@@ -71,8 +71,6 @@
 #endif
 
 //added for HW security, john.0629
-#define FALSE 0
-#define TRUE 1
 #define MAX_KEY_LEN     61
 #define KEY_BUF_SIZE    5
 
@@ -131,7 +129,7 @@ do { if(rt_global_debug_component & component) \
 #define RX_DESC_SIZE 24
 #define RX_DRV_INFO_SIZE_UNIT   8
 
-#define IS_UNDER_11N_AES_MODE(_ieee)  ((_ieee->pHTInfo->bCurrentHTSupport==TRUE) &&\
+#define IS_UNDER_11N_AES_MODE(_ieee)  ((_ieee->pHTInfo->bCurrentHTSupport==true) &&\
 									(_ieee->pairwise_key_type==KEY_TYPE_CCMP))
 
 #define COMP_TRACE				BIT0		// For function call tracing.
@@ -168,6 +166,7 @@ do { if(rt_global_debug_component & component) \
 #define COMP_FIRMWARE				BIT24	//for firmware downloading
 #define COMP_HT					BIT25	// For 802.11n HT related information. by Emily 2006-8-11
 #define COMP_AMSDU				BIT26	// For A-MSDU Debugging
+#define COMP_PS					BIT26	
 
 #define COMP_SCAN				BIT27	
 #define COMP_CMD				BIT28
@@ -184,7 +183,7 @@ do { if(rt_global_debug_component & component) \
                 #expr,__FILE__,__FUNCTION__,__LINE__);          \
         }
 //wb added to debug out data buf
-//if you want print DATA buffer related BA, please set ieee80211_debug_level to DATA|BA
+//if you want print DATA buffer related BA, please set rtllib_debug_level to DATA|BA
 #define RT_DEBUG_DATA(level, data, datalen)      \
         do{ if ((rt_global_debug_component & (level)) == (level))   \
                 {       \
@@ -320,7 +319,7 @@ do { if(rt_global_debug_component & component) \
 
 #define RTL819X_DEFAULT_RF_TYPE RF_1T2R
 
-#define IEEE80211_WATCH_DOG_TIME    2000
+#define RTLLIB_WATCH_DOG_TIME    2000
 #define		PHY_Beacon_RSSI_SLID_WIN_MAX		10
 //for txpowertracking by amy
 #define 	OFDM_Table_Length	19
@@ -1203,7 +1202,7 @@ typedef struct rtl_reg_debug{
 
 typedef struct tx_pendingbuf
 {
-	struct ieee80211_txb *txb;
+	struct rtllib_txb *txb;
 	short ispending;
 	short descfrag;
 } tx_pendigbuf;
@@ -1340,6 +1339,12 @@ typedef struct Stats
 
 //+by amy 080507
 
+typedef	enum _RT_EEPROM_TYPE{
+	EEPROM_93C46,
+	EEPROM_93C56,
+	EEPROM_BOOT_EFUSE,
+}RT_EEPROM_TYPE,*PRT_EEPROM_TYPE;
+
 typedef struct 	ChnlAccessSetting {
 	u16 SIFS_Timer;
 	u16 DIFS_Timer; 
@@ -1465,17 +1470,21 @@ typedef enum _RT_CUSTOMER_ID
 	RT_CID_Nettronix = 11,
 	RT_CID_DLINK = 12,
 	RT_CID_PRONET = 13,
-        RT_CID_COREGA = 14,
-        RT_CID_819x_ALPHA = 15,
-        RT_CID_819x_Sitecom = 16,
-        RT_CID_CCX = 17, // It's set under CCX logo test and isn't demanded for CCX functions, but for test behavior like retry limit and tx report. By Bruce, 2009-02-17.      
-        RT_CID_819x_Lenovo = 18,
+	RT_CID_COREGA = 14,
+	RT_CID_819x_ALPHA = 15,
+	RT_CID_819x_Sitecom = 16,
+	RT_CID_CCX = 17, // It's set under CCX logo test and isn't demanded for CCX functions, but for test behavior like retry limit and tx report. By Bruce, 2009-02-17.      
+	RT_CID_819x_Lenovo = 18,
 	RT_CID_819x_QMI = 19,
 	RT_CID_819x_Edimax_Belkin = 20,		
 	RT_CID_819x_Sercomm_Belkin = 21,			
 	RT_CID_819x_CAMEO1 = 22,
 	RT_CID_819x_MSI = 23,
 	RT_CID_819x_Acer = 24,
+	RT_CID_819x_AzWave_ASUS = 25,
+	RT_CID_819x_AzWave = 26, // For AzWave in PCIe, The ID is AzWave use and not only Asus
+	RT_CID_819x_WNC_COREGA = 27,
+	RT_CID_819x_CLEVO = 28,
 }RT_CUSTOMER_ID, *PRT_CUSTOMER_ID;
 
 //================================================================================
@@ -1506,6 +1515,14 @@ typedef enum _RESET_TYPE {
 	RESET_TYPE_SILENT = 0x02
 } RESET_TYPE;
 
+//
+// IC class identifier. Added by Roger, 2009.09.02.
+//
+typedef enum _IC_INFERIORITY_8192S{
+	IC_INFERIORITY_A            = 0, // Class A
+	IC_INFERIORITY_B            = 1, // Class B
+}IC_INFERIORITY_8192S, *PIC_INFERIORITY_8192S;
+
 // The simple tx command OP code. */
 typedef enum _tag_TxCmd_Config_Index{
 	TXCMD_TXRA_HISTORY_CTRL				= 0xFF900000,
@@ -1525,10 +1542,11 @@ typedef enum{
 	NIC_8192SU = 5,
 	} nic_t;
 
-//definded by WB. Ready to fill handlers for different NIC types.
+//defined by WB. Ready to fill handlers for different NIC types.
 //add handle here when necessary.
 struct rtl819x_ops{
 	nic_t nic_type;
+	u8 (* rtl819x_get_eeprom_size)(struct net_device* dev);
 	void (* rtl819x_read_eeprom_info)(struct net_device *dev);
 	short (* rtl819x_tx)(struct net_device *dev, struct sk_buff* skb);
 	short (* rtl819x_tx_cmd)(struct net_device *dev, struct sk_buff *skb);
@@ -1537,13 +1555,18 @@ struct rtl819x_ops{
 	bool (*	rtl819x_adapter_start)(struct net_device *dev);
 	void (* rtl819x_link_change)(struct net_device *dev);
 	void (*	rtl819x_initial_gain)(struct net_device *dev,u8 Operation);
-	void (*	rtl819x_query_rxdesc_status)(struct sk_buff *skb, struct ieee80211_rx_stats *stats, bool bIsRxAggrSubframe);
+	void (*	rtl819x_query_rxdesc_status)(struct sk_buff *skb, struct rtllib_rx_stats *stats, bool bIsRxAggrSubframe);
 };
 
 typedef struct r8192_priv
 {
 	struct rtl819x_ops* ops;
 	struct usb_device *udev;
+#ifdef ENABLE_UNASSOCIATED_USB_SUSPEND
+	struct usb_interface *intf;
+	u8 is_suspended;
+        u16 suspend_delay_cnt;
+#endif	
 	//added for maintain info from eeprom
 	short epromtype;
 	u16 eeprom_vid;
@@ -1560,10 +1583,10 @@ typedef struct r8192_priv
 	u8  ep_out_num;
 	u8  ep_num;
 	int irq;
-	struct ieee80211_device *ieee80211;
-#ifdef RTL8192U
+	struct rtllib_device *rtllib;
+
 	u8 RATRTableBitmap;
-#endif
+
 	u32	IC_Cut;
 	short card_8192; // O: rtl8192, 1:rtl8185 V B/C, 2:rtl8185 V D */
 	u32 card_8192_version; // if TCR reports card V B/C this discriminates */
@@ -1582,6 +1605,7 @@ typedef struct r8192_priv
 #else
         struct mutex mutex;
 #endif
+	bool ps_force;
 	spinlock_t rf_lock; //used to lock rf write operation added by wb
 	spinlock_t rf_ps_lock;
 
@@ -1748,9 +1772,9 @@ typedef struct r8192_priv
 #endif
 
 	// Add For EEPROM Efuse switch and  Efuse Shadow map Setting
-	bool		EepromOrEfuse;
-	bool		bBootFromEfuse;	// system boot form EFUSE
 	u8  		EfuseMap[2][HWSET_MAX_SIZE_92S];
+	u16		EfuseUsedBytes;
+	u8		EfuseUsedPercentage;
 	
 	u8  		EEPROMUsbOption;
 	u8  		EEPROMUsbPhyParam[5];
@@ -1811,6 +1835,8 @@ typedef struct r8192_priv
 	u8	CrystalCap;						// CrystalCap.
 	u8	BluetoothCoexist;
 	u8	ExternalPA;
+
+	IC_INFERIORITY_8192S IC_Class;
 
 	u8	CckPwEnl;
 	// Use to calculate PWBD.
@@ -1880,10 +1906,10 @@ typedef struct r8192_priv
 	bool bcck_in_ch14;
 	bool btxpowerdata_readfromEEPORM;
 	u16 	TSSI_13dBm;
-        u8	CCKPresentAttentuation_20Mdefault;
-        u8	CCKPresentAttentuation_40Mdefault;
-        char	CCKPresentAttentuation_difference;
-        char	CCKPresentAttentuation;
+	u8	CCKPresentAttentuation_20Mdefault;
+	u8	CCKPresentAttentuation_40Mdefault;
+	char	CCKPresentAttentuation_difference;
+	char	CCKPresentAttentuation;
 	//For Backup Initial Gain
 	bool bDMInitialGainEnable;
 	init_gain initgain_backup;
@@ -1911,6 +1937,11 @@ typedef struct r8192_priv
 
 	//by amy for gpio
 	 bool bHwRadioOff;
+
+	//PS related*/
+	bool isRFOff;//added by amy for IPS 090331
+	bool bInPowerSaveMode;//added by amy for IPS 090331
+
 	//by amy for ps
 	bool RFChangeInProgress; // RF Chnage in progress, by Bruce, 2007-10-30
 	//bool SetRFPowerStateInProgress;
@@ -1940,9 +1971,10 @@ typedef struct r8192_priv
 	int		IrpPendingCount;
 	bool		bResetInProgress;
 	bool		force_reset;
+	bool		force_lps;
 	u8		InitialGainOperateType;
 	
-	u16		SifsTime;
+	u32		SifsTime;
 	
 	//define work item by amy 080526
 #if LINUX_VERSION_CODE > KERNEL_VERSION(2,5,0)  
@@ -2024,20 +2056,25 @@ typedef struct r8192_priv
 	u16 rf_pathmap;
 //#endif
 
-#ifdef USB_AGGR_BULKIN
-	bool		bRegUsbAggrBulkinEnable;
-	bool		bCurUsbAggrBulkinEnable;
-#endif
-
-#ifdef USB_RX_AGGREGATION_SUPPORT
+#ifdef RTL8192U
 	// USB Rx Aggregation related setting.
 	u32		CurUsbAggrSetting;
 	u8		CurReg0xfe38;
 	u8		CurUsbAggrMode; // 0:Disable, 1:UsbRxAggr, 2:UsbAggrBulkin
 	bool		bCurDmRxAggrOn;
 
-	bool		bCurrentRxAggrEnable;
+#if USB_AGGR_BULKIN
+	bool		bRegUsbAggrBulkinEnable;
+	bool		bCurUsbAggrBulkinEnable;
+#endif
+#endif
+
+#if defined(USB_RX_AGGREGATION_SUPPORT) || defined(USB_AGGR_BULKIN)
 	bool		bForcedUsbRxAggr;
+#endif
+
+#ifdef USB_RX_AGGREGATION_SUPPORT
+	bool		bCurrentRxAggrEnable;
 	u32		ForcedUsbRxAggrInfo;
 	u32		LastUsbRxAggrInfoSetting;
 	u32		RegUsbRxAggrInfo;
@@ -2224,10 +2261,37 @@ void CamResetAllEntry(struct net_device* dev);
 void EnableHWSecurityConfig8192(struct net_device *dev);
 void setKey(struct net_device *dev, u8 EntryNo, u8 KeyIndex, u16 KeyType, u8 *MacAddr, u8 DefaultKey, u32 *KeyContent );
 short rtl8192_is_tx_queue_empty(struct net_device *dev);
-#ifdef RTL8192U
-bool rtl8192_check_ht_cap(struct net_device* dev, struct sta_info *sta, struct ieee80211_network* net);//added by amy for adhoc 090403
-void rtl8192_update_peer_ratr_table(struct net_device* dev,u8* pMcsRate,struct sta_info* pEntry);//added by amy for adhoc 090403
+
+bool rtl8192_check_ht_cap(struct net_device* dev, struct sta_info *sta, struct rtllib_network* net);//added by amy for adhoc 090403
 void Adhoc_InitRateAdaptive(struct net_device *dev,struct sta_info  *pEntry);//added by amy for adhoc 090403
+#ifdef RTL8192U
+void rtl8192_update_peer_ratr_table(struct net_device* dev,u8* pMcsRate,struct sta_info* pEntry);//added by amy for adhoc 090403
 #endif
+
+#ifdef ENABLE_IPS
+void rtllib_ips_leave_wq(struct net_device *dev);
+void rtllib_ips_leave(struct net_device *dev);
+#if (LINUX_VERSION_CODE >= KERNEL_VERSION(2,6,20))
+void IPSLeave_wq (struct work_struct *work);
+#else
+void IPSLeave_wq(struct net_device *dev);
+#endif
+void IPSEnter(struct net_device *dev);
+void IPSLeave(struct net_device *dev);
+#endif
+
+#ifdef ENABLE_LPS
+void LeisurePSEnter(struct net_device *dev);
+void LeisurePSLeave(struct net_device *dev);
+#endif
+
+#define IS_HARDWARE_TYPE_819xP(dev) ((((struct r8192_priv*)rtllib_priv(dev))->card_8192==NIC_8190P)||\
+					(((struct r8192_priv*)rtllib_priv(dev))->card_8192==NIC_8192E))
+#define IS_HARDWARE_TYPE_819xU(dev)	(((struct r8192_priv*)rtllib_priv(dev))->card_8192==NIC_8192U)
+#define IS_HARDWARE_TYPE_8192SU(dev)	(((struct r8192_priv*)rtllib_priv(dev))->card_8192==NIC_8192SU)
+#define IS_HARDWARE_TYPE_8192SE(dev)	(((struct r8192_priv*)rtllib_priv(dev))->card_8192==NIC_8192SE)
+
+#define	IS_HARDWARE_TYPE_8192S(dev)			\
+(IS_HARDWARE_TYPE_8192SE(dev) || IS_HARDWARE_TYPE_8192SU(dev))
 
 #endif

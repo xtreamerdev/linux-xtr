@@ -12,9 +12,9 @@
  * 
  * The full GNU General Public License is included in this distribution in the
  * file called LICENSE.
- * 	
+ *
  * Contact Information:
- * Jerry chuang <wlanfae@realtek.com>
+ * wlanfae <wlanfae@realtek.com>
 ******************************************************************************/
 // ****************************************************************************
 // 
@@ -163,24 +163,19 @@ extern void RF_ChangeTxPath(struct net_device* dev,  u16 DataRate)
 //---------------------------------------------------------------------------*/
 void PHY_RF6052SetBandwidth(struct net_device* dev, HT_CHANNEL_WIDTH Bandwidth)	//20M or 40M
 {	
-	//u8				eRFPath;	
-	struct r8192_priv 	*priv = ieee80211_priv(dev);
+	struct r8192_priv 	*priv = rtllib_priv(dev);
 	
-
-	//if (priv->card_8192 == NIC_8192SE)
 #ifdef RTL8192SU  //YJ,test,090113	
+	//if (IS_HARDWARE_TYPE_8192S(dev))
 	{		
 		switch(Bandwidth)
 		{
 			case HT_CHANNEL_WIDTH_20:
-				//rtl8192_phy_SetRFReg(dev, (RF90_RADIO_PATH_E)RF90_PATH_A, RF_CHNLBW, BIT10|BIT11, 0x01);
-
 				priv->RfRegChnlVal[0] = ((priv->RfRegChnlVal[0] & 0xfffff3ff) | 0x0400);
 				rtl8192_phy_SetRFReg(dev, RF90_PATH_A, RF_CHNLBW, bRFRegOffsetMask, priv->RfRegChnlVal[0]);
 
 				break;
 			case HT_CHANNEL_WIDTH_20_40:
-				//rtl8192_phy_SetRFReg(dev, (RF90_RADIO_PATH_E)RF90_PATH_A, RF_CHNLBW, BIT10|BIT11, 0x00);
 				priv->RfRegChnlVal[0] = ((priv->RfRegChnlVal[0] & 0xfffff3ff));
 				rtl8192_phy_SetRFReg(dev, RF90_PATH_A, RF_CHNLBW, bRFRegOffsetMask, priv->RfRegChnlVal[0]);
 
@@ -192,6 +187,7 @@ void PHY_RF6052SetBandwidth(struct net_device* dev, HT_CHANNEL_WIDTH Bandwidth)	
 	}
 //	else
 #else
+	u8	eRFPath;
 	{
 	for(eRFPath = 0; eRFPath <priv->NumTotalRFPath; eRFPath++)
 	{
@@ -232,14 +228,14 @@ void PHY_RF6052SetBandwidth(struct net_device* dev, HT_CHANNEL_WIDTH Bandwidth)	
 //---------------------------------------------------------------------------*/
 extern void PHY_RF6052SetCckTxPower(struct net_device* dev, u8	powerlevel)
 {
-	struct r8192_priv *priv = ieee80211_priv(dev);
+	struct r8192_priv *priv = rtllib_priv(dev);
 	u32				TxAGC=0;
 	bool			TurboScanOff=false;
 
 	if ((priv->EEPROMVersion >= 2) && (priv->EEPROMRegulatory != 0))
 		TurboScanOff = true;
 
-	if(priv->ieee80211->scanning == 1 || priv->ieee80211->be_scan_inprogress == true)
+	if(priv->rtllib->scanning == 1 || priv->rtllib->be_scan_inprogress == true)
 		TxAGC = 0x3f;
 	else
 		TxAGC = powerlevel;
@@ -273,14 +269,14 @@ void getPowerBase(
 	u8*		pFinalPowerIndex
 	)
 {
-	struct r8192_priv *priv = ieee80211_priv(dev);
+	struct r8192_priv *priv = rtllib_priv(dev);
 	u32			powerBase0, powerBase1;
 	u32			Legacy_pwrdiff=0, HT20_pwrdiff=0;
 	u8			i, powerlevel[4];
-
+	
 	for(i=0; i<2; i++)
 		powerlevel[i] = pPowerLevel[i];
-	// We only care about the path A for legacy.	
+	// We only care about the path A for legacy.
 	if (priv->EEPROMVersion < 2)
 		powerBase0 = powerlevel[0] + (priv->LegacyHTTxPowerDiff & 0xf); 
 	else if (priv->EEPROMVersion >= 2)
@@ -289,7 +285,7 @@ void getPowerBase(
 		// For legacy OFDM, tx pwr always > HT OFDM pwr. We do not care Path B
 		// legacy OFDM pwr diff. NO BB register to notify HW.
 		powerBase0 = powerlevel[0] + Legacy_pwrdiff; 
-		//RTPRINT(FPHY, PHY_TXPWR, (" [LagacyToHT40 pwr diff = %d]\n", Legacy_pwrdiff));		
+		//RTPRINT(FPHY, PHY_TXPWR, (" [LagacyToHT40 pwr diff = %d]\n", Legacy_pwrdiff));
 	}
 	powerBase0 = (powerBase0<<24) | (powerBase0<<16) |(powerBase0<<8) |powerBase0;
 	*OfdmBase = powerBase0;
@@ -297,7 +293,7 @@ void getPowerBase(
 	
 	//MCS rates
 	if(priv->EEPROMVersion >= 2)
-	{	
+	{
 		//Check HT20 to HT40 diff		
 		if (priv->CurrentChannelBW == HT_CHANNEL_WIDTH_20)
 		{
@@ -323,7 +319,7 @@ void getPowerBase(
 	pFinalPowerIndex[0] = powerlevel[0];
 	pFinalPowerIndex[1] = powerlevel[1];
 	switch(priv->EEPROMRegulatory)
-		{
+	{
 		case 3:
 			//The following is for calculation of the power diff for Ant-B to Ant-A.
 			if (priv->CurrentChannelBW == HT_CHANNEL_WIDTH_20_40)
@@ -349,7 +345,7 @@ void getPowerBase(
 		RT_TRACE(COMP_RF, "20MHz finalPowerIndex (A / B) = 0x%x / 0x%x\n", pFinalPowerIndex[0], pFinalPowerIndex[1]);
 	}
 }
-	
+
 void getTxPowerWriteValByRegulatory(
 	struct net_device* dev,
 	u8		Channel,
@@ -358,15 +354,15 @@ void getTxPowerWriteValByRegulatory(
 	u32		powerBase1,
 	u32*		pOutWriteVal
 	)
-	{
-	struct r8192_priv *priv = ieee80211_priv(dev);
+{
+	struct r8192_priv *priv = rtllib_priv(dev);
 	//u16 RegOffset[6] = {0xe00, 0xe04, 0xe10, 0xe14, 0xe18, 0xe1c};
 	u8	i, chnlGroup = 0, pwr_diff_limit[4];
 	u32 	writeVal, customer_limit;
 	
-		//
-		// Index 0 & 1= legacy OFDM, 2-5=HT_MCS rate
-		//		
+	//
+	// Index 0 & 1= legacy OFDM, 2-5=HT_MCS rate
+	//
 	switch(priv->EEPROMRegulatory)
 	{
 		case 0:	// Realtek better performance
@@ -382,7 +378,7 @@ void getTxPowerWriteValByRegulatory(
 				// increase power diff defined by Realtek for regulatory
 			if (priv->CurrentChannelBW == HT_CHANNEL_WIDTH_20_40)
 			{
-			writeVal = ((index<2)?powerBase0:powerBase1);
+				writeVal = ((index<2)?powerBase0:powerBase1);
 				//RTPRINT(FPHY, PHY_TXPWR, ("Realtek regulatory, 40MHz, writeVal = 0x%x\n", writeVal));
 			}
 			else
@@ -476,7 +472,7 @@ void setAntennaDiff(
 	u8*		pFinalPowerIndex
 	)
 {
-	struct r8192_priv *priv = ieee80211_priv(dev);
+	struct r8192_priv *priv = rtllib_priv(dev);
 	s8	ant_pwr_diff=0;
 	u32	u4RegValue=0;
 
@@ -517,7 +513,7 @@ void writeOFDMPowerReg(
 	u32		Value
 	)
 {
-	struct r8192_priv *priv = ieee80211_priv(dev);
+	struct r8192_priv *priv = rtllib_priv(dev);
 	u16 RegOffset[6] = {0xe00, 0xe04, 0xe10, 0xe14, 0xe18, 0xe1c};
 	u8 i, rfa_pwr[4];
 	u8 rfa_lower_bound = 0, rfa_upper_bound = 0, rf_pwr_diff = 0;
@@ -584,18 +580,18 @@ void writeOFDMPowerReg(
 	//printk("Set 0x%x = %08x\n",RegOffset[index], writeVal);
 }
 
-	
+
 //-----------------------------------------------------------------------------
 // Function:	PHY_RF6052SetOFDMTxPower
-		//
+//
 // Overview:	For legacy and HY OFDM, we must read EEPROM TX power index for 
 //			different channel and read original value in TX power register area from
 //			0xe00. We increase offset and original value to be correct tx pwr.
-		//		
+//
 // Input:       NONE
-		//
+//
 // Output:      NONE
-		// 
+//
 // Return:      NONE
 //
 // Revised History:
@@ -616,7 +612,7 @@ extern void PHY_RF6052SetOFDMTxPower(struct net_device* dev, u8* pPowerLevel, u8
 	setAntennaDiff(dev, &finalPowerIndex[0]	);
 	
 	for(index=0; index<6; index++)
-		{
+	{
 		getTxPowerWriteValByRegulatory(dev, Channel, index, 
 			powerBase0, powerBase1, &writeVal);
 
@@ -627,7 +623,7 @@ extern void PHY_RF6052SetOFDMTxPower(struct net_device* dev, u8* pPowerLevel, u8
 
 RT_STATUS PHY_RF6052_Config(struct net_device* dev)
 {
-	struct r8192_priv 			*priv = ieee80211_priv(dev);
+	struct r8192_priv 			*priv = rtllib_priv(dev);
 	RT_STATUS				rtStatus = RT_STATUS_SUCCESS;	
 	//RF90_RADIO_PATH_E		eRFPath;
 	//BB_REGISTER_DEFINITION_T	*pPhyReg; 
@@ -687,7 +683,7 @@ RT_STATUS phy_RF6052_Config_ParaFile(struct net_device* dev)
 	//static s1Byte		szRadioBGMFile[] = RTL819X_PHY_RADIO_B_GM;
 	u8			eRFPath;
 	RT_STATUS		rtStatus = RT_STATUS_SUCCESS;
-	struct r8192_priv 	*priv = ieee80211_priv(dev);
+	struct r8192_priv 	*priv = rtllib_priv(dev);
 	BB_REGISTER_DEFINITION_T	*pPhyReg;	
 	//u8			eCheckItem;
 	
@@ -939,9 +935,9 @@ extern void PHY_RFShadowCompareFlagSetAll(struct net_device  * dev)
 		{
 			// 2008/11/20 MH For S3S4 test, we only check reg 26/27 now!!!!
 			if (Offset != 0x26 && Offset != 0x27)
-				PHY_RFShadowCompareFlagSet(dev, (RF90_RADIO_PATH_E)eRFPath, Offset, FALSE);
+				PHY_RFShadowCompareFlagSet(dev, (RF90_RADIO_PATH_E)eRFPath, Offset, false);
 			else
-				PHY_RFShadowCompareFlagSet(dev, (RF90_RADIO_PATH_E)eRFPath, Offset, TRUE);
+				PHY_RFShadowCompareFlagSet(dev, (RF90_RADIO_PATH_E)eRFPath, Offset, true);
 		}
 	}
 		
@@ -959,9 +955,9 @@ extern void PHY_RFShadowRecorverFlagSetAll(struct net_device  * dev)
 		{
 			// 2008/11/20 MH For S3S4 test, we only check reg 26/27 now!!!!
 			if (Offset != 0x26 && Offset != 0x27)
-				PHY_RFShadowRecorverFlagSet(dev, (RF90_RADIO_PATH_E)eRFPath, Offset, FALSE);
+				PHY_RFShadowRecorverFlagSet(dev, (RF90_RADIO_PATH_E)eRFPath, Offset, false);
 			else
-				PHY_RFShadowRecorverFlagSet(dev, (RF90_RADIO_PATH_E)eRFPath, Offset, TRUE);
+				PHY_RFShadowRecorverFlagSet(dev, (RF90_RADIO_PATH_E)eRFPath, Offset, true);
 		}
 	}
 		

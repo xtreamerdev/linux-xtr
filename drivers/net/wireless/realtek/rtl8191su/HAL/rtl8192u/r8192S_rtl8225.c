@@ -14,7 +14,7 @@
  * file called LICENSE.
  *
  * Contact Information:
- * Jerry chuang <wlanfae@realtek.com>
+ * wlanfae <wlanfae@realtek.com>
 ******************************************************************************/
 #include "r8192U.h"
 #include "r8192S_hw.h"
@@ -71,7 +71,7 @@ void PHY_SetRF0222DCckTxPower(struct net_device* dev ,u8	powerlevel)
 void PHY_SetRF0222DBandwidth(struct net_device* dev , HT_CHANNEL_WIDTH	 Bandwidth)	//20M or 40M
 {	
 	u8			eRFPath;	
-	struct r8192_priv *priv = ieee80211_priv(dev);
+	struct r8192_priv *priv = rtllib_priv(dev);
 	
 
 	//if (IS_HARDWARE_TYPE_8192S(dev))
@@ -140,7 +140,7 @@ void PHY_SetRF0222DBandwidth(struct net_device* dev , HT_CHANNEL_WIDTH	 Bandwidt
 void PHY_SetRF8225Bandwidth(struct net_device* dev ,HT_CHANNEL_WIDTH Bandwidth)	//20M or 40M
 {	
 	u8			eRFPath;	
-	struct r8192_priv *priv = ieee80211_priv(dev);
+	struct r8192_priv *priv = rtllib_priv(dev);
 	
 	//for(eRFPath = RF90_PATH_A; eRFPath <pHalData->NumTotalRFPath; eRFPath++)
 	for(eRFPath = 0; eRFPath <priv->NumTotalRFPath; eRFPath++)
@@ -165,7 +165,7 @@ void PHY_SetRF8225Bandwidth(struct net_device* dev ,HT_CHANNEL_WIDTH Bandwidth)	
 //just in phy
 bool PHY_RF8225_Config(struct net_device* dev )
 {
-	struct r8192_priv *priv = ieee80211_priv(dev);
+	struct r8192_priv *priv = rtllib_priv(dev);
 	bool	rtStatus = true;	
 	//RF90_RADIO_PATH_E			eRFPath;
 	//BB_REGISTER_DEFINITION_T	*pPhyReg; 
@@ -223,7 +223,7 @@ bool phy_RF8225_Config_ParaFile(struct net_device* dev)
 	//static char				szRadioBFile[] = RTL819X_PHY_RADIO_B;	
 	u8					eRFPath;
 	bool				rtStatus = true;
-	struct r8192_priv *priv = ieee80211_priv(dev);
+	struct r8192_priv *priv = rtllib_priv(dev);
 	BB_REGISTER_DEFINITION_T	*pPhyReg;	
 	//u8						eCheckItem;
 

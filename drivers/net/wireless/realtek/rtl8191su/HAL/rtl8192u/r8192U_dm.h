@@ -15,7 +15,7 @@
  * file called LICENSE.
  *			
  * Contact Information:
- * Jerry chuang <wlanfae@realtek.com>
+ * wlanfae <wlanfae@realtek.com>
 ******************************************************************************/
 #ifndef	__R8192UDM_H__
 #define __R8192UDM_H__

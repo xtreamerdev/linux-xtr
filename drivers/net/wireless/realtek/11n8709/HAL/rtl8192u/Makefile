@@ -36,12 +36,17 @@ EXTRA_CFLAGS += -DRTL8192SU_USB_PHY_TEST=0
 
 #EXTRA_CFLAGS += -DMUTIPLE_BULK_OUT
 EXTRA_CFLAGS += -DCONFIG_RTL8192_PM
-EXTRA_CFLAGS += -DENABLE_IPS
-EXTRA_CFLAGS += -DENABLE_LPS
+#EXTRA_CFLAGS += -DENABLE_IPS
+#EXTRA_CFLAGS += -DENABLE_LPS
 
 EXTRA_CFLAGS += -DTCP_CSUM_OFFLOAD_RX
 #EXTRA_CFLAGS += -DCONFIG_MP_TOOL
-#EXTRA_CFLAGS += -DBUILT_IN_CRYPTO
+EXTRA_CFLAGS += -DBUILT_IN_CRYPTO
+
+#EXTRA_CFLAGS += -DENABLE_UNASSOCIATED_USB_SUSPEND	# suspended if unassociated idle period > DENABLE_UNASSOCIATED_USB_SUSPEND_DELAY
+#EXTRA_CFLAGS += -DENABLE_UNASSOCIATED_USB_SUSPEND_DELAY=10 # unit: second
+#EXTRA_CFLAGS += -DENABLE_UNASSOCIATED_USB_AUTOSUSPEND	# if Linux USB autosuspend is enabled. ("CONFIG_USB_SUSPEND" and "echo auto > /sys/bus/usb/devices/x-x/power/level"; http://www.lesswatts.org/projects/devices-power-management/usb.php ) 
+
 endif
 
 ifeq ($(NIC_SELECT),RTL8192U)
@@ -60,64 +65,76 @@ EXTRA_CFLAGS += -DCONFIG_RTL8192_PM
 endif
 
 EXTRA_CFLAGS += -DUSE_FW_SOURCE_HEADER_FILE
-#EXTRA_CFLAGS += -DBUILT_IN_IEEE80211
+EXTRA_CFLAGS += -DBUILT_IN_RTLLIB
 #EXTRA_CFLAGS += -DWIFI_TEST
+#EXTRA_CFLAGS += -DENABLE_TKIP11N
+#EXTRA_CFLAGS += -DFOR_ANDROID_X86
 
 #
 # For RTK DMP platform
 EXTRA_CFLAGS += -DRTK_DMP_PLATFORM
 EXTRA_CFLAGS += -DENABLE_TX_ISR_TASKLET
 
+#it will fail to compile in suse linux enterprise 10 sp2. This flag is to solve this problem.
+ifeq ($(shell uname -r | cut -d. -f1,2,3,4), 2.6.16.60-0)
+	EXTRA_CFLAGS += -DOPENSUSE_SLED=1
+else
+	EXTRA_CFLAGS += -DOPENSUSE_SLED=0
+endif
+
 ifeq ($(NIC_SELECT),RTL8192SU)
-r8192s_usb-objs := r8180_93cx6.o r8192U_wx.o r8192S_phy.o r8192S_rtl6052.o r8192S_rtl8225.o r819xU_cmdpkt.o r8192U_dm.o r8192SU_HWImg.o r8192S_firmware.o r8192S_Efuse.o r8192U_core.o r8192U_pm.o r8192SU_led.o 
-# BUILT_IN_IEEE80211
-#r8192s_usb-objs += \
-        ../../ieee80211/ieee80211_rx.o                \
-        ../../ieee80211/ieee80211_softmac.o           \
-        ../../ieee80211/ieee80211_tx.o                \
-        ../../ieee80211/ieee80211_wx.o                \
-        ../../ieee80211/ieee80211_module.o            \
-        ../../ieee80211/ieee80211_softmac_wx.o        \
-        ../../ieee80211/rtl819x_HTProc.o              \
-        ../../ieee80211/rtl819x_TSProc.o              \
-        ../../ieee80211/rtl819x_BAProc.o              \
-        ../../ieee80211/dot11d.o                      \
-        ../../ieee80211/ieee80211_crypt.o             \
-        ../../ieee80211/ieee80211_crypt_tkip.o        \
-        ../../ieee80211/ieee80211_crypt_ccmp.o        \
-        ../../ieee80211/ieee80211_crypt_wep.o
+r8192s_usb-objs := r8180_93cx6.o r8192U_wx.o r8192S_phy.o r8192S_rtl6052.o r8192S_rtl8225.o r819xU_cmdpkt.o r8192U_dm.o r8192SU_HWImg.o r8192S_firmware.o r8192S_Efuse.o r8192U_core.o r8192U_pm.o r8192SU_led.o
+
+# BUILT_IN_RTLLIB
+r8192s_usb-objs += \
+        ../../rtllib/rtllib_rx.o                \
+        ../../rtllib/rtllib_softmac.o           \
+        ../../rtllib/rtllib_tx.o                \
+        ../../rtllib/rtllib_wx.o                \
+        ../../rtllib/rtllib_module.o            \
+        ../../rtllib/rtllib_softmac_wx.o        \
+        ../../rtllib/rtl819x_HTProc.o              \
+        ../../rtllib/rtl819x_TSProc.o              \
+        ../../rtllib/rtl819x_BAProc.o              \
+        ../../rtllib/dot11d.o                      \
+        ../../rtllib/rtllib_crypt.o             \
+        ../../rtllib/rtllib_crypt_tkip.o        \
+        ../../rtllib/rtllib_crypt_ccmp.o        \
+        ../../rtllib/rtllib_crypt_wep.o
+
 #r8192s_usb-objs        += r8192u_mp.o
 
-# start of BUILT_IN_CRYPTO
-#r8192s_usb-objs += \
-        ../../ieee80211/api.o                   \
-        ../../ieee80211/compress.o              \
-        ../../ieee80211/digest.o                \
-        ../../ieee80211/cipher.o                \
-        ../../ieee80211/scatterwalk.o           \
-        ../../ieee80211/arc4.o                  \
-        ../../ieee80211/michael_mic.o           \
-        ../../ieee80211/aes.o
+# BUILT_IN_CRYPTO
+r8192s_usb-objs += \
+        ../../rtllib/api.o			\
+        ../../rtllib/compress.o		\
+        ../../rtllib/digest.o		\
+        ../../rtllib/cipher.o		\
+        ../../rtllib/scatterwalk.o	\
+        ../../rtllib/arc4.o			\
+        ../../rtllib/michael_mic.o	\
+        ../../rtllib/aes.o
 
 obj-$(DRIVER_RELEASE_MODE) := r8192s_usb.o
 else
 r8192_usb-objs := r8192U_core.o r8180_93cx6.o r8192U_wx.o r8190_rtl8256.o r819xU_phy.o r819xU_firmware.o r819xU_cmdpkt.o r8192U_dm.o r819xU_firmware_img.o r8192U_pm.o
-# BUILT_IN_IEEE80211
-#r8192_usb-objs += \
-        ../../ieee80211/ieee80211_rx.o                \
-        ../../ieee80211/ieee80211_softmac.o           \
-        ../../ieee80211/ieee80211_tx.o                \
-        ../../ieee80211/ieee80211_wx.o                \
-        ../../ieee80211/ieee80211_module.o            \
-        ../../ieee80211/ieee80211_softmac_wx.o        \
-        ../../ieee80211/rtl819x_HTProc.o              \
-        ../../ieee80211/rtl819x_TSProc.o              \
-        ../../ieee80211/rtl819x_BAProc.o              \
-        ../../ieee80211/dot11d.o                      \
-        ../../ieee80211/ieee80211_crypt.o             \
-        ../../ieee80211/ieee80211_crypt_tkip.o        \
-        ../../ieee80211/ieee80211_crypt_ccmp.o        \
-        ../../ieee80211/ieee80211_crypt_wep.o
+
+# BUILT_IN_RTLLIB
+r8192_usb-objs += \
+        ../../rtllib/rtllib_rx.o                \
+        ../../rtllib/rtllib_softmac.o           \
+        ../../rtllib/rtllib_tx.o                \
+        ../../rtllib/rtllib_wx.o                \
+        ../../rtllib/rtllib_module.o            \
+        ../../rtllib/rtllib_softmac_wx.o        \
+        ../../rtllib/rtl819x_HTProc.o              \
+        ../../rtllib/rtl819x_TSProc.o              \
+        ../../rtllib/rtl819x_BAProc.o              \
+        ../../rtllib/dot11d.o                      \
+        ../../rtllib/rtllib_crypt.o             \
+        ../../rtllib/rtllib_crypt_tkip.o        \
+        ../../rtllib/rtllib_crypt_ccmp.o        \
+        ../../rtllib/rtllib_crypt_wep.o
 
 obj-$(DRIVER_RELEASE_MODE) := r8192_usb.o
 endif

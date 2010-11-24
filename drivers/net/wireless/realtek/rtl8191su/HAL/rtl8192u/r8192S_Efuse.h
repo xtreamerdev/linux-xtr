@@ -20,7 +20,7 @@
  * file called LICENSE.
  * 
  * Contact Information:
- * Jerry chuang <wlanfae@realtek.com>
+ * wlanfae <wlanfae@realtek.com>
 ******************************************************************************/
 // ******************************************************************************
 // * History:
@@ -44,6 +44,12 @@
 
 //--------------------------Define Parameters-------------------------------*/
 #define		EFUSE_MAC_LEN					0x200
+
+#define		EFUSE_REAL_CONTENT_LEN		512
+#define		EFUSE_MAP_LEN					128
+#define		EFUSE_MAX_SECTION			16
+#define		EFUSE_MAX_WORD_UNIT			4
+#define		EFUSE_IC_ID_OFFSET			506 //for some inferior IC purpose.
 
 #define		EFUSE_INIT_MAP				0
 #define		EFUSE_MODIFY_MAP				1
@@ -97,7 +103,7 @@ extern	void
 EFUSE_ShadowRead(struct net_device* dev,unsigned char Type,unsigned short Offset,u32 *Value);
 extern	void
 EFUSE_ShadowWrite(struct net_device* dev,unsigned char Type,unsigned short Offset,u32 Value);
-extern	void
+extern	bool
 EFUSE_ShadowUpdate(struct net_device* dev);
 extern	void 
 EFUSE_ShadowMapUpdate(struct net_device* dev);

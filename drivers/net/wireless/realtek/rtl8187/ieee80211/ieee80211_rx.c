@@ -997,11 +997,11 @@ static inline int ieee80211_network_init(
 
 	/* Pull out fixed field data */
 	memcpy(network->bssid, beacon->header.addr3, ETH_ALEN);
-	network->capability = beacon->capability;
+	network->capability = le16_to_cpu(beacon->capability);
 	network->last_scanned = jiffies;
-	network->time_stamp[0] = beacon->time_stamp[0];
-	network->time_stamp[1] = beacon->time_stamp[1];
-	network->beacon_interval = beacon->beacon_interval;
+	network->time_stamp[0] = le16_to_cpu(beacon->time_stamp[0]);
+	network->time_stamp[1] = le16_to_cpu(beacon->time_stamp[1]);
+	network->beacon_interval = le16_to_cpu(beacon->beacon_interval);
 	/* Where to pull this? beacon->listen_interval;*/
 	network->listen_interval = 0x0A;
 	network->rates_len = network->rates_ex_len = 0;

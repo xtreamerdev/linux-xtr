@@ -1,0 +1,8 @@
+rm -rf $1/HAL
+cp -rf $2/HAL $1
+make clean M=$1/HAL/rtl8192u
+
+rm -rf $1/rtllib
+cp -rf $2/rtllib $1
+make clean M=$1/rtllib
+

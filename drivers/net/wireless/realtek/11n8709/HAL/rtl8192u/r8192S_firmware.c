@@ -14,7 +14,7 @@
  * file called LICENSE.
  *
  * Contact Information:
- * Jerry chuang <wlanfae@realtek.com>
+ * wlanfae <wlanfae@realtek.com>
 ******************************************************************************/
 // **************************************************************************************************
 // * Procedure:    Init boot code/firmware code/data session
@@ -29,7 +29,7 @@
 // *        NDIS_STATUS_FAILURE - the following initialization process should be terminated
 // *        NDIS_STATUS_SUCCESS - if firmware initialization process success
 // **************************************************************************************************/
-//#include "ieee80211.h"
+//#include "rtllib.h"
 
 #include "r8192U.h"
 #include "r8192S_firmware.h"
@@ -96,7 +96,7 @@ FirmwareEnableCPU(struct net_device *dev)
 bool
 FirmwareCheckReady(struct net_device *dev,	u8 LoadFWStatus)
 {
-	struct r8192_priv 	*priv = ieee80211_priv(dev);
+	struct r8192_priv 	*priv = rtllib_priv(dev);
 	RT_STATUS	rtStatus = RT_STATUS_SUCCESS;
 	rt_firmware	*pFirmware = priv->pFirmware;
 	int			PollingCnt = 1000;
@@ -164,9 +164,9 @@ FirmwareCheckReady(struct net_device *dev,	u8 LoadFWStatus)
 		}
 
 		RT_TRACE(COMP_FIRMWARE, "DMEM code download success, CPUStatus(%#x)\n", CPUStatus);		
-
+                
 		PollingCnt = 1000; // Set polling cycle to 10000ms.
-
+              
 		do
 		{//Polling Load Firmware ready
 			CPUStatus = read_nic_byte(dev, TCR);
@@ -233,7 +233,7 @@ FirmwareCheckReady(struct net_device *dev,	u8 LoadFWStatus)
 // 
 bool FirmwareDownloadCode(struct net_device *dev, u8 *code_virtual_address, u32 buffer_len)
 {
-	struct r8192_priv	*priv = ieee80211_priv(dev);
+	struct r8192_priv	*priv = rtllib_priv(dev);
 	bool				rt_status = true;
 	u16				frag_threshold = RTL8192S_FW_PKT_FRAG_SIZE;
 	u16				frag_length, frag_offset = 0, ExtraDescOffset = 0;
@@ -300,16 +300,16 @@ bool FirmwareDownloadCode(struct net_device *dev, u8 *code_virtual_address, u32 
 		
 		tcb_desc->txbuf_size= frag_length;
 
-		if(!priv->ieee80211->check_nic_enough_desc(dev,tcb_desc->queue_index)||
-			(!skb_queue_empty(&priv->ieee80211->skb_waitQ[tcb_desc->queue_index]))||\
-			(priv->ieee80211->queue_stop) ) 
+		if(!priv->rtllib->check_nic_enough_desc(dev,tcb_desc->queue_index)||
+			(!skb_queue_empty(&priv->rtllib->skb_waitQ[tcb_desc->queue_index]))||\
+			(priv->rtllib->queue_stop) ) 
 		{
 			RT_TRACE(COMP_FIRMWARE,"=====================================================> tx full!\n");
-			skb_queue_tail(&priv->ieee80211->skb_waitQ[tcb_desc->queue_index], skb);
+			skb_queue_tail(&priv->rtllib->skb_waitQ[tcb_desc->queue_index], skb);
 		} 
 		else 
 		{
-			priv->ieee80211->softmac_hard_start_xmit(skb,dev);
+			priv->rtllib->softmac_hard_start_xmit(skb,dev);
 		}
 		
 		frag_offset += (frag_length - ExtraDescOffset);
@@ -334,7 +334,7 @@ cmdsend_downloadcode_fail:
 //
 u8 FirmwareHeaderMapRfType(struct net_device *dev)
 {	
-	struct r8192_priv 	*priv = ieee80211_priv(dev);
+	struct r8192_priv 	*priv = rtllib_priv(dev);
 	switch(priv->rf_type)
 	{
 		case RF_1T1R: 	return 0x11;
@@ -356,7 +356,7 @@ u8 FirmwareHeaderMapRfType(struct net_device *dev)
 //
 void FirmwareHeaderPriveUpdate(struct net_device *dev, PRT_8192S_FIRMWARE_PRIV 	pFwPriv)
 {
-	struct r8192_priv 	*priv = ieee80211_priv(dev);
+	struct r8192_priv 	*priv = rtllib_priv(dev);
 
 	// Update RF types for RATR settings.
 	pFwPriv->rf_config = FirmwareHeaderMapRfType(dev);
@@ -400,7 +400,7 @@ FirmwareGetNextStatus(FIRMWARE_8192S_STATUS FWCurrentStatus)
 
 bool FirmwareDownload92S(struct net_device *dev)
 {	
-	struct r8192_priv 	*priv = ieee80211_priv(dev);
+	struct r8192_priv 	*priv = rtllib_priv(dev);
 	bool				rtStatus = true;
 	const char 		*pFwImageFileName[1] = {"RTL8192SU/rtl8192sfw.bin"};
 	u8				*pucMappedFile = NULL;
@@ -409,7 +409,7 @@ bool FirmwareDownload92S(struct net_device *dev)
 	rt_firmware		*pFirmware = priv->pFirmware;
 	u8				FwStatus = FW_STATUS_INIT;
 	PRT_8192S_FIRMWARE_HDR		pFwHdr = NULL;
-	PRT_8192S_FIRMWARE_PRIV	pFwPriv = NULL;
+	PRT_8192S_FIRMWARE_PRIV		pFwPriv = NULL;
 	int 				rc;
 	const struct firmware 	*fw_entry;
 	u32				file_length = 0;
@@ -561,6 +561,8 @@ bool FirmwareDownload92S(struct net_device *dev)
 
 			case FW_STATUS_LOAD_DMEM:			
 				// <Roger_Notes> Partial update the content of header private. 2008.12.18 */
+				pFwHdr = pFirmware->pFwHeader;
+				pFwPriv = (PRT_8192S_FIRMWARE_PRIV)&pFwHdr->FWPriv;
 				FirmwareHeaderPriveUpdate(dev, pFwPriv);
 				pucMappedFile = (u8*)(pFirmware->pFwHeader)+RT_8192S_FIRMWARE_HDR_EXCLUDE_PRI_SIZE;
 				ulFileLength = FwHdrSize-RT_8192S_FIRMWARE_HDR_EXCLUDE_PRI_SIZE;
@@ -600,10 +602,10 @@ bool FirmwareDownload92S(struct net_device *dev)
 	RT_TRACE(COMP_FIRMWARE, "Firmware Download Success!!\n");	
 	return rtStatus;	
 	
-	DownloadFirmware_Fail:
+	DownloadFirmware_Fail:	
 	RT_TRACE(COMP_INIT, "Firmware Download Fail!! Dump related configurations.\n");
 	RT_TRACE(COMP_INIT, "Dump CMDR(0x40): %x\n", read_nic_dword(dev, CMDR));
-	RT_TRACE(COMP_ERR, "Firmware Download Fail!!%x\n",read_nic_word(dev, TCR));
+	RT_TRACE(COMP_ERR, "Firmware Download Fail!!%x\n",read_nic_word(dev, TCR));	
 	RT_TRACE(COMP_INIT, "Dump CPUINST(0x318): %x\n", read_nic_word(dev, CPUINST));
 	RT_TRACE(COMP_INIT, "Dump CPUCAUSE(0x31C): %x\n", read_nic_word(dev, CPUCAUSE));
 	RT_TRACE(COMP_INIT, "Dump SYS_CLKR(0x08): %x\n", read_nic_word(dev, SYS_CLKR));

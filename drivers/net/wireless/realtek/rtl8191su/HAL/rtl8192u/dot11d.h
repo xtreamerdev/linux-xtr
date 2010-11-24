@@ -20,14 +20,14 @@
  * file called LICENSE.
  *
  * Contact Information:
- * Jerry chuang <wlanfae@realtek.com>
+ * wlanfae <wlanfae@realtek.com>
 ******************************************************************************/
 
 #ifndef __INC_DOT11D_H
 #define __INC_DOT11D_H
 
 #ifdef ENABLE_DOT11D
-#include "../../ieee80211/ieee80211.h"
+#include "../../rtllib/rtllib.h"
 
 //#define ENABLE_DOT11D
 
@@ -74,7 +74,7 @@ typedef struct _RT_DOT11D_INFO {
 
 #define IS_COUNTRY_IE_CHANGED(__pIeeeDev, __Ie) \
 	(((__Ie).Length == 0 || (__Ie).Length != GET_DOT11D_INFO(__pIeeeDev)->CountryIeLen) ? \
-	FALSE : \
+	false : \
 	(!memcmp(GET_DOT11D_INFO(__pIeeeDev)->CountryIeBuf, (__Ie).Octet, (__Ie).Length)))
 
 #define CIE_WATCHDOG_TH 1
@@ -84,27 +84,20 @@ typedef struct _RT_DOT11D_INFO {
 
 #define IS_DOT11D_STATE_DONE(__pIeeeDev) (GET_DOT11D_INFO(__pIeeeDev)->State == DOT11D_STATE_DONE)
 
-#define Dot11d_Init             ieee80211_func(Dot11d_Init)
-#define Dot11d_Reset            ieee80211_func(Dot11d_Reset)
-#define Dot11d_UpdateCountryIe  ieee80211_func(Dot11d_UpdateCountryIe)
-#define DOT11D_GetMaxTxPwrInDbm ieee80211_func(DOT11D_GetMaxTxPwrInDbm)
-#define DOT11D_ScanComplete     ieee80211_func(DOT11D_ScanComplete)
-#define IsLegalChannel          ieee80211_func(IsLegalChannel)
-#define ToLegalChannel          ieee80211_func(ToLegalChannel)
 
 void
 Dot11d_Init(
-	struct ieee80211_device *dev
+	struct rtllib_device *dev
 	);
 
 void
 Dot11d_Reset(
-	struct ieee80211_device *dev
+	struct rtllib_device *dev
 	);
 
 void
 Dot11d_UpdateCountryIe(
-	struct ieee80211_device *dev,
+	struct rtllib_device *dev,
 	u8 *		pTaddr,
 	u16	CoutryIeLen,
 	u8 * pCoutryIe	 
@@ -112,22 +105,22 @@ Dot11d_UpdateCountryIe(
 
 u8
 DOT11D_GetMaxTxPwrInDbm(
-	struct ieee80211_device *dev,
+	struct rtllib_device *dev,
 	u8 Channel
 	);
 
 void
 DOT11D_ScanComplete(
-	struct ieee80211_device * dev
+	struct rtllib_device * dev
 	);
 
 int IsLegalChannel(
-	struct ieee80211_device * dev,
+	struct rtllib_device * dev,
 	u8 channel
 );
 
 int ToLegalChannel(
-	struct ieee80211_device * dev,
+	struct rtllib_device * dev,
 	u8 channel
 );
 #endif //ENABLE_DOT11D

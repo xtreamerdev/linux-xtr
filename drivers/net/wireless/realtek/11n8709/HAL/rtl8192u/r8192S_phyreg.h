@@ -14,7 +14,7 @@
  * file called LICENSE.
  *			
  * Contact Information:
- * Jerry chuang <wlanfae@realtek.com>
+ * wlanfae <wlanfae@realtek.com>
 ******************************************************************************/
 // ***************************************************************************
 // Note:	1. Define PMAC/BB register map
@@ -101,7 +101,7 @@
 
 #define		rFPGA0_RFTiming1			0x810	// Useless now
 #define		rFPGA0_RFTiming2			0x814
-//#define rFPGA0_XC_RFTiming        		0x818
+#define rFPGA0_XC_RFTiming        		0x818
 //#define rFPGA0_XD_RFTiming        		0x81c
 
 #define		rFPGA0_XA_HSSIParameter1		0x820	// RF 3 wire register

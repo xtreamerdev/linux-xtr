@@ -14,7 +14,7 @@
  * file called LICENSE.
  *			
  * Contact Information:
- * Jerry chuang <wlanfae@realtek.com>
+ * wlanfae <wlanfae@realtek.com>
 ******************************************************************************/
 // *****************************************************************************
 // * Note:	1. Define Mac register address and corresponding bit mask map
@@ -34,22 +34,9 @@
 typedef enum _VERSION_8192S{
 	VERSION_8192S_ACUT,
 	VERSION_8192S_BCUT,
-	VERSION_8192S_CCUT
+	VERSION_8192S_CCUT,
+	VERSION_8192S_DCUT
 }VERSION_8192S,*PVERSION_8192S;
-
-//#ifdef RTL8192SU
-typedef enum _VERSION_8192SUsb{
-	VERSION_8192SU_A, //A-Cut
-	VERSION_8192SU_B, //B-Cut
-	VERSION_8192SU_C, //C-Cut
-}VERSION_8192SUsb, *PVERSION_8192SUsb;
-//#else
-typedef enum _VERSION_819xU{
-	VERSION_819xU_A, // A-cut
-	VERSION_819xU_B, // B-cut
-	VERSION_819xU_C,// C-cut
-}VERSION_819xU,*PVERSION_819xU;
-//#endif 
 
 #if 0
 // 2007/11/15 MH Define different RF type. */
@@ -201,6 +188,7 @@ typedef enum _RT_RF_TYPE_819xU{
 #define		SYS_FUNC_EN		0x0002	// System Function Enable.
 #define		PMC_FSM			0x0004	// Power Sequence Control.
 #define		SYS_CLKR			0x0008	// System Clock.
+#define		CR9346				0x000A	// 93C46/93C56 Command Register.
 #define		EPROM_CMD			0x000A	// 93C46/93C56 Command Register. (win CR93C46)
 #define		EE_VPD				0x000C	// EEPROM VPD Data.
 #define		AFE_MISC			0x0010	// AFE Misc.
@@ -1058,8 +1046,8 @@ typedef enum _RT_RF_TYPE_819xU{
         		
 #define		TOTAL_CAM_ENTRY			32
        		
-#define		CAM_CONFIG_USEDK		TRUE
-#define		CAM_CONFIG_NO_USEDK		FALSE
+#define		CAM_CONFIG_USEDK		true
+#define		CAM_CONFIG_NO_USEDK		false
        		
 #define		CAM_WRITE				BIT16
 #define		CAM_READ				0x00000000
@@ -1219,112 +1207,6 @@ typedef enum _RT_RF_TYPE_819xU{
 //       8192S EEPROM/EFUSE share register definition.
 //----------------------------------------------------------------------------
 
-#ifdef RTL8192SE
-//
-// 2008/11/05 MH Redefine EEPROM address for 8192SE
-// 92SE/SU EEPROM definition seems not the same!!!!!!
-// EEPROM MAP REgister Definition!!!! Please refer to 8192SE EEPROM V0.5 2008/10/21
-// Update to 8192SE EEPROM V0.6 2008/11/11
-//
-#define 	RTL8190_EEPROM_ID				0x8129	// 0-1
-#define 	EEPROM_HPON					0x02 // LDO settings.2-5
-#define 	EEPROM_CLK						0x06 // Clock settings.6-7
-#define 	EEPROM_TESTR					0x08 // SE Test mode.8
-
-#define 	EEPROM_VID						0x0A // SE Vendor ID.A-B
-#define 	EEPROM_DID						0x0C // SE Device ID. C-D
-#define 	EEPROM_SVID					0x0E // SE Vendor ID.E-F
-#define 	EEPROM_SMID					0x10 // SE PCI Subsystem ID. 10-11
-
-#define 	EEPROM_MAC_ADDR				0x12 // SEMAC Address. 12-17
-#define 	EEPROM_NODE_ADDRESS_BYTE_0	0x12 // MAC address.
-
-#define 	EEPROM_PwDiff					0x54 // Difference of gain index between legacy and high throughput OFDM.
-
-//
-// 0x20 - 4B EPHY parameter!!!
-//
-//
-#define 	EEPROM_TxPowerBase			0x50 // Tx Power of serving station.
-#define 	EEPROM_TxPwIndex_CCK_24G	0x5D // 0x50~0x5D Range = 0~0x24//FIXLZM 
-#define 	EEPROM_TxPwIndex_OFDM_24G	0x6B // 0x5E~0x6B Range = 0~0x24//FIXLZM 
-#define	EEPROM_TX_PWR_INDEX_RANGE	28		// CCK and OFDM 14 channel
-
-
-// 2009/01/21 MH Add for SD3 requirement 
-#define 	EEPROM_TX_PWR_HT20_DIFF		0x62// HT20 Tx Power Index Difference
-#define 	DEFAULT_HT20_TXPWR_DIFF		2	// HT20<->40 default Tx Power Index Difference
-#define 	EEPROM_TX_PWR_OFDM_DIFF		0x65// OFDM Tx Power Index Difference
-#define 	EEPROM_TX_PWR_BAND_EDGE	0x67// TX Power offset at band-edge channel
-#define 	TX_PWR_BAND_EDGE_CHK		0x6D// Check if band-edge scheme is enabled
-
-// Oly old EEPROM format support the definition=============================
-//
-#define 	EEPROM_TxPwIndex_CCK_24G	0x5D // 0x50~0x5D Range = 0~0x24
-#define 	EEPROM_TxPwIndex_OFDM_24G	0x6B // 0x5E~0x6B Range = 0~0x24
-#define 	EEPROM_HT2T_CH1_A			0x6c //HT 2T path A channel 1 Power Index.
-#define 	EEPROM_HT2T_CH7_A			0x6d //HT 2T path A channel 7 Power Index.
-#define 	EEPROM_HT2T_CH13_A			0x6e //HT 2T path A channel 13 Power Index.
-#define 	EEPROM_HT2T_CH1_B			0x6f //HT 2T path B channel 1 Power Index.
-#define 	EEPROM_HT2T_CH7_B			0x70 //HT 2T path B channel 7 Power Index.
-#define 	EEPROM_HT2T_CH13_B			0x71 //HT 2T path B channel 13 Power Index.
-//
-#define 	EEPROM_TSSI_A					0x74 //TSSI value of path A.
-#define 	EEPROM_TSSI_B					0x75 //TSSI value of path B.
-//
-#define	EEPROM_RFInd_PowerDiff		0x76
-#define	EEPROM_Default_LegacyHTTxPowerDiff	0x3
-//
-#define 	EEPROM_ThermalMeter			0x77 // Thermal meter default value.
-#define 	EEPROM_CrystalCap				0x79 // Crystal Cap.
-#define 	EEPROM_ChannelPlan				0x7B // Map of supported channels.	
-#define 	EEPROM_Version					0x7C // The EEPROM content version
-#define	EEPROM_CustomID				0x7A
-#define 	EEPROM_BoardType				0x7E 
-// 0: 2x2 Green RTL8192GE miniCard (QFN68)
-// 1: 1x2            RTL8191SE miniCard (QFN64)
-// 2: 2x2            RTL8192SE miniCard (QFN68)
-// 3: 1x2            RTL8191SR minicCard(QFN64)
-
-//
-// Default Value for EEPROM or EFUSE!!!
-//
-#define	EEPROM_Default_TSSI			0x0
-#define 	EEPROM_Default_TxPowerDiff		0x0
-#define 	EEPROM_Default_CrystalCap		0x5
-#define 	EEPROM_Default_BoardType		0x02 // Default: 2X2, RTL8192SE(QFPN68)
-#define 	EEPROM_Default_TxPower		0x1010
-#define	EEPROM_Default_HT2T_TxPwr		0x10
-#define 	EEPROM_Default_TxPowerBase	0x0
-
-#ifdef EEPROM_OLD_FORMAT_SUPPORT
-#define 	EEPROM_Default_ThermalMeter	0x12
-#define 	EEPROM_Default_PwDiff			0x4
-#else
-#define	EEPROM_Default_LegacyHTTxPowerDiff	0x3
-#define	EEPROM_Default_ThermalMeter			0x12
-#define	EEPROM_Default_AntTxPowerDiff			0x0
-#define	EEPROM_Default_TxPwDiff_CrystalCap		0x5
-#define	EEPROM_Default_TxPowerLevel			0x22
-#endif
-
-#define	EEPROM_CHANNEL_PLAN_FCC			0x0
-#define	EEPROM_CHANNEL_PLAN_IC			0x1
-#define	EEPROM_CHANNEL_PLAN_ETSI		0x2
-#define	EEPROM_CHANNEL_PLAN_SPAIN		0x3
-#define	EEPROM_CHANNEL_PLAN_FRANCE		0x4
-#define	EEPROM_CHANNEL_PLAN_MKK			0x5
-#define	EEPROM_CHANNEL_PLAN_MKK1		0x6
-#define	EEPROM_CHANNEL_PLAN_ISRAEL		0x7
-#define	EEPROM_CHANNEL_PLAN_TELEC		0x8
-#define	EEPROM_CHANNEL_PLAN_GLOBAL_DOMAIN	0x9
-#define	EEPROM_CHANNEL_PLAN_WORLD_WIDE_13	0xA
-#define	EEPROM_CHANNEL_PLAN_BY_HW_MASK	0x80
-
-
-#define 	EEPROM_CID_DEFAULT				0x0
-#define 	EEPROM_CID_TOSHIBA				0x4
-#else
 //----------------------------------------------------------------------------
 //       8192S EEROM and Compatible E-Fuse definition. Added by Roger, 2008.10.21.
 //----------------------------------------------------------------------------
@@ -1393,20 +1275,21 @@ typedef enum _RT_RF_TYPE_819xU{
 #define	EEPROM_CHANNEL_PLAN_GLOBAL_DOMAIN		0x9
 #define	EEPROM_CHANNEL_PLAN_WORLD_WIDE_13		0xA
 #define	EEPROM_CHANNEL_PLAN_BY_HW_MASK		0x80
-#define 	EEPROM_CID_DEFAULT				0x0
-#define 	EEPROM_CID_ALPHA					0x1
-#define 	EEPROM_CID_Senao					0x3
-#define	EEPROM_CID_CAMEO					0X8
-#define 	EEPROM_CID_SITECOM				0x9
-#define 	EEPROM_CID_COREGA				0xB
-#define 	EEPROM_CID_EDIMAX_BELKIN			0xC
-#define	EEPROM_CID_SERCOMM_BELKIN		0xE
-#define	EEPROM_CID_CAMEO1				0xF
-#define 	EEPROM_CID_WHQL 					0xFE // added by chiyoko for dtm, 20090108
-//#define EEPROM_CID_RUNTOP					0x2
-//#define EEPROM_CID_TOSHIBA				0x4
-#define	EEPROM_CID_NetCore				0x5
-#endif
+
+#define	EEPROM_CID_DEFAULT			0x0
+#define	EEPROM_CID_ALPHA				0x1
+#define	EEPROM_CID_Senao				0x3
+#define	EEPROM_CID_NetCore			0x5
+#define	EEPROM_CID_CAMEO				0X8
+#define	EEPROM_CID_SITECOM			0x9
+#define	EEPROM_CID_COREGA			0xB
+#define	EEPROM_CID_EDIMAX_BELKIN		0xC
+#define	EEPROM_CID_SERCOMM_BELKIN	0xE
+#define	EEPROM_CID_CAMEO1			0xF
+#define	EEPROM_CID_WNC_COREGA		0x12
+#define	EEPROM_CID_CLEVO				0x13
+#define	EEPROM_CID_WHQL				0xFE // added by chiyoko for dtm, 20090108
+
 
 //-----------------------------------------------------------------
 // 0x2c0 FW Command Control register definition, added by Roger, 2008.11.27.

@@ -1,9 +1,30 @@
 #!/bin/bash
 
 # Select NIC type
-card=RTL8192u
+card=RTL8192su
 
-ifconfig wlan0 down
+case "$card" in
+        "RTL8192u")
+	  ifconfig wlan0 down;;
+        "RTL8192su")
+	  ifconfig wlan0 down;;
+        "RTL8190p")
+	  ifconfig wlan0 down;;
+        "RTL8192e")
+	  ifconfig wlan0 down;;
+        "RTL8192se")
+	  ifconfig wlan0 down;;
+	 "RTL8191se_Mesh")
+	  ifconfig mesh0 down;
+	  ifconfig ra0 down;;
+        "RTL8192ce")
+	  ifconfig wlan0 down;;
+        *)
+        echo "Unknown NIC type"
+	break;;
+esac
+
+
 SYSTEM=`uname -r|cut -d. -f1,2`
 
 if [ $SYSTEM = 2.4 ]
@@ -12,38 +33,53 @@ then
 case "$card" in
         "RTL8192u")
         rmmod r8192_usb;;
+        "RTL8192su")
+        rmmod r8192s_usb;;
         "RTL8190p")
         rmmod r8190_pci;;
         "RTL8192e")
-        rmmod r8192_pci;;
-        *)
-        echo "Unknown NIC type"
-	;;
+        rmmod r8192e_pci;;
+        "RTL8192se")
+	rmmod r8192se_pci;;
+	"RTL8191se_Mesh")
+	rmmod r8192se_pci_mesh;;
+        "RTL8192ce")
+	rmmod r8192ce_pci;;
+	*)
+		echo "Unknown NIC type";;
 esac
-rmmod ieee80211-rsl
-rmmod ieee80211_crypt_ccmp-rsl
-rmmod ieee80211_crypt_tkip-rsl
-rmmod ieee80211_crypt_wep-rsl
-rmmod aes-rsl
-rmmod michael_mic-rsl
-rmmod crypto-rsl
-rmmod ieee80211_crypt-rsl
+#rmmod rtllib-rsl
+#rmmod rtllib_crypt_ccmp-rsl
+#rmmod rtllib_crypt_tkip-rsl
+#rmmod rtllib_crypt_wep-rsl
+#rmmod aes-rsl
+#rmmod michael_mic-rsl
+#rmmod crypto-rsl
+#rmmod rtllib_crypt-rsl
 else
 #rmmod 
 case "$card" in
         "RTL8192u")
         rmmod r8192_usb.ko;;
+        "RTL8192su")
+        rmmod r8192s_usb.ko;;
         "RTL8190p")
         rmmod r8190_pci.ko;;
         "RTL8192e")
-        rmmod r8192_pci.ko;;
+        rmmod r8192e_pci.ko;;
+        "RTL8192se")
+        rmmod r8192se_pci.ko;;
+	"RTL8191se_Mesh")
+	rmmod r8192se_pci_mesh.ko;;
+        "RTL8192ce")
+        rmmod r8192ce_pci.ko;;
         *)
         echo "Unknown NIC type"
 	break;;
 esac
-rmmod ieee80211-rsl.ko
-rmmod ieee80211_crypt_ccmp-rsl.ko
-rmmod ieee80211_crypt_tkip-rsl.ko
-rmmod ieee80211_crypt_wep-rsl.ko
-rmmod ieee80211_crypt-rsl.ko
+#rmmod rtllib-rsl.ko
+#rmmod rtllib_crypt_ccmp-rsl.ko
+#rmmod rtllib_crypt_tkip-rsl.ko
+#rmmod rtllib_crypt_wep-rsl.ko
+#rmmod rtllib_crypt-rsl.ko
 fi
