@@ -1,7 +1,7 @@
 /*
  * unistr.c - NTFS Unicode string handling. Part of the Linux-NTFS project.
  *
- * Copyright (c) 2001-2004 Anton Altaparmakov
+ * Copyright (c) 2001-2006 Anton Altaparmakov
  *
  * This program/include file is free software; you can redistribute it and/or
  * modify it under the terms of the GNU General Public License as published
@@ -18,6 +18,8 @@
  * distribution in the file COPYING); if not, write to the Free Software
  * Foundation,Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
  */
+
+#include <linux/slab.h>
 
 #include "types.h"
 #include "debug.h"
@@ -59,16 +61,16 @@ static const u8 legal_ansi_char_array[0x40] = {
  * @upcase:		upcase table (only if @ic == IGNORE_CASE)
  * @upcase_size:	length in Unicode characters of @upcase (if present)
  *
- * Compare the names @s1 and @s2 and return TRUE (1) if the names are
- * identical, or FALSE (0) if they are not identical. If @ic is IGNORE_CASE,
+ * Compare the names @s1 and @s2 and return 'true' (1) if the names are
+ * identical, or 'false' (0) if they are not identical. If @ic is IGNORE_CASE,
  * the @upcase table is used to performa a case insensitive comparison.
  */
-BOOL ntfs_are_names_equal(const ntfschar *s1, size_t s1_len,
+bool ntfs_are_names_equal(const ntfschar *s1, size_t s1_len,
 		const ntfschar *s2, size_t s2_len, const IGNORE_CASE_BOOL ic,
 		const ntfschar *upcase, const u32 upcase_size)
 {
 	if (s1_len != s2_len)
-		return FALSE;
+		return false;
 	if (ic == CASE_SENSITIVE)
 		return !ntfs_ucsncmp(s1, s2, s1_len);
 	return !ntfs_ucsncasecmp(s1, s2, s1_len, upcase, upcase_size);
@@ -242,7 +244,7 @@ int ntfs_file_compare_values(FILE_NAME_ATTR *file_name_attr1,
  * map dictates, into a little endian, 2-byte Unicode string.
  *
  * This function allocates the string and the caller is responsible for
- * calling kmem_cache_free(ntfs_name_cache, @outs); when finished with it.
+ * calling kmem_cache_free(ntfs_name_cache, *@outs); when finished with it.
  *
  * On success the function returns the number of Unicode characters written to
  * the output string *@outs (>= 0), not counting the terminating Unicode NULL
@@ -262,37 +264,48 @@ int ntfs_nlstoucs(const ntfs_volume *vol, const char *ins,
 	wchar_t wc;
 	int i, o, wc_len;
 
-	/* We don't trust outside sources. */
-	if (ins) {
-		ucs = (ntfschar*)kmem_cache_alloc(ntfs_name_cache, SLAB_NOFS);
-		if (ucs) {
+	/* We do not trust outside sources. */
+	if (likely(ins)) {
+		ucs = kmem_cache_alloc(ntfs_name_cache, GFP_NOFS);
+		if (likely(ucs)) {
 			for (i = o = 0; i < ins_len; i += wc_len) {
 				wc_len = nls->char2uni(ins + i, ins_len - i,
 						&wc);
-				if (wc_len >= 0) {
-					if (wc) {
+				if (likely(wc_len >= 0 &&
+						o < NTFS_MAX_NAME_LEN)) {
+					if (likely(wc)) {
 						ucs[o++] = cpu_to_le16(wc);
 						continue;
-					} /* else (!wc) */
+					} /* else if (!wc) */
 					break;
-				} /* else (wc_len < 0) */
-				goto conversion_err;
+				} /* else if (wc_len < 0 ||
+						o >= NTFS_MAX_NAME_LEN) */
+				goto name_err;
 			}
 			ucs[o] = 0;
 			*outs = ucs;
 			return o;
-		} /* else (!ucs) */
-		ntfs_error(vol->sb, "Failed to allocate name from "
-				"ntfs_name_cache!");
+		} /* else if (!ucs) */
+		ntfs_error(vol->sb, "Failed to allocate buffer for converted "
+				"name from ntfs_name_cache.");
 		return -ENOMEM;
-	} /* else (!ins) */
-	ntfs_error(NULL, "Received NULL pointer.");
+	} /* else if (!ins) */
+	ntfs_error(vol->sb, "Received NULL pointer.");
 	return -EINVAL;
-conversion_err:
-	ntfs_error(vol->sb, "Name using character set %s contains characters "
-			"that cannot be converted to Unicode.", nls->charset);
+name_err:
 	kmem_cache_free(ntfs_name_cache, ucs);
-	return -EILSEQ;
+	if (wc_len < 0) {
+		ntfs_error(vol->sb, "Name using character set %s contains "
+				"characters that cannot be converted to "
+				"Unicode.", nls->charset);
+		i = -EILSEQ;
+	} else /* if (o >= NTFS_MAX_NAME_LEN) */ {
+		ntfs_error(vol->sb, "Name is too long (maximum length for a "
+				"name on NTFS is %d Unicode characters.",
+				NTFS_MAX_NAME_LEN);
+		i = -ENAMETOOLONG;
+	}
+	return i;
 }
 
 /**
@@ -337,7 +350,7 @@ int ntfs_ucstonls(const ntfs_volume *vol, const ntfschar *ins,
 		}
 		if (!ns) {
 			ns_len = ins_len * NLS_MAX_CHARSET_SIZE;
-			ns = (unsigned char*)kmalloc(ns_len + 1, GFP_NOFS);
+			ns = kmalloc(ns_len + 1, GFP_NOFS);
 			if (!ns)
 				goto mem_err_out;
 		}
@@ -352,7 +365,7 @@ retry:			wc = nls->uni2char(le16_to_cpu(ins[i]), ns + o,
 			else if (wc == -ENAMETOOLONG && ns != *outs) {
 				unsigned char *tc;
 				/* Grow in multiples of 64 bytes. */
-				tc = (unsigned char*)kmalloc((ns_len + 64) &
+				tc = kmalloc((ns_len + 64) &
 						~63, GFP_NOFS);
 				if (tc) {
 					memcpy(tc, ns, ns_len);
@@ -372,7 +385,8 @@ retry:			wc = nls->uni2char(le16_to_cpu(ins[i]), ns + o,
 	return -EINVAL;
 conversion_err:
 	ntfs_error(vol->sb, "Unicode name contains characters that cannot be "
-			"converted to character set %s.", nls->charset);
+			"converted to character set %s.  You might want to "
+			"try to use the mount option nls=utf8.", nls->charset);
 	if (ns != *outs)
 		kfree(ns);
 	if (wc != -ENAMETOOLONG)

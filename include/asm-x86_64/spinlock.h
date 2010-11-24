@@ -6,8 +6,10 @@
 #include <asm/page.h>
 #include <linux/config.h>
 
+#ifdef CONFIG_PRINTK
 extern int printk(const char * fmt, ...)
 	__attribute__ ((format (printf, 1, 2)));
+#endif
 
 /*
  * Your basic SMP spinlocks, allowing only a single CPU anywhere

@@ -65,7 +65,7 @@ __xipram cfi_read_pri(struct map_info *map, __u16 adr, __u16 size, const char* n
 	cfi_send_gen_cmd(0xff, 0, base, map, cfi, cfi->device_type, NULL);
 
 #ifdef CONFIG_MTD_XIP
-	(void) map_read(map, base);
+	(void) map_read_data(map, base);
 	asm volatile (".rep 8; nop; .endr");
 	local_irq_enable();
 #endif

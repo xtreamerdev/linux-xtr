@@ -462,7 +462,6 @@ void class_device_del(struct class_device *class_dev)
 		sysfs_remove_link(&class_dev->kobj, "device");
 	class_device_remove_attrs(class_dev);
 
-	kobject_hotplug(&class_dev->kobj, KOBJ_REMOVE);
 	kobject_del(&class_dev->kobj);
 
 	if (parent)

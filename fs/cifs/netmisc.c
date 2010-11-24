@@ -72,6 +72,7 @@ static const struct smb_to_posix_error mapping_table_ERRDOS[] = {
 	{ERRinvlevel,-EOPNOTSUPP},
 	{ERRdirnotempty, -ENOTEMPTY},
 	{ERRnotlocked, -ENOLCK},
+	{ERRcancelviolation, -ENOLCK},
 	{ERRalreadyexists, -EEXIST},
 	{ERRmoredata, -EOVERFLOW},
 	{ERReasnotsupported,-EOPNOTSUPP},
@@ -84,11 +85,11 @@ static const struct smb_to_posix_error mapping_table_ERRDOS[] = {
 
 static const struct smb_to_posix_error mapping_table_ERRSRV[] = {
 	{ERRerror, -EIO},
-	{ERRbadpw, -EPERM},
+	{ERRbadpw, -EACCES},  /* was EPERM */
 	{ERRbadtype, -EREMOTE},
 	{ERRaccess, -EACCES},
 	{ERRinvtid, -ENXIO},
-	{ERRinvnetname, -ENODEV},
+	{ERRinvnetname, -ENXIO},
 	{ERRinvdevice, -ENXIO},
 	{ERRqfull, -ENOSPC},
 	{ERRqtoobig, -ENOSPC},
@@ -133,7 +134,6 @@ static const struct smb_to_posix_error mapping_table_ERRHRD[] = {
 int
 cifs_inet_pton(int address_family, char *cp,void *dst)
 {
-	struct in_addr address;
 	int value;
 	int digit;
 	int i;
@@ -190,8 +190,7 @@ cifs_inet_pton(int address_family, char *cp,void *dst)
 	if (value > addr_class_max[end - bytes])
 		return 0;
 
-	address.s_addr = *((__be32 *) bytes) | htonl(value);
-	*((__be32 *)dst) = address.s_addr;
+	*((__be32 *)dst) = *((__be32 *) bytes) | htonl(value);
 	return 1; /* success */
 }
 
@@ -332,7 +331,7 @@ static const struct {
 	ERRHRD, ERRgeneral, NT_STATUS_ACCOUNT_RESTRICTION}, {
 	ERRSRV, 2241, NT_STATUS_INVALID_LOGON_HOURS}, {
 	ERRSRV, 2240, NT_STATUS_INVALID_WORKSTATION}, {
-	ERRSRV, 2242, NT_STATUS_PASSWORD_EXPIRED}, {
+	ERRSRV, ERRpasswordExpired, NT_STATUS_PASSWORD_EXPIRED}, {
 	ERRSRV, 2239, NT_STATUS_ACCOUNT_DISABLED}, {
 	ERRHRD, ERRgeneral, NT_STATUS_NONE_MAPPED}, {
 	ERRHRD, ERRgeneral, NT_STATUS_TOO_MANY_LUIDS_REQUESTED}, {
@@ -678,7 +677,7 @@ static const struct {
 	ERRDOS, 193, NT_STATUS_IMAGE_CHECKSUM_MISMATCH}, {
 	ERRHRD, ERRgeneral, NT_STATUS_LOST_WRITEBEHIND_DATA}, {
 	ERRHRD, ERRgeneral, NT_STATUS_CLIENT_SERVER_PARAMETERS_INVALID}, {
-	ERRSRV, 2242, NT_STATUS_PASSWORD_MUST_CHANGE}, {
+	ERRSRV, ERRpasswordExpired, NT_STATUS_PASSWORD_MUST_CHANGE}, {
 	ERRHRD, ERRgeneral, NT_STATUS_NOT_FOUND}, {
 	ERRHRD, ERRgeneral, NT_STATUS_NOT_TINY_STREAM}, {
 	ERRHRD, ERRgeneral, NT_STATUS_RECOVERY_FAILURE}, {
@@ -815,7 +814,7 @@ map_smb_to_linux_error(struct smb_hdr *smb)
 	if (smb->Flags2 & SMBFLG2_ERR_STATUS) {
 		/* translate the newer STATUS codes to old style errors and then to POSIX errors */
 		__u32 err = le32_to_cpu(smb->Status.CifsError);
-		if(cifsFYI)
+		if(cifsFYI & CIFS_RC)
 			cifs_print_status(err);
 		ntstatus_to_dos(err, &smberrclass, &smberrcode);
 	} else {
@@ -870,7 +869,14 @@ unsigned int
 smbCalcSize(struct smb_hdr *ptr)
 {
 	return (sizeof (struct smb_hdr) + (2 * ptr->WordCount) +
-		BCC(ptr));
+		2 /* size of the bcc field */ + BCC(ptr));
+}
+
+unsigned int
+smbCalcSize_LE(struct smb_hdr *ptr)
+{
+	return (sizeof (struct smb_hdr) + (2 * ptr->WordCount) +
+		2 /* size of the bcc field */ + le16_to_cpu(BCC_LE(ptr)));
 }
 
 /* The following are taken from fs/ntfs/util.c */
@@ -903,3 +909,61 @@ cifs_UnixTimeToNT(struct timespec t)
 	/* Convert to 100ns intervals and then add the NTFS time offset. */
 	return (u64) t.tv_sec * 10000000 + t.tv_nsec/100 + NTFS_TIME_OFFSET;
 }
+
+static int total_days_of_prev_months[] =
+{0, 31, 59, 90, 120, 151, 181, 212, 243, 273, 304, 334};
+
+
+__le64 cnvrtDosCifsTm(__u16 date, __u16 time)
+{
+	return cpu_to_le64(cifs_UnixTimeToNT(cnvrtDosUnixTm(date, time)));
+}
+
+struct timespec cnvrtDosUnixTm(__u16 date, __u16 time)
+{
+	struct timespec ts;
+	int sec, min, days, month, year;
+	SMB_TIME * st = (SMB_TIME *)&time;
+	SMB_DATE * sd = (SMB_DATE *)&date;
+
+	cFYI(1,("date %d time %d",date, time));
+
+	sec = 2 * st->TwoSeconds;
+	min = st->Minutes;
+	if((sec > 59) || (min > 59))
+		cERROR(1,("illegal time min %d sec %d", min, sec));
+	sec += (min * 60);
+	sec += 60 * 60 * st->Hours;
+	if(st->Hours > 24)
+		cERROR(1,("illegal hours %d",st->Hours));
+	days = sd->Day;
+	month = sd->Month;
+	if((days > 31) || (month > 12))
+		cERROR(1,("illegal date, month %d day: %d", month, days));
+	month -= 1;
+	days += total_days_of_prev_months[month];
+	days += 3652; /* account for difference in days between 1980 and 1970 */
+	year = sd->Year;
+	days += year * 365;
+	days += (year/4); /* leap year */
+	/* generalized leap year calculation is more complex, ie no leap year
+	for years/100 except for years/400, but since the maximum number for DOS
+	 year is 2**7, the last year is 1980+127, which means we need only
+	 consider 2 special case years, ie the years 2000 and 2100, and only
+	 adjust for the lack of leap year for the year 2100, as 2000 was a 
+	 leap year (divisable by 400) */
+	if(year >= 120)  /* the year 2100 */
+		days = days - 1;  /* do not count leap year for the year 2100 */
+
+	/* adjust for leap year where we are still before leap day */
+	if(year != 120)
+		days -= ((year & 0x03) == 0) && (month < 2 ? 1 : 0);
+	sec += 24 * 60 * 60 * days; 
+
+	ts.tv_sec = sec;
+
+	/* cFYI(1,("sec after cnvrt dos to unix time %d",sec)); */
+
+	ts.tv_nsec = 0;
+	return ts;
+} 

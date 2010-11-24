@@ -39,7 +39,7 @@ struct mtd_info *cfi_probe(struct map_info *map);
 
 #define xip_allowed(base, map) \
 do { \
-	(void) map_read(map, base); \
+	(void) map_read_data(map, base); \
 	asm volatile (".rep 8; nop; .endr"); \
 	local_irq_enable(); \
 } while (0)

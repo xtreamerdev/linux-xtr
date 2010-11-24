@@ -35,6 +35,7 @@
 #include <linux/quotaops.h>
 #include <linux/smp_lock.h>
 #include <linux/buffer_head.h>
+#include <linux/namei.h>
 
 static inline int udf_match(int len1, const char *name1, int len2, const char *name2)
 {
@@ -223,7 +224,7 @@ udf_find_entry(struct inode *dir, struct dentry *dentry,
 		{
 			int poffset;	/* Unpaded ending offset */
 
-			poffset = fibh->soffset + sizeof(struct fileIdentDesc) + liu + lfi;
+			poffset = fibh->soffset + sizeof(struct fileIdentDesc) + liu + lfi;	// fibh->soffset would be negative
 
 			if (poffset >= lfi)
 				nameptr = (uint8_t *)(fibh->ebh->b_data + poffset - lfi);
@@ -636,6 +637,15 @@ static int udf_create(struct inode *dir, struct dentry *dentry, int mode, struct
 		return err;
 	}
 
+// When create a new file with O_DIRECT flag, the data should not be stored in File Entry.
+// This kind of operation doesn't have the address space with direct_io function.
+	if(nd->intent.open.flags & O_DIRECT) {
+		if (UDF_QUERY_FLAG(inode->i_sb, UDF_FLAG_USE_SHORT_AD))
+			UDF_I_ALLOCTYPE(inode) = ICBTAG_FLAG_AD_SHORT;
+		else
+			UDF_I_ALLOCTYPE(inode) = ICBTAG_FLAG_AD_LONG;
+	}
+                                                                
 	if (UDF_I_ALLOCTYPE(inode) == ICBTAG_FLAG_AD_IN_ICB)
 		inode->i_data.a_ops = &udf_adinicb_aops;
 	else

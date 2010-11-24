@@ -20,6 +20,7 @@
 #define UDF_FLAG_VARCONV		8
 #define UDF_FLAG_NLS_MAP		9
 #define UDF_FLAG_UTF8			10
+#define UDF_FLAG_RECOVERY		16		/* The partition is specified to use recovery facility */
 
 #define UDF_PART_FLAG_UNALLOC_BITMAP	0x0001
 #define UDF_PART_FLAG_UNALLOC_TABLE	0x0002
@@ -118,6 +119,7 @@ static inline struct udf_sb_info *UDF_SB(struct super_block *sb)
 #define UDF_SB_BITMAP_NR_GROUPS(X,Y,Z)		( UDF_SB_PARTMAPS(X)[(Y)].Z.s_bitmap->s_nr_groups )
 
 #define UDF_SB_VOLIDENT(X)			( UDF_SB(X)->s_volident )
+// How many Partition Maps
 #define UDF_SB_NUMPARTS(X)			( UDF_SB(X)->s_partitions )
 #define UDF_SB_PARTITION(X)			( UDF_SB(X)->s_partition )
 #define UDF_SB_SESSION(X)			( UDF_SB(X)->s_session )

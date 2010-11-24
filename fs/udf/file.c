@@ -193,7 +193,7 @@ int udf_ioctl(struct inode *inode, struct file *filp, unsigned int cmd,
 		return -EPERM;
 	}
 
-	if ( !arg )
+	if ( cmd != UDF_ABCUT_INFO && !arg )
 	{
 		udf_debug("invalid argument to udf_ioctl\n");
 		return -EINVAL;
@@ -224,6 +224,56 @@ int udf_ioctl(struct inode *inode, struct file *filp, unsigned int cmd,
 			result = copy_to_user((char __user *)arg, UDF_I_DATA(inode),
 				UDF_I_LENEATTR(inode)) ? -EFAULT : 0;
 			break;
+
+		case UDF_ABCUT:
+		{
+			int from, count;
+			long long ptrs;
+			
+//			get_user(ptrs, (long long __user *)arg);
+			if(copy_from_user(&ptrs, (long long __user *)arg, sizeof(ptrs))) {
+				printk(KERN_DEBUG "UDF_ABCUT parameter error!\n");
+				return -EFAULT;
+			}
+			from = (int)(ptrs & 0x00000000ffffffff);
+			count = (int)((ptrs & 0xffffffff00000000) >> 32);
+			printk(KERN_DEBUG "ab-erase, from:%d len:%d\n", from, count);
+			udf_ab_cut(inode, filp, from, count);
+			break;
+		}
+		case UDF_ABCUT_INFO:
+		{
+			int total_size=0, i=0;
+			int8_t etype;
+			kernel_lb_addr eloc, bloc;
+			uint32_t elen=0, extoffset=0;
+			struct buffer_head *bh=NULL;
+
+			if(!inode) {
+				printk(KERN_DEBUG "UDF_ABCUT_INFO paramter error!\n");
+				return 0;
+			}
+			if(is_bad_inode(inode)) {
+				printk(KERN_DEBUG "UDF_ABCUT_INFO paramter error!\n");
+				return 0;
+			}
+		
+			bloc=UDF_I_LOCATION(inode);
+			printk(KERN_DEBUG "cnt:\tsize\textent offset\textent type\tLBA\ttotal size\n");
+			while ((etype = udf_next_aext(inode, &bloc, &extoffset, &eloc, &elen, &bh, 1)) != -1) {
+				total_size+=elen;
+				if(!etype)
+					printk(KERN_DEBUG "%d\t%d,%d\t%d\t\tRecorded\t%d,%d\t%d/%d\t%p\n", i, elen, elen>>inode->i_sb->s_blocksize_bits, extoffset, eloc.logicalBlockNum, eloc.partitionReferenceNum, total_size, total_size>>inode->i_sb->s_blocksize_bits, bh);
+				else if(etype == 1)
+					printk(KERN_DEBUG "%d\t%d,%d\t%d\t\tAllocated\t%d,%d\t%d/%d\t%p\n", i, elen, elen>>inode->i_sb->s_blocksize_bits, extoffset, eloc.logicalBlockNum, eloc.partitionReferenceNum, total_size, total_size>>inode->i_sb->s_blocksize_bits, bh);
+				else if(etype == 2)
+					printk(KERN_DEBUG "%d\t%d,%d\t%d\t\tBoth no\t%d,%d\t%d/%d\t%p\n", i, elen, elen>>inode->i_sb->s_blocksize_bits, extoffset, eloc.logicalBlockNum, eloc.partitionReferenceNum, total_size, total_size>>inode->i_sb->s_blocksize_bits, bh);
+				i++;
+			}
+			printk(KERN_DEBUG "\n\n\n");
+			udf_release_data(bh);
+			break;
+		}
 	}
 
 	return result;

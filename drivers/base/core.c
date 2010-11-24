@@ -39,7 +39,7 @@ dev_attr_show(struct kobject * kobj, struct attribute * attr, char * buf)
 	ssize_t ret = 0;
 
 	if (dev_attr->show)
-		ret = dev_attr->show(dev, buf);
+		ret = dev_attr->show(dev, dev_attr, buf);
 	return ret;
 }
 
@@ -52,7 +52,7 @@ dev_attr_store(struct kobject * kobj, struct attribute * attr,
 	ssize_t ret = 0;
 
 	if (dev_attr->store)
-		ret = dev_attr->store(dev, buf, count);
+		ret = dev_attr->store(dev, dev_attr, buf, count);
 	return ret;
 }
 
@@ -212,6 +212,7 @@ void device_initialize(struct device *dev)
 	INIT_LIST_HEAD(&dev->driver_list);
 	INIT_LIST_HEAD(&dev->bus_list);
 	INIT_LIST_HEAD(&dev->dma_pools);
+	init_MUTEX(&dev->sem);
 }
 
 /**
@@ -264,7 +265,6 @@ int device_add(struct device *dev)
  BusError:
 	device_pm_remove(dev);
  PMError:
-	kobject_hotplug(&dev->kobj, KOBJ_REMOVE);
 	kobject_del(&dev->kobj);
  Error:
 	if (parent)
@@ -348,7 +348,6 @@ void device_del(struct device * dev)
 		platform_notify_remove(dev);
 	bus_remove_device(dev);
 	device_pm_remove(dev);
-	kobject_hotplug(&dev->kobj, KOBJ_REMOVE);
 	kobject_del(&dev->kobj);
 	if (parent)
 		put_device(parent);

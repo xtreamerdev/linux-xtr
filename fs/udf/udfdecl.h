@@ -24,6 +24,7 @@
 #define UDF_NAME_LEN		256
 #define UDF_PATH_LEN		1023
 
+/** The offset of the Allocation Descriptors of File Entry or Extended File Entry **/
 #define udf_file_entry_alloc_offset(inode)\
 	(UDF_I_USE(inode) ?\
 		sizeof(struct unallocSpaceEntry) :\
@@ -99,13 +100,14 @@ extern void udf_read_inode(struct inode *);
 extern void udf_delete_inode(struct inode *);
 extern void udf_clear_inode(struct inode *);
 extern int udf_write_inode(struct inode *, int);
-extern long udf_block_map(struct inode *, long);
+extern long udf_block_map(struct inode *, long, long *);
 extern int8_t inode_bmap(struct inode *, int, kernel_lb_addr *, uint32_t *, kernel_lb_addr *, uint32_t *, uint32_t *, struct buffer_head **);
 extern int8_t udf_add_aext(struct inode *, kernel_lb_addr *, int *, kernel_lb_addr, uint32_t, struct buffer_head **, int);
 extern int8_t udf_write_aext(struct inode *, kernel_lb_addr, int *, kernel_lb_addr, uint32_t, struct buffer_head *, int);
 extern int8_t udf_delete_aext(struct inode *, kernel_lb_addr, int, kernel_lb_addr, uint32_t, struct buffer_head *);
 extern int8_t udf_next_aext(struct inode *, kernel_lb_addr *, int *, kernel_lb_addr *, uint32_t *, struct buffer_head **, int);
 extern int8_t udf_current_aext(struct inode *, kernel_lb_addr *, int *, kernel_lb_addr *, uint32_t *, struct buffer_head **, int);
+extern void udf_ab_cut(struct inode*, struct file *filp, int, int);
 
 /* misc.c */
 extern struct buffer_head *udf_tgetblk(struct super_block *, int);

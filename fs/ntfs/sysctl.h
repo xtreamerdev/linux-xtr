@@ -24,9 +24,8 @@
 #ifndef _LINUX_NTFS_SYSCTL_H
 #define _LINUX_NTFS_SYSCTL_H
 
-#include <linux/config.h>
 
-#if (DEBUG && CONFIG_SYSCTL)
+#if defined(DEBUG) && defined(CONFIG_SYSCTL)
 
 extern int ntfs_sysctl(int add);
 

@@ -60,6 +60,8 @@
 #include <linux/vmalloc.h>
 #include <asm/byteorder.h>
 
+#include <linux/proc_fs.h>
+#include <linux/seq_file.h>
 #include <linux/udf_fs.h>
 #include "udf_sb.h"
 #include "udf_i.h"
@@ -97,6 +99,164 @@ static void udf_open_lvid(struct super_block *);
 static void udf_close_lvid(struct super_block *);
 static unsigned int udf_count_free(struct super_block *);
 static int udf_statfs(struct super_block *, struct kstatfs *);
+
+struct super_block *proc_sb=NULL;
+kernel_lb_addr	proc_rootDirectoryICB;
+
+#ifdef UDF_BACKUP
+// We donot support "Long allocation" because the start_block should be 6 bytes. I donot think we will have such a big HD... XD
+void udf_add_backup_region (struct super_block *sb, unsigned long start_block, unsigned long blocks)
+{
+	struct udf_backup_location *ptr = ((struct udf_sb_info*)sb->s_fs_info)->backup_head;
+	struct udf_backup_location *backup;
+
+	backup = kmalloc(sizeof(struct udf_backup_location), GFP_KERNEL);
+	backup->start_block = start_block;
+	backup->blocks = blocks;
+	backup->next = NULL;
+
+	if(ptr) {
+		while(ptr->next)
+			ptr = ptr->next;
+		ptr->next = backup;
+	} else
+		((struct udf_sb_info*)sb->s_fs_info)->backup_head = backup;
+}
+
+#define UDF_BACKUP_FILE1 "DVD_RTAV"
+#define UDF_BACKUP_FILE2 "VR_MOVIE.VRO"
+
+extern struct subsystem realtek_boards_subsys;
+#define UDF_ATTR_RO(_name) \
+static struct subsys_attribute _name##_attr = __ATTR_RO(_name)
+#define UDF_ATTR_RW(_name) \
+static struct subsys_attribute _name##_attr = \
+	__ATTR(_name, 0644, _name##_show, _name##_store)
+
+static ssize_t udf_backup_blocks_show(struct subsystem *subsys, char *page)
+{
+	int len=0;
+	struct udf_backup_location *ptr;
+	long partition_start;
+	struct buffer_head *bh = NULL, *bh2=NULL;
+	struct extendedFileEntry *efe;
+	struct unallocSpaceEntry *use;
+	int dir_size, offset;
+	kernel_lb_addr found_lb;
+	long_ad *lad;
+	short_ad *sad;
+	int found = 0;
+
+	if(proc_sb) {
+		ptr = ((struct udf_sb_info*)proc_sb->s_fs_info)->backup_head;
+		while(ptr) {
+			len+=sprintf(page+len, "%ld %ld\n", ptr->start_block, ptr->blocks);
+			ptr = ptr->next;
+		}
+		partition_start = UDF_SB_PARTMAPS(proc_sb)[0].s_partition_root;
+		if(UDF_SB_PARTMAPS(proc_sb)[0].s_uspace.s_bitmap && (UDF_SB_PARTFLAGS(proc_sb, 0) & UDF_PART_FLAG_UNALLOC_BITMAP))
+			len+=sprintf(page+len, "%ld %d\n", UDF_SB_PARTMAPS(proc_sb)[0].s_uspace.s_bitmap->s_extPosition+partition_start, UDF_SB_PARTMAPS(proc_sb)[0].s_uspace.s_bitmap->s_nr_groups);
+		else if(UDF_SB_PARTMAPS(proc_sb)[0].s_uspace.s_table && (UDF_SB_PARTFLAGS(proc_sb, 0) & UDF_PART_FLAG_UNALLOC_TABLE)) {
+			len+=sprintf(page+len, "%ld %d\n", UDF_I_LOCATION(UDF_SB_PARTMAPS(proc_sb)[0].s_uspace.s_table).logicalBlockNum+partition_start, 1);
+			bh = udf_tread(proc_sb, UDF_I_LOCATION(UDF_SB_PARTMAPS(proc_sb)[0].s_uspace.s_table).logicalBlockNum+partition_start);
+			if (!bh)
+				return len;
+			use = (struct unallocSpaceEntry *)bh->b_data;
+			sad = (short_ad*)(use->allocDescs+use->lengthAllocDescs-8);
+			while(sad->extLength>>30 == EXT_NEXT_EXTENT_ALLOCDECS>>30) {
+				struct allocExtDesc *allocextdesc;
+	
+				len+=sprintf(page+len, "%ld 1\n", sad->extPosition+partition_start);
+				bh2 = udf_tread(proc_sb, sad->extPosition+partition_start);
+				udf_release_data(bh);
+				bh=bh2;
+				if (!bh)
+					return len;
+				allocextdesc = (struct allocExtDesc *)bh->b_data;
+				sad = (short_ad*)(bh->b_data+sizeof(struct allocExtDesc)+allocextdesc->lengthAllocDescs-8);
+				printk("sad length: %d, position: %d \n", sad->extLength, sad->extPosition);
+			}
+			udf_release_data(bh);
+		}
+
+		len+=sprintf(page+len, "%ld 1\n", proc_rootDirectoryICB.logicalBlockNum+partition_start);
+		bh = udf_tread(proc_sb, proc_rootDirectoryICB.logicalBlockNum+partition_start);
+		if (!bh)
+			return len;
+		efe = (struct extendedFileEntry *)bh->b_data;
+		dir_size = efe->informationLength;
+		offset = 0;
+		while(dir_size>offset) {
+			if(((struct fileIdentDesc*)(efe->allocDescs+offset))->lengthFileIdent == (strlen(UDF_BACKUP_FILE1)+1)) {
+				if(!strncmp(((struct fileIdentDesc*)(efe->allocDescs+offset))->fileIdent+((struct fileIdentDesc*)(efe->allocDescs+offset))->lengthOfImpUse+1, UDF_BACKUP_FILE1, strlen(UDF_BACKUP_FILE1)) && !(((struct fileIdentDesc*)(efe->allocDescs+offset))->fileCharacteristics&FID_FILE_CHAR_DELETED)) {
+					found_lb = lelb_to_cpu(((struct fileIdentDesc*)(efe->allocDescs+offset))->icb.extLocation);
+					len+=sprintf(page+len, "%ld 1\n", found_lb.logicalBlockNum+partition_start);
+					found = 1;
+				}
+			}
+			offset += (((38+((struct fileIdentDesc*)(efe->allocDescs+offset))->lengthFileIdent+((struct fileIdentDesc*)(efe->allocDescs+offset))->lengthOfImpUse)+3)&~3);
+		}
+		udf_release_data(bh);
+
+		if(!found)
+			return len;
+
+		bh = udf_tread(proc_sb, found_lb.logicalBlockNum+partition_start);
+		if (!bh)
+			return len;
+		efe = (struct extendedFileEntry *)bh->b_data;
+		dir_size = efe->informationLength;
+		offset = 0;
+		found = 0;
+		while(dir_size>offset) {
+			if(((struct fileIdentDesc*)(efe->allocDescs+offset))->lengthFileIdent == (strlen(UDF_BACKUP_FILE2)+1)) {
+				if(!strncmp(((struct fileIdentDesc*)(efe->allocDescs+offset))->fileIdent+((struct fileIdentDesc*)(efe->allocDescs+offset))->lengthOfImpUse+1, UDF_BACKUP_FILE2, strlen(UDF_BACKUP_FILE2)) && !(((struct fileIdentDesc*)(efe->allocDescs+offset))->fileCharacteristics&FID_FILE_CHAR_DELETED)) {
+					found_lb = lelb_to_cpu(((struct fileIdentDesc*)(efe->allocDescs+offset))->icb.extLocation);
+					len+=sprintf(page+len, "%ld 1\n", found_lb.logicalBlockNum+partition_start);
+					found = 1;
+				}
+			}
+			offset += (((38+((struct fileIdentDesc*)(efe->allocDescs+offset))->lengthFileIdent+((struct fileIdentDesc*)(efe->allocDescs+offset))->lengthOfImpUse)+3)&~3);
+		}
+		udf_release_data(bh);
+
+		if(!found)
+			return len;
+
+		bh = udf_tread(proc_sb, found_lb.logicalBlockNum+partition_start);
+		if (!bh)
+			return len;
+		efe = (struct extendedFileEntry *)bh->b_data;
+		lad = (long_ad*)(efe->allocDescs+efe->lengthExtendedAttr+efe->lengthAllocDescs-16);
+		while(lad->extLength>>30 == EXT_NEXT_EXTENT_ALLOCDECS>>30) {
+			struct allocExtDesc *allocextdesc;
+
+			len+=sprintf(page+len, "%ld 1\n", (lelb_to_cpu(lad->extLocation)).logicalBlockNum+partition_start);
+			bh2 = udf_tread(proc_sb, (lelb_to_cpu(lad->extLocation)).logicalBlockNum+partition_start);
+			udf_release_data(bh);
+			bh=bh2;
+			if (!bh)
+				return len;
+			allocextdesc = (struct allocExtDesc *)bh->b_data;
+			lad = (long_ad*)(bh->b_data+sizeof(struct allocExtDesc)+allocextdesc->lengthAllocDescs-16);
+		}
+		udf_release_data(bh);
+	}
+	return len;
+}
+
+UDF_ATTR_RO(udf_backup_blocks);
+static struct attribute * udf_attrs[] = {
+	&udf_backup_blocks_attr.attr,
+	NULL
+};
+
+static struct attribute_group udf_attr_group = {
+	.name  = "udf",
+	.attrs = udf_attrs,
+};
+
+#endif
 
 /* UDF filesystem type */
 static struct super_block *udf_get_sb(struct file_system_type *fs_type,
@@ -189,6 +349,70 @@ struct udf_options
 	struct nls_table *nls_map;
 };
 
+extern int load_block_bitmap(struct super_block * sb, struct udf_bitmap *bitmap, unsigned int block_group);
+static void *udf_proc_start(struct seq_file *s, loff_t *pos)
+{
+	int bitmap_nr;
+	
+	if(!proc_sb)
+		return NULL;
+
+	if(*pos >= UDF_SB_PARTMAPS(proc_sb)[0].s_uspace.s_bitmap->s_nr_groups)
+		return NULL;
+	bitmap_nr = load_block_bitmap(proc_sb, UDF_SB_PARTMAPS(proc_sb)[0].s_uspace.s_bitmap, *pos);
+	return ((unsigned int*)UDF_SB_PARTMAPS(proc_sb)[0].s_uspace.s_bitmap->s_block_bitmap[bitmap_nr]->b_data);
+}
+
+static void *udf_proc_next(struct seq_file *s, void *v, loff_t *pos)
+{
+	int bitmap_nr;
+	
+	(*pos) ++;
+	if(*pos >= UDF_SB_PARTMAPS(proc_sb)[0].s_uspace.s_bitmap->s_nr_groups)
+		return NULL;
+	bitmap_nr = load_block_bitmap(proc_sb, UDF_SB_PARTMAPS(proc_sb)[0].s_uspace.s_bitmap, *pos);
+	return ((unsigned int*)UDF_SB_PARTMAPS(proc_sb)[0].s_uspace.s_bitmap->s_block_bitmap[bitmap_nr]->b_data);
+}
+
+static void udf_proc_stop(struct seq_file *s, void *v)
+{
+	seq_putc(s, '\n');
+}
+
+static int udf_proc_show(struct seq_file *s, void *v)
+{
+	int i;
+	for(i=0;i<2048;i+=4) {
+		seq_printf(s, "%#010X ", ((unsigned int*)v)[i/4]);
+		if(!((i+4)%24))
+			seq_putc(s, '\n');
+	}
+
+	return 0;
+}
+
+static struct seq_operations udf_seq_ops = {
+	.start  = udf_proc_start,
+	.next   = udf_proc_next,
+	.stop   = udf_proc_stop,
+	.show   = udf_proc_show
+};
+
+static int udf_proc_open(struct inode *inode, struct file *file)
+{
+	return seq_open(file, &udf_seq_ops);
+}
+
+static struct file_operations udf_proc_ops = {
+	.owner = THIS_MODULE,
+	.open = udf_proc_open,
+	.read = seq_read,
+	.llseek = seq_lseek,
+	.release = seq_release
+};
+
+static struct proc_dir_entry *udf_proc_dir_entry;
+
 static int __init init_udf_fs(void)
 {
 	int err;
@@ -198,6 +422,16 @@ static int __init init_udf_fs(void)
 	err = register_filesystem(&udf_fstype);
 	if (err)
 		goto out;
+
+#ifdef CONFIG_PROC_FS
+	udf_proc_dir_entry = create_proc_entry("udf", S_IFREG | S_IRUGO | S_IWUSR, NULL);
+	if(udf_proc_dir_entry) {
+		udf_proc_dir_entry->proc_fops = &udf_proc_ops;
+	}
+#endif
+#ifdef UDF_BACKUP
+	sysfs_create_group(&realtek_boards_subsys.kset.kobj,&udf_attr_group);
+#endif
 	return 0;
 out:
 	destroy_inodecache();
@@ -207,6 +441,12 @@ out1:
 
 static void __exit exit_udf_fs(void)
 {
+#ifdef CONFIG_PROC_FS
+	remove_proc_entry ("udf", udf_proc_dir_entry);
+#endif
+#ifdef UDF_BACKUP
+	sysfs_remove_group(&realtek_boards_subsys.kset.kobj,&udf_attr_group);
+#endif
 	unregister_filesystem(&udf_fstype);
 	destroy_inodecache();
 }
@@ -273,7 +513,7 @@ enum {
 	Opt_noadinicb, Opt_adinicb, Opt_shortad, Opt_longad,
 	Opt_gid, Opt_uid, Opt_umask, Opt_session, Opt_lastblock,
 	Opt_anchor, Opt_volume, Opt_partition, Opt_fileset,
-	Opt_rootdir, Opt_utf8, Opt_iocharset,
+	Opt_rootdir, Opt_utf8, Opt_iocharset, Opt_recovery,
 	Opt_err
 };
 
@@ -299,6 +539,7 @@ static match_table_t tokens = {
 	{Opt_rootdir, "rootdir=%u"},
 	{Opt_utf8, "utf8"},
 	{Opt_iocharset, "iocharset=%s"},
+	{Opt_recovery, "recovery"},
 	{Opt_err, NULL}
 };
 
@@ -419,6 +660,9 @@ udf_parse_options(char *options, struct udf_options *uopt)
 				uopt->flags |= (1 << UDF_FLAG_NLS_MAP);
 				break;
 #endif
+			case Opt_recovery:
+				uopt->flags |= (1 << UDF_FLAG_RECOVERY);
+				break;
 			default:
 				printk(KERN_ERR "udf: bad mount option \"%s\" "
 						"or missing value\n", p);
@@ -664,16 +908,16 @@ udf_find_anchor(struct super_block *sb)
 	
 			if (ident == TAG_IDENT_AVDP)
 			{
-				if (location == last[i] - UDF_SB_SESSION(sb))
+				if (location == last[i])
 				{
-					lastblock = UDF_SB_ANCHOR(sb)[0] = last[i] - UDF_SB_SESSION(sb);
-					UDF_SB_ANCHOR(sb)[1] = last[i] - 256 - UDF_SB_SESSION(sb);
+					lastblock = UDF_SB_ANCHOR(sb)[0] = last[i];
+					UDF_SB_ANCHOR(sb)[1] = last[i] - 256;
 				}
-				else if (location == udf_variable_to_fixed(last[i]) - UDF_SB_SESSION(sb))
+				else if (location == udf_variable_to_fixed(last[i]))
 				{
 					UDF_SET_FLAG(sb, UDF_FLAG_VARCONV);
-					lastblock = UDF_SB_ANCHOR(sb)[0] = udf_variable_to_fixed(last[i]) - UDF_SB_SESSION(sb);
-					UDF_SB_ANCHOR(sb)[1] = lastblock - 256 - UDF_SB_SESSION(sb);
+					lastblock = UDF_SB_ANCHOR(sb)[0] = udf_variable_to_fixed(last[i]);
+					UDF_SB_ANCHOR(sb)[1] = lastblock - 256;
 				}
 				else
 					udf_debug("Anchor found at block %d, location mismatch %d.\n",
@@ -682,7 +926,7 @@ udf_find_anchor(struct super_block *sb)
 			else if (ident == TAG_IDENT_FE || ident == TAG_IDENT_EFE)
 			{
 				lastblock = last[i];
-				UDF_SB_ANCHOR(sb)[3] = 512;
+				UDF_SB_ANCHOR(sb)[3] = 512 + UDF_SB_SESSION(sb);
 			}
 			else
 			{
@@ -698,14 +942,14 @@ udf_find_anchor(struct super_block *sb)
 				}
 	
 				if (ident == TAG_IDENT_AVDP &&
-					location == last[i] - 256 - UDF_SB_SESSION(sb))
+					location == last[i] - 256)
 				{
 					lastblock = last[i];
 					UDF_SB_ANCHOR(sb)[1] = last[i] - 256;
 				}
 				else
 				{
-					if (last[i] < 312 + UDF_SB_SESSION(sb) || !(bh = sb_bread(sb, last[i] - 312 - UDF_SB_SESSION(sb))))
+					if (last[i] < 312 + UDF_SB_SESSION(sb) || !(bh = sb_bread(sb, last[i] - 312)))
 					{
 						ident = location = 0;
 					}
@@ -737,7 +981,7 @@ udf_find_anchor(struct super_block *sb)
 			location = le32_to_cpu(((tag *)bh->b_data)->tagLocation);
 			udf_release_data(bh);
 
-			if (ident == TAG_IDENT_AVDP && location == 256)
+			if (ident == TAG_IDENT_AVDP && location == (256 + UDF_SB_SESSION(sb)))
 				UDF_SET_FLAG(sb, UDF_FLAG_VARCONV);
 		}
 	}
@@ -847,6 +1091,9 @@ udf_find_fileset(struct super_block *sb, kernel_lb_addr *fileset, kernel_lb_addr
 	if ((fileset->logicalBlockNum != 0xFFFFFFFF ||
 		fileset->partitionReferenceNum != 0xFFFF) && bh)
 	{
+#ifdef UDF_BACKUP
+		udf_add_backup_region(sb, fileset->logicalBlockNum+UDF_SB_PARTROOT(sb, fileset->partitionReferenceNum), 1);
+#endif
 		udf_debug("Fileset at block=%d, partition=%d\n",
 			fileset->logicalBlockNum, fileset->partitionReferenceNum);
 
@@ -906,6 +1153,11 @@ udf_load_fileset(struct super_block *sb, struct buffer_head *bh, kernel_lb_addr 
 	fset = (struct fileSetDesc *)bh->b_data;
 
 	*root = lelb_to_cpu(fset->rootDirectoryICB.extLocation);
+
+#ifdef UDF_BACKUP
+	if(sb == proc_sb)
+		proc_rootDirectoryICB=*root;
+#endif
 
 	UDF_SB_SERIALNUM(sb) = le16_to_cpu(fset->descTag.tagSerialNum);
 
@@ -1098,8 +1350,12 @@ udf_load_logicalvol(struct super_block *sb, struct buffer_head * bh, kernel_lb_a
 			fileset->logicalBlockNum,
 			fileset->partitionReferenceNum);
 	}
-	if (lvd->integritySeqExt.extLength)
+	if (lvd->integritySeqExt.extLength) {
 		udf_load_logicalvolint(sb, leea_to_cpu(lvd->integritySeqExt));
+#ifdef UDF_BACKUP
+		udf_add_backup_region(sb, le32_to_cpu(lvd->integritySeqExt.extLocation), le32_to_cpu(lvd->integritySeqExt.extLength>> sb->s_blocksize_bits));
+#endif
+	}
 	return 0;
 }
 
@@ -1313,12 +1569,18 @@ udf_load_partition(struct super_block *sb, kernel_lb_addr *fileset)
 			main_s = le32_to_cpu( anchor->mainVolDescSeqExt.extLocation );
 			main_e = le32_to_cpu( anchor->mainVolDescSeqExt.extLength );
 			main_e = main_e >> sb->s_blocksize_bits;
+#ifdef UDF_BACKUP
+			udf_add_backup_region(sb, main_s, main_e);
+#endif
 			main_e += main_s;
 	
 			/* Locate the reserve sequence */
 			reserve_s = le32_to_cpu(anchor->reserveVolDescSeqExt.extLocation);
 			reserve_e = le32_to_cpu(anchor->reserveVolDescSeqExt.extLength);
 			reserve_e = reserve_e >> sb->s_blocksize_bits;
+#ifdef UDF_BACKUP
+			udf_add_backup_region(sb, reserve_s, reserve_e);
+#endif
 			reserve_e += reserve_s;
 
 			udf_release_data(bh);
@@ -1391,7 +1653,7 @@ udf_load_partition(struct super_block *sb, kernel_lb_addr *fileset)
 					struct buffer_head *bh = NULL;
 					uint32_t pos;
 
-					pos = udf_block_map(UDF_SB_VAT(sb), 0);
+					pos = udf_block_map(UDF_SB_VAT(sb), 0, NULL);
 					bh = sb_bread(sb, pos);
 					UDF_SB_TYPEVIRT(sb,i).s_start_offset =
 						le16_to_cpu(((struct virtualAllocationTable20 *)bh->b_data + udf_ext0_offset(UDF_SB_VAT(sb)))->lengthHeader) +
@@ -1509,6 +1771,13 @@ static int udf_fill_super(struct super_block *sb, void *options, int silent)
 	if (!udf_parse_options((char *)options, &uopt))
 		goto error_out;
 
+	// proc_sb is used in proc.
+	// We also use proc_sb in /sys/realtek_boards/udf/udf_backup_blocks.
+	if (uopt.flags & (1 << UDF_FLAG_RECOVERY)) {
+		printk("UDF partition \"%s\" is mounted with recovery option. Store the super block.\n", sb->s_id);
+		proc_sb = sb;
+	}
+
 	if (uopt.flags & (1 << UDF_FLAG_UTF8) &&
 	    uopt.flags & (1 << UDF_FLAG_NLS_MAP))
 	{
@@ -1549,10 +1818,20 @@ static int udf_fill_super(struct super_block *sb, void *options, int silent)
 
 	udf_debug("Multi-session=%d\n", UDF_SB_SESSION(sb));
 
-	UDF_SB_LASTBLOCK(sb) = uopt.lastblock;
+	if(uopt.lastblock)
+		UDF_SB_LASTBLOCK(sb) = uopt.lastblock;
+	else
+// Why we donot want to set UDF_SB_LASTBLOCK(sb)? This is because this function, udf_find_anchor, will try to get the second anchor when UDF_SB_LASTBLOCK(sb) is not equal to zero.
+// We must know the last block when trying to get the second anchor, and some recording softwares will use a strange way to format DVD+RW.
+// The strange way will cause that the ioctl of CDROM_LAST_WRITTEN returns a value that is not the expected last block (the value will be higher).
+// UDF_SB_LASTBLOCK(sb) is only useful for virtual partitions, and we will try to set UDF_SB_LASTBLOCK(sb) just for virtual partitions.
+//		UDF_SB_LASTBLOCK(sb) = udf_get_last_block(sb);
+		UDF_SB_LASTBLOCK(sb) = 0;
 	UDF_SB_ANCHOR(sb)[0] = UDF_SB_ANCHOR(sb)[1] = 0;
 	UDF_SB_ANCHOR(sb)[2] = uopt.anchor;
-	UDF_SB_ANCHOR(sb)[3] = 256;
+// We should check the first anchor from the start of the last session
+//	UDF_SB_ANCHOR(sb)[3] = 256;
+	UDF_SB_ANCHOR(sb)[3] = 256 + UDF_SB_SESSION(sb);
 
 	if (udf_check_valid(sb, uopt.novrs, silent)) /* read volume recognition sequences */
 	{
@@ -1678,6 +1957,10 @@ error_out:
 	UDF_SB_FREE(sb);
 	kfree(sbi);
 	sb->s_fs_info = NULL;
+	if (uopt.flags & (1 << UDF_FLAG_RECOVERY)) {
+		printk("Clear stored super block because of some problem.\n");
+		proc_sb = NULL;
+	}
 	return -EINVAL;
 }
 
@@ -1728,6 +2011,10 @@ udf_put_super(struct super_block *sb)
 {
 	int i;
 
+	if(sb == proc_sb) {
+		printk("UDF partition \"%s\" using recovery facility is umounted. Clear the stored super block.\n", sb->s_id);
+		proc_sb = NULL;
+	}
 	if (UDF_SB_VAT(sb))
 		iput(UDF_SB_VAT(sb));
 	if (UDF_SB_NUMPARTS(sb))
@@ -1756,6 +2043,7 @@ udf_put_super(struct super_block *sb)
 	UDF_SB_FREE(sb);
 	kfree(sb->s_fs_info);
 	sb->s_fs_info = NULL;
+	// proc_sb is used in proc.
 }
 
 /*

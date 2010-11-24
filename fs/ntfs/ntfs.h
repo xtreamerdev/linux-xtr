@@ -2,7 +2,7 @@
  * ntfs.h - Defines for NTFS Linux kernel driver. Part of the Linux-NTFS
  *	    project.
  *
- * Copyright (c) 2001-2004 Anton Altaparmakov
+ * Copyright (c) 2001-2005 Anton Altaparmakov
  * Copyright (C) 2002 Richard Russon
  *
  * This program/include file is free software; you can redistribute it and/or
@@ -31,6 +31,7 @@
 #include <linux/fs.h>
 #include <linux/nls.h>
 #include <linux/smp.h>
+#include <linux/pagemap.h>
 
 #include "types.h"
 #include "volume.h"
@@ -41,11 +42,28 @@ typedef enum {
 	NTFS_BLOCK_SIZE_BITS	= 9,
 	NTFS_SB_MAGIC		= 0x5346544e,	/* 'NTFS' */
 	NTFS_MAX_NAME_LEN	= 255,
+	NTFS_MAX_ATTR_NAME_LEN	= 255,
+	NTFS_MAX_CLUSTER_SIZE	= 64 * 1024,	/* 64kiB */
+	NTFS_MAX_PAGES_PER_CLUSTER = NTFS_MAX_CLUSTER_SIZE / PAGE_CACHE_SIZE,
 } NTFS_CONSTANTS;
+
+// added by jacky
+struct lock_class_key { };
+# define lockdep_set_class(lock, key)           do { (void)(key); } while (0)
+static inline void lockdep_on(void)
+{ }
+static inline void lockdep_off(void)
+{ }
 
 /* Global variables. */
 
 /* Slab caches (from super.c). */
+// modified by jacky
+//extern struct kmem_cache *ntfs_name_cache;
+//extern struct kmem_cache *ntfs_inode_cache;
+//extern struct kmem_cache *ntfs_big_inode_cache;
+//extern struct kmem_cache *ntfs_attr_ctx_cache;
+//extern struct kmem_cache *ntfs_index_ctx_cache;
 extern kmem_cache_t *ntfs_name_cache;
 extern kmem_cache_t *ntfs_inode_cache;
 extern kmem_cache_t *ntfs_big_inode_cache;
@@ -53,6 +71,18 @@ extern kmem_cache_t *ntfs_attr_ctx_cache;
 extern kmem_cache_t *ntfs_index_ctx_cache;
 
 /* The various operations structs defined throughout the driver files. */
+// modified by jacky
+//extern const struct address_space_operations ntfs_aops;
+//extern const struct address_space_operations ntfs_mst_aops;
+//
+//extern const struct  file_operations ntfs_file_ops;
+//extern const struct inode_operations ntfs_file_inode_ops;
+//
+//extern const struct  file_operations ntfs_dir_ops;
+//extern const struct inode_operations ntfs_dir_inode_ops;
+//
+//extern const struct  file_operations ntfs_empty_file_ops;
+//extern const struct inode_operations ntfs_empty_inode_ops;
 extern struct address_space_operations ntfs_aops;
 extern struct address_space_operations ntfs_mst_aops;
 
@@ -64,6 +94,8 @@ extern struct inode_operations ntfs_dir_inode_ops;
 
 extern struct  file_operations ntfs_empty_file_ops;
 extern struct inode_operations ntfs_empty_inode_ops;
+
+extern struct export_operations ntfs_export_ops;
 
 /**
  * NTFS_SB - return the ntfs volume given a vfs super block
@@ -85,6 +117,8 @@ extern void free_compression_buffers(void);
 
 /* From fs/ntfs/super.c */
 #define default_upcase_len 0x10000
+// modified by jacky
+//extern struct mutex ntfs_lock;
 extern struct semaphore ntfs_lock;
 
 typedef struct {
@@ -99,7 +133,7 @@ extern int pre_write_mst_fixup(NTFS_RECORD *b, const u32 size);
 extern void post_write_mst_fixup(NTFS_RECORD *b);
 
 /* From fs/ntfs/unistr.c */
-extern BOOL ntfs_are_names_equal(const ntfschar *s1, size_t s1_len,
+extern bool ntfs_are_names_equal(const ntfschar *s1, size_t s1_len,
 		const ntfschar *s2, size_t s2_len,
 		const IGNORE_CASE_BOOL ic,
 		const ntfschar *upcase, const u32 upcase_size);
@@ -125,5 +159,34 @@ extern int ntfs_ucstonls(const ntfs_volume *vol, const ntfschar *ins,
 
 /* From fs/ntfs/upcase.c */
 extern ntfschar *generate_default_upcase(void);
+
+static inline int ntfs_ffs(int x)
+{
+	int r = 1;
+
+	if (!x)
+		return 0;
+	if (!(x & 0xffff)) {
+		x >>= 16;
+		r += 16;
+	}
+	if (!(x & 0xff)) {
+		x >>= 8;
+		r += 8;
+	}
+	if (!(x & 0xf)) {
+		x >>= 4;
+		r += 4;
+	}
+	if (!(x & 3)) {
+		x >>= 2;
+		r += 2;
+	}
+	if (!(x & 1)) {
+		x >>= 1;
+		r += 1;
+	}
+	return r;
+}
 
 #endif /* _LINUX_NTFS_H */

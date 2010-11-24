@@ -7,8 +7,10 @@
 #include <linux/config.h>
 #include <linux/compiler.h>
 
+#ifdef CONFIG_PRINTK
 asmlinkage int printk(const char * fmt, ...)
 	__attribute__ ((format (printf, 1, 2)));
+#endif
 
 /*
  * Your basic SMP spinlocks, allowing only a single CPU anywhere

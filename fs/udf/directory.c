@@ -76,6 +76,11 @@ udf_filead_read(struct inode *dir, uint8_t *tmpad, uint8_t ad_size,
 }
 #endif
 
+/**
+	cfi will contain the content "struct fileIdentDesc" of the requested fid. No including Implementation Use, File Identifier, and Padding.
+	*nf_pos means (position of the requested FID)/4. When finish, *nf_pos will point to the next one. If this is a directory of ICBTAG_FLAG_AD_IN_ICB, the first FID is (EFE or FE)/4.
+	When finish, fibh->sbh & fibh->soffset point to the start of the requested FID and fibh->ebh & fibh->eoffset point to the next one. fibh->sbh & fibh->ebh may point to the different blocks.
+**/
 struct fileIdentDesc *
 udf_fileident_read(struct inode *dir, loff_t *nf_pos,
 	struct udf_fileident_bh *fibh,
@@ -92,6 +97,7 @@ udf_fileident_read(struct inode *dir, loff_t *nf_pos,
 
 	if (UDF_I_ALLOCTYPE(dir) == ICBTAG_FLAG_AD_IN_ICB)
 	{
+/* The fibh->eoffset of the first FID is (EFE or FE) */
 		fi = udf_get_fileident(UDF_I_DATA(dir) -
 			(UDF_I_EFE(dir) ?
 				sizeof(struct extendedFileEntry) :
@@ -219,6 +225,12 @@ udf_fileident_read(struct inode *dir, loff_t *nf_pos,
 	return fi;
 }
 
+/**
+	Get the requested FID; (buffer + *offset)  points to the requested FID.
+	"buffer" points to the buffer head that stores the target block, and "bufsize" is one block.
+	When finish, *offset will point to next FID.
+	If (buffer + *offset) is over bufsize, it means the next FID spans two blocks.
+**/
 struct fileIdentDesc * 
 udf_get_fileident(void * buffer, int bufsize, int * offset)
 {
@@ -300,6 +312,9 @@ udf_get_fileextent(void * buffer, int bufsize, int * offset)
 }
 #endif
 
+/**
+	If inc isn't null, move offset, which points to some Short Allocation Descriptor, to point to the next one
+**/
 short_ad *
 udf_get_fileshortad(uint8_t *ptr, int maxoffset, int *offset, int inc)
 {
@@ -321,6 +336,9 @@ udf_get_fileshortad(uint8_t *ptr, int maxoffset, int *offset, int inc)
 	return sa;
 }
 
+/**
+	If inc isn't null, move offset, which points to some Long Allocation Descriptor, to point to the next one
+**/
 long_ad *
 udf_get_filelongad(uint8_t *ptr, int maxoffset, int * offset, int inc)
 {

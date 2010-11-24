@@ -17,7 +17,6 @@
  * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307 USA
  */
 
-#include <linux/config.h>
 #include <linux/module.h>
 #include <linux/types.h>
 #include <linux/kernel.h>
@@ -27,6 +26,7 @@
 #include "cifsglob.h"
 #include "cifs_debug.h"
 #include "cifsproto.h"
+#include "js.h"
 
 /*****************************************************************************
  *
@@ -191,7 +191,8 @@ asn1_header_decode(struct asn1_ctx *ctx,
 		   unsigned char **eoc,
 		   unsigned int *cls, unsigned int *con, unsigned int *tag)
 {
-	unsigned int def, len;
+	unsigned int def = 0; 
+	unsigned int len = 0;
 
 	if (!asn1_id_decode(ctx, cls, con, tag))
 		return 0;
@@ -342,7 +343,7 @@ asn1_octets_decode(struct asn1_ctx *ctx,
 
 	*len = 0;
 
-	*octets = kmalloc(eoc - ctx->pointer, GFP_ATOMIC);
+	*octets = kzalloc(eoc - ctx->pointer, GFP_ATOMIC);
 	if (*octets == NULL) {
 		return 0;
 	}
@@ -385,7 +386,7 @@ asn1_oid_decode(struct asn1_ctx *ctx,
 	unsigned long *optr;
 
 	size = eoc - ctx->pointer + 1;
-	*oid = kmalloc(size * sizeof (unsigned long), GFP_ATOMIC);
+	*oid = kzalloc(size * sizeof (unsigned long), GFP_ATOMIC);
 	if (*oid == NULL) {
 		return 0;
 	}
@@ -466,7 +467,7 @@ decode_negTokenInit(unsigned char *security_blob, int length,
 	asn1_open(&ctx, security_blob, length);
 
 	if (asn1_header_decode(&ctx, &end, &cls, &con, &tag) == 0) {
-		cFYI(1, ("Error decoding negTokenInit header "));
+		cFYI(1, ("Error decoding negTokenInit header"));
 		return 0;
 	} else if ((cls != ASN1_APL) || (con != ASN1_CON)
 		   || (tag != ASN1_EOC)) {
@@ -494,7 +495,7 @@ decode_negTokenInit(unsigned char *security_blob, int length,
 		}
 
 		if (asn1_header_decode(&ctx, &end, &cls, &con, &tag) == 0) {
-			cFYI(1, ("Error decoding negTokenInit "));
+			cFYI(1, ("Error decoding negTokenInit"));
 			return 0;
 		} else if ((cls != ASN1_CTX) || (con != ASN1_CON)
 			   || (tag != ASN1_EOC)) {
@@ -504,7 +505,7 @@ decode_negTokenInit(unsigned char *security_blob, int length,
 		}
 
 		if (asn1_header_decode(&ctx, &end, &cls, &con, &tag) == 0) {
-			cFYI(1, ("Error decoding negTokenInit "));
+			cFYI(1, ("Error decoding negTokenInit"));
 			return 0;
 		} else if ((cls != ASN1_UNI) || (con != ASN1_CON)
 			   || (tag != ASN1_SEQ)) {
@@ -514,7 +515,7 @@ decode_negTokenInit(unsigned char *security_blob, int length,
 		}
 
 		if (asn1_header_decode(&ctx, &end, &cls, &con, &tag) == 0) {
-			cFYI(1, ("Error decoding 2nd part of negTokenInit "));
+			cFYI(1, ("Error decoding 2nd part of negTokenInit"));
 			return 0;
 		} else if ((cls != ASN1_CTX) || (con != ASN1_CON)
 			   || (tag != ASN1_EOC)) {
@@ -526,7 +527,7 @@ decode_negTokenInit(unsigned char *security_blob, int length,
 
 		if (asn1_header_decode
 		    (&ctx, &sequence_end, &cls, &con, &tag) == 0) {
-			cFYI(1, ("Error decoding 2nd part of negTokenInit "));
+			cFYI(1, ("Error decoding 2nd part of negTokenInit"));
 			return 0;
 		} else if ((cls != ASN1_UNI) || (con != ASN1_CON)
 			   || (tag != ASN1_SEQ)) {
@@ -552,8 +553,7 @@ decode_negTokenInit(unsigned char *security_blob, int length,
 					   *(oid + 3)));
 					rc = compare_oid(oid, oidlen, NTLMSSP_OID,
 						 NTLMSSP_OID_LEN);
-					if(oid)
-						kfree(oid);
+					kfree(oid);
 					if (rc)
 						use_ntlmssp = TRUE;
 				}

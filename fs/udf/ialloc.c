@@ -33,6 +33,12 @@
 #include "udf_i.h"
 #include "udf_sb.h"
 
+extern struct task_struct *udf_alloc_sem_owner;
+extern int udf_alloc_sem_count;
+
+void lock_udf_alloc_sem(struct udf_sb_info *);
+void unlock_udf_alloc_sem(struct udf_sb_info *);
+
 void udf_free_inode(struct inode * inode)
 {
 	struct super_block *sb = inode->i_sb;
@@ -47,7 +53,7 @@ void udf_free_inode(struct inode * inode)
 
 	clear_inode(inode);
 
-	down(&sbi->s_alloc_sem);
+	lock_udf_alloc_sem(sbi);
 	if (sbi->s_lvidbh) {
 		if (S_ISDIR(inode->i_mode))
 			UDF_SB_LVIDIU(sb)->numDirs =
@@ -58,7 +64,7 @@ void udf_free_inode(struct inode * inode)
 		
 		mark_buffer_dirty(sbi->s_lvidbh);
 	}
-	up(&sbi->s_alloc_sem);
+	unlock_udf_alloc_sem(sbi);
 
 	udf_free_blocks(sb, NULL, UDF_I_LOCATION(inode), 0, 1);
 }
@@ -88,7 +94,7 @@ struct inode * udf_new_inode (struct inode *dir, int mode, int * err)
 		return NULL;
 	}
 
-	down(&sbi->s_alloc_sem);
+	lock_udf_alloc_sem(sbi);
 	UDF_I_UNIQUE(inode) = 0;
 	UDF_I_LENEXTENTS(inode) = 0;
 	UDF_I_NEXT_ALLOC_BLOCK(inode) = 0;
@@ -153,7 +159,7 @@ struct inode * udf_new_inode (struct inode *dir, int mode, int * err)
 		UDF_I_CRTIME(inode) = current_fs_time(inode->i_sb);
 	insert_inode_hash(inode);
 	mark_inode_dirty(inode);
-	up(&sbi->s_alloc_sem);
+	unlock_udf_alloc_sem(sbi);
 
 	if (DQUOT_ALLOC_INODE(inode))
 	{

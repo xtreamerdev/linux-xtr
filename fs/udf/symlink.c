@@ -91,7 +91,7 @@ static int udf_symlink_filler(struct file *file, struct page *page)
 		symlink = UDF_I_DATA(inode) + UDF_I_LENEATTR(inode);
 	else
 	{
-		bh = sb_bread(inode->i_sb, udf_block_map(inode, 0));
+		bh = sb_bread(inode->i_sb, udf_block_map(inode, 0, NULL));
 
 		if (!bh)
 			goto out;

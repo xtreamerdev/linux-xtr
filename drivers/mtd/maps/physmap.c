@@ -119,6 +119,7 @@ static void __exit cleanup_physmap(void)
 module_init(init_physmap);
 module_exit(cleanup_physmap);
 
+EXPORT_SYMBOL(physmap_map);
 
 MODULE_LICENSE("GPL");
 MODULE_AUTHOR("David Woodhouse <dwmw2@infradead.org>");

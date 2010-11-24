@@ -1609,6 +1609,7 @@ unsigned int get_random_int(void)
 	return secure_ip_id(current->pid + jiffies);
 }
 
+EXPORT_SYMBOL(get_random_int);
 /*
  * randomize_range() returns a start address such that
  *

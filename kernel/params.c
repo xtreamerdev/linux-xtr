@@ -164,6 +164,18 @@ int parse_args(const char *name,
 	return 0;
 }
 
+char *find_args(char *args, char *name)
+{
+	char *param, *val;
+
+	while (*args) {
+		args = next_arg(args, &param, &val);
+		if (!strcmp(param, name))
+			return val;
+	}
+	return NULL;
+}
+
 /* Lazy bastard, eh? */
 #define STANDARD_PARAM_DEF(name, type, format, tmptype, strtolfn)      	\
 	int param_set_##name(const char *val, struct kernel_param *kp)	\

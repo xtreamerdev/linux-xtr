@@ -51,14 +51,16 @@ MODULE_LICENSE("GPL");
 
 #define EXTENT_MERGE_SIZE 5
 
+static char udf_use_icbtag[20];
+
 static mode_t udf_convert_permissions(struct fileEntry *);
 static int udf_update_inode(struct inode *, int);
 static void udf_fill_inode(struct inode *, struct buffer_head *);
-static struct buffer_head *inode_getblk(struct inode *, long, int *,
+static struct buffer_head *inode_getblk(struct inode *, long, unsigned long *, int *,
 	long *, int *);
 static int8_t udf_insert_aext(struct inode *, kernel_lb_addr, int,
 	kernel_lb_addr, uint32_t, struct buffer_head *);
-static void udf_split_extents(struct inode *, int *, int, int,
+static void udf_split_extents(struct inode *, int *, int, int, unsigned long,
 	kernel_long_ad [EXTENT_MERGE_SIZE], int *);
 static void udf_prealloc_extents(struct inode *, int, int,
 	 kernel_long_ad [EXTENT_MERGE_SIZE], int *);
@@ -68,6 +70,7 @@ static void udf_update_extents(struct inode *,
 	kernel_long_ad [EXTENT_MERGE_SIZE], int, int,
 	kernel_lb_addr, uint32_t, struct buffer_head **);
 static int udf_get_block(struct inode *, sector_t, struct buffer_head *, int);
+static int udf_get_blocks(struct inode *, sector_t, unsigned long, struct buffer_head *, int);
 
 /*
  * udf_delete_inode
@@ -135,6 +138,16 @@ static sector_t udf_bmap(struct address_space *mapping, sector_t block)
 	return generic_block_bmap(mapping,block,udf_get_block);
 }
 
+static ssize_t udf_direct_IO(int rw, struct kiocb *iocb,
+	const struct iovec *iov, loff_t offset, unsigned long nr_segs)
+{
+	struct file *file = iocb->ki_filp;
+	struct inode *inode = file->f_mapping->host;
+
+	return blockdev_direct_IO(rw, iocb, inode, inode->i_sb->s_bdev, iov,
+		offset, nr_segs, udf_get_blocks, NULL);
+}
+
 struct address_space_operations udf_aops = {
 	.readpage		= udf_readpage,
 	.writepage		= udf_writepage,
@@ -142,6 +155,7 @@ struct address_space_operations udf_aops = {
 	.prepare_write		= udf_prepare_write,
 	.commit_write		= generic_commit_write,
 	.bmap			= udf_bmap,
+	.direct_IO		= udf_direct_IO,
 };
 
 void udf_expand_file_adinicb(struct inode * inode, int newsize, int * err)
@@ -168,7 +182,7 @@ void udf_expand_file_adinicb(struct inode * inode, int newsize, int * err)
 
 	page = grab_cache_page(inode->i_mapping, 0);
 	BUG_ON(!PageLocked(page));
-
+	
 	if (!PageUptodate(page))
 	{
 		kaddr = kmap(page);
@@ -288,10 +302,11 @@ static int udf_get_block(struct inode *inode, sector_t block, struct buffer_head
 	int err, new;
 	struct buffer_head *bh;
 	unsigned long phys;
+	unsigned long max_blocks=1;
 
 	if (!create)
 	{
-		phys = udf_block_map(inode, block);
+		phys = udf_block_map(inode, block, NULL);
 		if (phys)
 			map_bh(bh_result, inode->i_sb, phys);
 		return 0;
@@ -314,9 +329,10 @@ static int udf_get_block(struct inode *inode, sector_t block, struct buffer_head
 
 	err = 0;
 
-	bh = inode_getblk(inode, block, &err, &phys, &new);
-	if (bh)
-		BUG();
+	bh = inode_getblk(inode, block, &max_blocks, &err, &phys, &new);
+// inode_getblk must return NULL. We donot need to check it again.
+//	if (bh)
+//		BUG();
 	if (err)
 		goto abort;
 	if (!phys)
@@ -333,6 +349,76 @@ abort_negative:
 	udf_warning(inode->i_sb, "udf_get_block", "block < 0");
 	goto abort;
 }
+
+#if 0
+static int udf_get_blocks(struct inode *inode, sector_t block, unsigned long max_blocks, struct buffer_head *bh_result, int create)
+{
+	int ret;
+	
+	ret = udf_get_block(inode, block, bh_result, create);
+	if (ret == 0)
+		bh_result->b_size = (1 << inode->i_blkbits);
+	return ret;
+}
+#else
+static int udf_get_blocks(struct inode *inode, sector_t block, unsigned long max_blocks, struct buffer_head *bh_result, int create)
+{
+	int err, new;
+	struct buffer_head *bh;
+	unsigned long phys;
+	long blocks;
+
+	if (!create)
+	{
+		phys = udf_block_map(inode, block, &blocks);
+		if (phys) {
+			map_bh(bh_result, inode->i_sb, phys);
+			if(max_blocks > blocks)
+				max_blocks = blocks;
+			bh_result->b_size = (max_blocks << inode->i_blkbits);
+		}
+		return 0;
+	}
+
+	err = -EIO;
+	new = 0;
+	bh = NULL;
+
+	lock_kernel();
+
+	if (block < 0)
+		goto abort_negative;
+
+	if (block == UDF_I_NEXT_ALLOC_BLOCK(inode) + 1)
+	{
+		UDF_I_NEXT_ALLOC_BLOCK(inode) ++;
+		UDF_I_NEXT_ALLOC_GOAL(inode) ++;
+	}
+
+	err = 0;
+
+	bh = inode_getblk(inode, block, &max_blocks, &err, &phys, &new);
+// inode_getblk must return NULL. We donot need to check it again.
+//	if (bh)
+//		BUG();
+	if (err)
+		goto abort;
+	if (!phys)
+		BUG();
+
+	if (new)
+		set_buffer_new(bh_result);
+	map_bh(bh_result, inode->i_sb, phys);
+	bh_result->b_size = (max_blocks << inode->i_blkbits);
+abort:
+	unlock_kernel();
+	return err;
+
+abort_negative:
+	udf_warning(inode->i_sb, "udf_get_block", "block < 0");
+	goto abort;
+}
+#endif
 
 static struct buffer_head *
 udf_getblk(struct inode *inode, long block, int create, int *err)
@@ -360,13 +446,14 @@ udf_getblk(struct inode *inode, long block, int create, int *err)
 }
 
 static struct buffer_head * inode_getblk(struct inode * inode, long block,
-	int *err, long *phys, int *new)
+	unsigned long *max_blocks, int *err, long *phys, int *new)
 {
 	struct buffer_head *pbh = NULL, *cbh = NULL, *nbh = NULL, *result = NULL;
 	kernel_long_ad laarr[EXTENT_MERGE_SIZE];
 	uint32_t pextoffset = 0, cextoffset = 0, nextoffset = 0;
 	int count = 0, startnum = 0, endnum = 0;
-	uint32_t elen = 0;
+/* max_elen stores the maximum size that an extent can have. */
+	uint32_t max_elen=(UDF_EXTENT_LENGTH_MASK&(~(inode->i_sb->s_blocksize - 1))), elen = 0;
 	kernel_lb_addr eloc, pbloc, cbloc, nbloc;
 	int c = 1;
 	uint64_t lbcount = 0, b_off = 0;
@@ -374,8 +461,10 @@ static struct buffer_head * inode_getblk(struct inode * inode, long block,
 	int8_t etype;
 	int goal = 0, pgoal = UDF_I_LOCATION(inode).logicalBlockNum;
 	char lastblock = 0;
+	int blocks;
 
 	pextoffset = cextoffset = nextoffset = udf_file_entry_alloc_offset(inode);
+// block starts from 0
 	b_off = (uint64_t)block << inode->i_sb->s_blocksize_bits;
 	pbloc = cbloc = nbloc = UDF_I_LOCATION(inode);
 
@@ -405,8 +494,30 @@ static struct buffer_head * inode_getblk(struct inode * inode, long block,
 		pextoffset = cextoffset;
 		cextoffset = nextoffset;
 
-		if ((etype = udf_next_aext(inode, &nbloc, &nextoffset, &eloc, &elen, &nbh, 1)) == -1)
-			break;
+		if ((etype = udf_next_aext(inode, &nbloc, &nextoffset, &eloc, &elen, &nbh, 1)) == -1) {
+		// We cannot directly "break" here because the offset may be larger than the maximum of an extent.
+			// elen is the size of the former extent when etype = -1
+			uint32_t block_offset=0;
+			if(count) {
+				if(elen&(inode->i_sb->s_blocksize - 1))
+					block_offset = inode->i_sb->s_blocksize-(elen&(inode->i_sb->s_blocksize - 1));
+			}
+			if((b_off-lbcount-block_offset) >= max_elen) {
+			// Store a biggest extent of EXT_NOT_RECORDED_NOT_ALLOCATED to the UDF partition
+				if(block_offset) {
+					laarr[c].extLength += block_offset;
+					udf_write_aext(inode, cbloc, &pextoffset, eloc, laarr[c].extLength, cbh, 0);
+					UDF_I_LENEXTENTS(inode) += block_offset;
+					lbcount += block_offset;
+				}
+				elen = EXT_NOT_RECORDED_NOT_ALLOCATED|max_elen;
+				memset(&eloc, 0x00, sizeof(kernel_lb_addr));
+				/* If udf_next_aext returns -1, nbloc, nextoffset, and nbh shouldn't advance and we can use them directly in udf_add_aext. Unless udf_next_aext points to an EXT_NEXT_EXTENT_ALLOCDECS block that sotres no extent, but I donot think this could be happening.  */
+				etype = udf_add_aext(inode, &nbloc, &nextoffset, eloc, elen, &nbh, 1);
+				elen = max_elen;	/* the elen returned from udf_next_aext doesn't contain etype */
+			} else
+				break;
+		}
 
 		c = !c;
 
@@ -414,6 +525,7 @@ static struct buffer_head * inode_getblk(struct inode * inode, long block,
 		laarr[c].extLocation = eloc;
 
 		if (etype != (EXT_NOT_RECORDED_NOT_ALLOCATED >> 30))
+/** The number of the last block plus 1 in the extent **/
 			pgoal = eloc.logicalBlockNum +
 				((elen + inode->i_sb->s_blocksize - 1) >>
 				inode->i_sb->s_blocksize_bits);
@@ -421,12 +533,15 @@ static struct buffer_head * inode_getblk(struct inode * inode, long block,
 		count ++;
 	} while (lbcount + elen <= b_off);
 
+//printk("%d %d %d %d\n", etype, *max_blocks, lbcount, elen);
+// lbcount records the total size of the former extents
+// b_off denotes the offset of the target block from its extent
 	b_off -= lbcount;
 	offset = b_off >> inode->i_sb->s_blocksize_bits;
 
 	/* if the extent is allocated and recorded, return the block
        if the extent is not a multiple of the blocksize, round up */
-
+// The target block is in some extent. Therefore, we donot need to new a block.
 	if (etype == (EXT_RECORDED_ALLOCATED >> 30))
 	{
 		if (elen & (inode->i_sb->s_blocksize - 1))
@@ -441,12 +556,19 @@ static struct buffer_head * inode_getblk(struct inode * inode, long block,
 		udf_release_data(nbh);
 		newblock = udf_get_lb_pblock(inode->i_sb, eloc, offset);
 		*phys = newblock;
+		blocks = (elen-b_off)>>inode->i_sb->s_blocksize_bits;
+		if(*max_blocks > blocks)
+			*max_blocks = blocks;
+// Damn, this will be happening. I still donot know why... When using direct I/O, this will happen on every 1G.
+//		printk("I donot think this could be happening... count:%d offset:%d max_blocks:%d elen:%d\n", count, offset, *max_blocks, elen);
 		return NULL;
 	}
 
+// if etype == -1, let laarr[c].extLength expand to alignment block size, and let laarr[!c] stores new extent that will contain the target block and is EXT_NOT_RECORDED_NOT_ALLOCATED
 	if (etype == -1)
 	{
 		endnum = startnum = ((count > 1) ? 1 : count);
+// The size of the former extent need to be a multiple of blocksize
 		if (laarr[c].extLength & (inode->i_sb->s_blocksize - 1))
 		{
 			laarr[c].extLength =
@@ -459,6 +581,8 @@ static struct buffer_head * inode_getblk(struct inode * inode, long block,
 					~(inode->i_sb->s_blocksize - 1);
 		}
 		c = !c;
+// New an extent that includes the target blocks and is EXT_NOT_RECORDED_NOT_ALLOCATED
+// We still donot know how many contiguous we can allocate for this extent. Assume it's 1 now.
 		laarr[c].extLength = EXT_NOT_RECORDED_NOT_ALLOCATED |
 			((offset + 1) << inode->i_sb->s_blocksize_bits);
 		memset(&laarr[c].extLocation, 0x00, sizeof(kernel_lb_addr));
@@ -497,9 +621,12 @@ static struct buffer_head * inode_getblk(struct inode * inode, long block,
 
 	/* if the current extent is not recorded but allocated, get the
 		block in the extent corresponding to the requested block */
-	if ((laarr[c].extLength >> 30) == (EXT_NOT_RECORDED_ALLOCATED >> 30))
+	if ((laarr[c].extLength >> 30) == (EXT_NOT_RECORDED_ALLOCATED >> 30)) {
 		newblocknum = laarr[c].extLocation.logicalBlockNum + offset;
-	else /* otherwise, allocate a new block */
+		blocks = (((laarr[c].extLength & UDF_EXTENT_LENGTH_MASK)+inode->i_sb->s_blocksize - 1)>>inode->i_sb->s_blocksize_bits)-offset;
+		if(*max_blocks > blocks)
+			*max_blocks = blocks;
+	} else /* otherwise, allocate a new block */
 	{
 		if (UDF_I_NEXT_ALLOC_BLOCK(inode) == block)
 			goal = UDF_I_NEXT_ALLOC_GOAL(inode);
@@ -518,12 +645,13 @@ static struct buffer_head * inode_getblk(struct inode * inode, long block,
 			return NULL;
 		}
 		UDF_I_LENEXTENTS(inode) += inode->i_sb->s_blocksize;
+		*max_blocks=1;
 	}
 
 	/* if the extent the requsted block is located in contains multiple blocks,
        split the extent into at most three extents. blocks prior to requested
        block, requested block, and blocks after requested block */
-	udf_split_extents(inode, &c, offset, newblocknum, laarr, &endnum);
+	udf_split_extents(inode, &c, offset, newblocknum, *max_blocks, laarr, &endnum);
 
 #ifdef UDF_PREALLOCATE
 	/* preallocate blocks */
@@ -543,13 +671,14 @@ static struct buffer_head * inode_getblk(struct inode * inode, long block,
 	if (!(newblock = udf_get_pblock(inode->i_sb, newblocknum,
 		UDF_I_LOCATION(inode).partitionReferenceNum, 0)))
 	{
+		printk("I donot think this could be happening...\n");
 		return NULL;
 	}
 	*phys = newblock;
 	*err = 0;
 	*new = 1;
-	UDF_I_NEXT_ALLOC_BLOCK(inode) = block;
-	UDF_I_NEXT_ALLOC_GOAL(inode) = newblocknum;
+	UDF_I_NEXT_ALLOC_BLOCK(inode) = block+(*max_blocks)-1;
+	UDF_I_NEXT_ALLOC_GOAL(inode) = newblocknum+(*max_blocks)-1;
 	inode->i_ctime = current_fs_time(inode->i_sb);
 
 	if (IS_SYNC(inode))
@@ -559,8 +688,9 @@ static struct buffer_head * inode_getblk(struct inode * inode, long block,
 	return result;
 }
 
+// The extent should be split into, at most, 3 parts. The middle part starts from 'newblocknum' and has 'blocks' blocks
 static void udf_split_extents(struct inode *inode, int *c, int offset, int newblocknum,
-	kernel_long_ad laarr[EXTENT_MERGE_SIZE], int *endnum)
+	unsigned long blocks, kernel_long_ad laarr[EXTENT_MERGE_SIZE], int *endnum)
 {
 	if ((laarr[*c].extLength >> 30) == (EXT_NOT_RECORDED_ALLOCATED >> 30) ||
 		(laarr[*c].extLength >> 30) == (EXT_NOT_RECORDED_NOT_ALLOCATED >> 30))
@@ -570,9 +700,9 @@ static void udf_split_extents(struct inode *inode, int *c, int offset, int newbl
 			inode->i_sb->s_blocksize - 1) >> inode->i_sb->s_blocksize_bits;
 		int8_t etype = (laarr[curr].extLength >> 30);
 
-		if (blen == 1)
+		if (blen == blocks)
 			;
-		else if (!offset || blen == offset + 1)
+		else if (!offset || blen == offset + blocks)
 		{
 			laarr[curr+2] = laarr[curr+1];
 			laarr[curr+1] = laarr[curr];
@@ -606,15 +736,15 @@ static void udf_split_extents(struct inode *inode, int *c, int offset, int newbl
 			laarr[curr].extLocation.partitionReferenceNum =
 				UDF_I_LOCATION(inode).partitionReferenceNum;
 		laarr[curr].extLength = EXT_RECORDED_ALLOCATED |
-			inode->i_sb->s_blocksize;
+			(inode->i_sb->s_blocksize)*blocks;
 		curr ++;
 
-		if (blen != offset + 1)
+		if (blen != offset + blocks)
 		{
 			if (etype == (EXT_NOT_RECORDED_ALLOCATED >> 30))
-				laarr[curr].extLocation.logicalBlockNum += (offset + 1);
+				laarr[curr].extLocation.logicalBlockNum += (offset + blocks);
 			laarr[curr].extLength = (etype << 30) |
-				((blen - (offset + 1)) << inode->i_sb->s_blocksize_bits);
+				((blen - (offset + blocks)) << inode->i_sb->s_blocksize_bits);
 			curr ++;
 			(*endnum) ++;
 		}
@@ -732,14 +862,17 @@ static void udf_merge_extents(struct inode *inode,
 					inode->i_sb->s_blocksize - 1) & ~UDF_EXTENT_LENGTH_MASK)
 				{
 					laarr[i+1].extLength = (laarr[i+1].extLength -
-						(laarr[i].extLength & UDF_EXTENT_LENGTH_MASK) +
-						UDF_EXTENT_LENGTH_MASK) & ~(inode->i_sb->s_blocksize-1);
+						((UDF_EXTENT_LENGTH_MASK & ~(inode->i_sb->s_blocksize-1)) -(laarr[i].extLength & UDF_EXTENT_LENGTH_MASK)));
+//						& ~(inode->i_sb->s_blocksize-1);
 					laarr[i].extLength = (laarr[i].extLength & UDF_EXTENT_FLAG_MASK) +
 						(UDF_EXTENT_LENGTH_MASK + 1) - inode->i_sb->s_blocksize;
-					laarr[i+1].extLocation.logicalBlockNum =
-						laarr[i].extLocation.logicalBlockNum +
-						((laarr[i].extLength & UDF_EXTENT_LENGTH_MASK) >>
-							inode->i_sb->s_blocksize_bits);
+					if((laarr[i+1].extLength >> 30) != (EXT_NOT_RECORDED_NOT_ALLOCATED >> 30)) {
+					// no need to re-position laarr[i+1].extLocation
+						laarr[i+1].extLocation.logicalBlockNum =
+							laarr[i].extLocation.logicalBlockNum +
+							((laarr[i].extLength & UDF_EXTENT_LENGTH_MASK) >>
+								inode->i_sb->s_blocksize_bits);
+					}
 				}
 				else
 				{
@@ -1044,6 +1177,7 @@ static void udf_fill_inode(struct inode *inode, struct buffer_head *bh)
 				((struct unallocSpaceEntry *)bh->b_data)->lengthAllocDescs);
 		UDF_I_DATA(inode) = kmalloc(inode->i_sb->s_blocksize - sizeof(struct unallocSpaceEntry), GFP_KERNEL);
 		memcpy(UDF_I_DATA(inode), bh->b_data + sizeof(struct unallocSpaceEntry), inode->i_sb->s_blocksize - sizeof(struct unallocSpaceEntry));
+		memcpy(&udf_use_icbtag, bh->b_data + sizeof(tag), sizeof(icbtag));
 		return;
 	}
 
@@ -1315,15 +1449,23 @@ udf_update_inode(struct inode *inode, int do_sync)
 	fe = (struct fileEntry *)bh->b_data;
 	efe = (struct extendedFileEntry *)bh->b_data;
 
-	if (le16_to_cpu(fe->descTag.tagIdent) == TAG_IDENT_USE)
+//	if (le16_to_cpu(fe->descTag.tagIdent) == TAG_IDENT_USE)
+	if (UDF_I_USE(inode))
 	{
 		struct unallocSpaceEntry *use =
 			(struct unallocSpaceEntry *)bh->b_data;
 
 		use->lengthAllocDescs = cpu_to_le32(UDF_I_LENALLOC(inode));
 		memcpy(bh->b_data + sizeof(struct unallocSpaceEntry), UDF_I_DATA(inode), inode->i_sb->s_blocksize - sizeof(struct unallocSpaceEntry));
+		memcpy(&use->icbTag, &udf_use_icbtag, sizeof(icbtag));
 		crclen = sizeof(struct unallocSpaceEntry) + UDF_I_LENALLOC(inode) -
 			sizeof(tag);
+		use->descTag.tagIdent = cpu_to_le16(TAG_IDENT_USE);
+		if (UDF_SB_UDFREV(inode->i_sb) >= 0x0200)
+			use->descTag.descVersion = cpu_to_le16(3);
+		else
+			use->descTag.descVersion = cpu_to_le16(2);
+		use->descTag.tagSerialNum = cpu_to_le16(UDF_SB_SERIALNUM(inode->i_sb));
 		use->descTag.tagLocation = cpu_to_le32(UDF_I_LOCATION(inode).logicalBlockNum);
 		use->descTag.descCRCLength = cpu_to_le16(crclen);
 		use->descTag.descCRC = cpu_to_le16(udf_crc((char *)use + sizeof(tag), crclen, 0));
@@ -1697,6 +1839,7 @@ int8_t udf_add_aext(struct inode *inode, kernel_lb_addr *bloc, int *extoffset,
 	return etype;
 }
 
+/* elen includes etype; the elen in udf_next_aext doesn't include etype. */
 int8_t udf_write_aext(struct inode *inode, kernel_lb_addr bloc, int *extoffset,
     kernel_lb_addr eloc, uint32_t elen, struct buffer_head *bh, int inc)
 {
@@ -1753,6 +1896,16 @@ int8_t udf_write_aext(struct inode *inode, kernel_lb_addr bloc, int *extoffset,
 	return (elen >> 30);
 }
 
+/**
+	Return the extent that "extoffset" and "bh" indicate. They will advance to the next extent if inc is not null.
+	bloc: point to the File Entry or Extended File Entry, if bh is null, or the Allocation Extent Descriptor, if bh is't null
+	extoffset: the offset of Short or Long Allocation Descriptor from the beginning of FE or EFE, if bh is null, or the Allocation Extent Descriptor(Table 3.10.1-1), if bh is't null
+	inc: if inc isn't 0, move extoffset to point to the next Allocation Descriptor after completion of this function
+	eloc: return the logical block address the first block of the extent
+	elen: return the length of the extent that contains the block in bytes
+	bh: if it's not null, it points to a buffer head that contains an extent that has allocation descriptors
+	return value: return the Extent interpretation (Table 3.10.2-2). return -1 if something is wrong or there is no next extent
+**/
 int8_t udf_next_aext(struct inode *inode, kernel_lb_addr *bloc, int *extoffset,
 	kernel_lb_addr *eloc, uint32_t *elen, struct buffer_head **bh, int inc)
 {
@@ -1761,6 +1914,7 @@ int8_t udf_next_aext(struct inode *inode, kernel_lb_addr *bloc, int *extoffset,
 	while ((etype = udf_current_aext(inode, bloc, extoffset, eloc, elen, bh, inc)) ==
 		(EXT_NEXT_EXTENT_ALLOCDECS >> 30))
 	{
+/** The extent is the next extent of allocation descriptors. Table 3.10.2-2 **/
 		*bloc = *eloc;
 		*extoffset = sizeof(struct allocExtDesc);
 		udf_release_data(*bh);
@@ -1791,6 +1945,7 @@ int8_t udf_current_aext(struct inode *inode, kernel_lb_addr *bloc, int *extoffse
 	}
 	else
 	{
+// *bh points to a buffer head that contains an extent that has allocation descriptors.
 		if (!(*extoffset))
 			*extoffset = sizeof(struct allocExtDesc);
 		ptr = (*bh)->b_data + *extoffset;
@@ -1903,7 +2058,6 @@ int8_t udf_delete_aext(struct inode *inode, kernel_lb_addr nbloc, int nextoffset
 
 	if (nbh != obh)
 	{
-		udf_free_blocks(inode->i_sb, inode, nbloc, 0, 1);
 		udf_write_aext(inode, obloc, &oextoffset, eloc, elen, obh, 1);
 		udf_write_aext(inode, obloc, &oextoffset, eloc, elen, obh, 1);
 		if (!obh)
@@ -1922,6 +2076,7 @@ int8_t udf_delete_aext(struct inode *inode, kernel_lb_addr nbloc, int nextoffset
 				udf_update_tag((obh)->b_data, sizeof(struct allocExtDesc));
 			mark_buffer_dirty_inode(obh, inode);
 		}
+		udf_free_blocks(inode->i_sb, inode, nbloc, 0, 1);
 	}
 	else
 	{
@@ -1949,6 +2104,15 @@ int8_t udf_delete_aext(struct inode *inode, kernel_lb_addr nbloc, int nextoffset
 	return (elen >> 30);
 }
 
+/**
+	block: indicate the number of the block which you want to get the information of
+	bloc: return the File Entry or Extended File Entry, if bh is null, or the Allocation Extent Descriptor, if bh is't null
+	extoffset: return the next offset of Short or Long Allocation Descriptor from the beginning of FE or EFE, if bh is null, or the Allocation Extent Descriptor, if bh is't null
+	eloc: return the logical block address the first block of the extent
+	elen: return the length of the extent that contains the block in bytes
+	offset:the offset of the block from its corresponding extent
+	return value: return the Extent interpretation (Table 3.10.2-2). return -1 if something is wrong or the Extent Length of Allocation Descriptor is 0
+**/
 int8_t inode_bmap(struct inode *inode, int block, kernel_lb_addr *bloc, uint32_t *extoffset,
 	kernel_lb_addr *eloc, uint32_t *elen, uint32_t *offset, struct buffer_head **bh)
 {
@@ -1986,7 +2150,9 @@ int8_t inode_bmap(struct inode *inode, int block, kernel_lb_addr *bloc, uint32_t
 	return etype;
 }
 
-long udf_block_map(struct inode *inode, long block)
+// We can know the extent length counted from the target block by the parameter ext_len.
+// If ext_len is NULL, no need to return the value.
+long udf_block_map(struct inode *inode, long block, long *ext_len)
 {
 	kernel_lb_addr eloc, bloc;
 	uint32_t offset, extoffset, elen;
@@ -1995,9 +2161,11 @@ long udf_block_map(struct inode *inode, long block)
 
 	lock_kernel();
 
-	if (inode_bmap(inode, block, &bloc, &extoffset, &eloc, &elen, &offset, &bh) == (EXT_RECORDED_ALLOCATED >> 30))
+	if (inode_bmap(inode, block, &bloc, &extoffset, &eloc, &elen, &offset, &bh) == (EXT_RECORDED_ALLOCATED >> 30)) {
 		ret = udf_get_lb_pblock(inode->i_sb, eloc, offset >> inode->i_sb->s_blocksize_bits);
-	else
+		if(ext_len)
+			*ext_len = (elen - offset + inode->i_sb->s_blocksize - 1) >> inode->i_sb->s_blocksize_bits;
+	} else
 		ret = 0;
 
 	unlock_kernel();
@@ -2008,3 +2176,45 @@ long udf_block_map(struct inode *inode, long block)
 	else
 		return ret;
 }
+
+void udf_ab_cut(struct inode *inode, struct file *filp, int from, int count)
+{
+	kernel_lb_addr bloc, eloc;
+	uint32_t extoffset, elen, offset;
+	struct buffer_head *bh = NULL;
+	int i=0, o=0, c;
+	int8_t etype;
+	unsigned int lba;
+	
+//lock_kernel();
+	invalidate_inode_pages(inode->i_mapping);
+	do {
+		bh = NULL;
+		etype = inode_bmap(inode, from, &bloc, &extoffset, &eloc, &elen, &offset, &bh);
+//		printk(KERN_DEBUG "block %d: extoffset:%d eloc:%d elen:%d\n", from+i, extoffset, eloc.logicalBlockNum, elen);
+		o = offset >> inode->i_sb->s_blocksize_bits;
+		c = (elen - offset) >> inode->i_sb->s_blocksize_bits;
+		udf_delete_aext(inode, bloc, extoffset-16, eloc, elen, bh);
+		lba = eloc.logicalBlockNum;
+		if(c + i > count) {
+			c = count-i;
+			eloc.logicalBlockNum += (o+c);
+			udf_insert_aext(inode, bloc, extoffset-16, eloc, (elen - ((o+count-i) << inode->i_sb->s_blocksize_bits)) | (etype<<30), bh);
+		}
+		if(o) {
+			eloc.logicalBlockNum = lba;
+			udf_insert_aext(inode, bloc, extoffset-16, eloc, o << inode->i_sb->s_blocksize_bits | (etype<<30), bh);
+		}
+		i+=c;
+		eloc.logicalBlockNum = lba;
+		udf_free_blocks(inode->i_sb, inode, eloc, o, c);
+	} while(i < count);
+	down(&filp->f_dentry->d_inode->i_sem);
+	inode->i_size -= count << inode->i_sb->s_blocksize_bits;
+//	filp->f_pos -= count << inode->i_sb->s_blocksize_bits;
+	invalidate_inode_pages(inode->i_mapping);
+	up(&filp->f_dentry->d_inode->i_sem);
+//unlock_kernel();
+}
+
+

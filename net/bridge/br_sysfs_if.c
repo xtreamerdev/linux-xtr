@@ -260,7 +260,6 @@ void br_sysfs_removeif(struct net_bridge_port *p)
 {
 	pr_debug("br_sysfs_removeif\n");
 	sysfs_remove_link(&p->br->ifobj, p->dev->name);
-	kobject_hotplug(&p->kobj, KOBJ_REMOVE);
 	kobject_del(&p->kobj);
 }
 

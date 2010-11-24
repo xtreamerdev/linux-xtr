@@ -1,7 +1,7 @@
 /*
  * bitmap.c - NTFS kernel bitmap handling.  Part of the Linux-NTFS project.
  *
- * Copyright (c) 2004 Anton Altaparmakov
+ * Copyright (c) 2004-2005 Anton Altaparmakov
  *
  * This program/include file is free software; you can redistribute it and/or
  * modify it under the terms of the GNU General Public License as published
@@ -34,18 +34,18 @@
  * @start_bit:		first bit to set
  * @count:		number of bits to set
  * @value:		value to set the bits to (i.e. 0 or 1)
- * @is_rollback:	if TRUE this is a rollback operation
+ * @is_rollback:	if 'true' this is a rollback operation
  *
  * Set @count bits starting at bit @start_bit in the bitmap described by the
  * vfs inode @vi to @value, where @value is either 0 or 1.
  *
- * @is_rollback should always be FALSE, it is for internal use to rollback
+ * @is_rollback should always be 'false', it is for internal use to rollback
  * errors.  You probably want to use ntfs_bitmap_set_bits_in_run() instead.
  *
  * Return 0 on success and -errno on error.
  */
 int __ntfs_bitmap_set_bits_in_run(struct inode *vi, const s64 start_bit,
-		const s64 count, const u8 value, const BOOL is_rollback)
+		const s64 count, const u8 value, const bool is_rollback)
 {
 	s64 cnt = count;
 	pgoff_t index, end_index;
@@ -90,7 +90,8 @@ int __ntfs_bitmap_set_bits_in_run(struct inode *vi, const s64 start_bit,
 	/* If the first byte is partial, modify the appropriate bits in it. */
 	if (bit) {
 		u8 *byte = kaddr + pos;
-		while ((bit & 7) && cnt--) {
+		while ((bit & 7) && cnt) {
+			cnt--;
 			if (value)
 				*byte |= 1 << bit++;
 			else
@@ -171,7 +172,7 @@ rollback:
 		return PTR_ERR(page);
 	if (count != cnt)
 		pos = __ntfs_bitmap_set_bits_in_run(vi, start_bit, count - cnt,
-				value ? 0 : 1, TRUE);
+				value ? 0 : 1, true);
 	else
 		pos = 0;
 	if (!pos) {

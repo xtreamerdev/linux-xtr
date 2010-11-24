@@ -75,7 +75,7 @@ uint32_t udf_get_pblock_virt15(struct super_block *sb, uint32_t block, uint16_t 
 		index = UDF_SB_TYPEVIRT(sb,partition).s_start_offset / sizeof(uint32_t) + block;
 	}
 
-	loc = udf_block_map(UDF_SB_VAT(sb), newblock);
+	loc = udf_block_map(UDF_SB_VAT(sb), newblock, NULL);
 
 	if (!(bh = sb_bread(sb, loc)))
 	{

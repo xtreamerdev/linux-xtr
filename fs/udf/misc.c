@@ -219,7 +219,7 @@ udf_read_tagged(struct super_block *sb, uint32_t block, uint32_t location, uint1
 	if (block == 0xFFFFFFFF)
 		return NULL;
 
-	bh = udf_tread(sb, block + UDF_SB_SESSION(sb));
+	bh = udf_tread(sb, block);
 	if (!bh)
 	{
 		udf_debug("block=%d, location=%d: read failed\n", block + UDF_SB_SESSION(sb), location);

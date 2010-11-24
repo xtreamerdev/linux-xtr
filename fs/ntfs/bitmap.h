@@ -29,8 +29,13 @@
 
 #include "types.h"
 
+// added by jacky
+#define bool	int
+#define false   0
+#define true    1
+
 extern int __ntfs_bitmap_set_bits_in_run(struct inode *vi, const s64 start_bit,
-		const s64 count, const u8 value, const BOOL is_rollback);
+		const s64 count, const u8 value, const bool is_rollback);
 
 /**
  * ntfs_bitmap_set_bits_in_run - set a run of bits in a bitmap to a value
@@ -48,7 +53,7 @@ static inline int ntfs_bitmap_set_bits_in_run(struct inode *vi,
 		const s64 start_bit, const s64 count, const u8 value)
 {
 	return __ntfs_bitmap_set_bits_in_run(vi, start_bit, count, value,
-			FALSE);
+			false);
 }
 
 /**
