@@ -1,0 +1,153 @@
+config REALTEK_RTOS_MEMORY_SIZE
+	hex "RTOS memory size"
+	depends on REALTEK_VENUS
+	default "0x400000"
+	help
+	  RTOS needs some RAM for running.
+
+config REALTEK_DETERMINE_SYSTEM_CPU_CLOCK_FREQUENCY
+	bool "Determine System CPU clock frequency in advance"
+	depends on REALTEK_VENUS
+
+config REALTEK_SYSTEM_CPU_CLOCK_FREQUENCY                                                 
+	int "System CPU clock frequency" if REALTEK_DETERMINE_SYSTEM_CPU_CLOCK_FREQUENCY
+	depends on REALTEK_DETERMINE_SYSTEM_CPU_CLOCK_FREQUENCY
+	default "202500000"
+	help
+	  System CPU clock frequency. This is used to compute the Linux
+	  time, and it should be synced with RTC time from time to time.
+	  For Venus, it's default value is 202500000. If this value is not
+	  set, Linux will estimate it and doing this will waste over 0.5  
+	  second in time.c.
+
+config REALTEK_SYSTEM_OWNS_SECOND_UART
+	bool "If SYSTEM CPU owns the second UART port"
+	depends on REALTEK_VENUS
+	default y
+	help
+	  Sometimes the second UART is used by Audio or Video CPU.
+
+config REALTEK_USE_EXTERNAL_TIMER_INTERRUPT
+	bool "If yes, use external timer interrupt; if no, use internal timer interrupt."
+	depends on REALTEK_VENUS
+	default y
+	help
+	  External timer interrupt is more reliable.
+
+config REALTEK_COMPACT
+	bool "Build up a smallest kernel."
+	depends on REALTEK_VENUS
+	default n
+	help
+	  Strip anything that isn't necessary.
+
+source "arch/mips/realtek-boards/drivers/Kconfig"
+
+config REALTEK_OPEN_CU0
+	bool "Allow userland application access cpu register directly."
+	depends on REALTEK_VENUS
+	default n
+	help
+	  Use this function allow application to use some kernel function.
+
+choice
+        prompt "Shadow Registers"
+        default REALTEK_USE_SHADOW_REGISTERS
+
+config REALTEK_NO_SHADOW_REGISTERS
+	bool "No Use"
+	depends on REALTEK_VENUS
+	help
+	  Don't use any shadow registers.
+
+config REALTEK_USE_SHADOW_REGISTERS
+	bool "General Use"
+	depends on REALTEK_VENUS
+	help
+	  Use shadow registers to accelerate the interrupt handling.
+
+config REALTEK_USE_FAST_INTERRUPT
+	bool "Fast Interrupt"
+	depends on REALTEK_VENUS
+	help
+	  Use fast interrupt to handle USB interrupt.
+
+endchoice
+
+config REALTEK_MAP_IO_REGISTERS
+	bool "Map io registers into user space."
+	depends on REALTEK_VENUS
+	default n
+	help
+	  Map io registers.
+
+config REALTEK_WATCHPOINT
+	bool "Use watch point to debug."
+	depends on REALTEK_VENUS
+	default n
+	help
+	  Use watch point.
+
+config REALTEK_WATCHDOG
+        bool "Use watchdog mechanism."
+        depends on REALTEK_VENUS
+        default n
+        help
+          System will automatically be rebooted if watchdog doesn't respond in 1.5 seconds.
+
+config REALTEK_SCHED_LOG
+	bool "Log the scheduling sequence."
+	depends on REALTEK_VENUS
+	default n
+	help
+	  Log the scheduling sequence.
+
+config REALTEK_RECLAIM_BOOT_MEM
+	bool "Reclaim the memory used by boot loader."
+	depends on REALTEK_VENUS
+	default n
+	help
+	  Reclain the memory used by boot loader.
+
+config REALTEK_ADVANCED_RECLAIM
+	bool "Buddy system will allocate memory more efficiently."
+	depends on REALTEK_VENUS
+	default n
+	help
+	  Buddy system will allocate memory more efficiently.
+
+config REALTEK_DETECT_OCCUPY
+	bool "Detect if one thread occupy CPU too long."
+	depends on REALTEK_VENUS
+	default n
+	help
+	  Detect if one thread occupy CPU too long.
+
+config REALTEK_MONITOR_PAGE
+	bool "Monitor all the ide actions operated on specified page."
+	depends on REALTEK_VENUS
+	default n
+	help
+	  Monitor all the ide actions operated on specified page.
+
+config REALTEK_ENABLE_ADE
+	bool "Kernel won't handle automatically unaligned access."
+	depends on REALTEK_VENUS
+	default n
+	help
+	  Kernel won't handle automatically unaligned access.
+
+config REALTEK_SB2_DBG
+        bool "Enable the debug facility of SB2."
+        depends on REALTEK_VENUS
+        default n
+        help
+          Enable the debug facility of SB2.
+
+config REALTEK_SHOW_STACK
+        bool "Enable the debug facility of showing task stack."
+        depends on REALTEK_VENUS
+        default n
+        help
+          Enable the debug facility of showing task stack.
+

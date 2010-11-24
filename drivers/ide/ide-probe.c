@@ -57,6 +57,10 @@
 #include <asm/uaccess.h>
 #include <asm/io.h>
 
+extern int ide_debug;
+
+#include "debug.h"
+
 /**
  *	generic_id		-	add a generic drive id
  *	@drive:	drive to make an ID block for
@@ -179,6 +183,7 @@ static inline void do_identify (ide_drive_t *drive, u8 cmd)
 	int bswap = 1;
 	struct hd_driveid *id;
 
+	ideinfo("do_identify\n");
 	id = drive->id;
 	/* read 512 bytes of id info */
 	hwif->ata_input_data(drive, id, SECTOR_WORDS);
@@ -345,7 +350,11 @@ static int actual_try_to_identify (ide_drive_t *drive, u8 cmd)
 	/* ask drive for ID */
 	hwif->OUTB(cmd, IDE_COMMAND_REG);
 
+#if 0
 	timeout = ((cmd == WIN_IDENTIFY) ? WAIT_WORSTCASE : WAIT_PIDENTIFY) / 2;
+#else
+	timeout = ((cmd == WIN_IDENTIFY) ? WAIT_WORSTCASE : WAIT_PIDENTIFY) / 50;
+#endif
 	timeout += jiffies;
 	do {
 		if (time_after(jiffies, timeout)) {
@@ -463,6 +472,7 @@ static int do_probe (ide_drive_t *drive, u8 cmd)
 	int rc;
 	ide_hwif_t *hwif = HWIF(drive);
 
+	ideinfo("do_probe\n");
 	if (drive->present) {
 		/* avoid waiting for inappropriate probes */
 		if ((drive->media != ide_disk) && (cmd == WIN_IDENTIFY))
@@ -534,6 +544,7 @@ static int do_probe (ide_drive_t *drive, u8 cmd)
 		/* ensure drive irq is clear */
 		(void) hwif->INB(IDE_STATUS_REG);
 	}
+	//printk("rc=%x\n", rc);
 	return rc;
 }
 
@@ -596,6 +607,7 @@ static inline u8 probe_for_drive (ide_drive_t *drive)
 	 *	Also note that 0 everywhere means "can't do X"
 	 */
  
+	ideinfo("probe_for_drive\n");
 	drive->id = kmalloc(SECTOR_WORDS *4, GFP_KERNEL);
 	drive->id_read = 0;
 	if(drive->id == NULL)
@@ -661,6 +673,7 @@ static void hwif_release_dev (struct device *dev)
 
 static void hwif_register (ide_hwif_t *hwif)
 {
+	ideinfo("hwif_register\n");
 	/* register with global device tree */
 	strlcpy(hwif->gendev.bus_id,hwif->name,BUS_ID_SIZE);
 	hwif->gendev.driver_data = hwif;
@@ -725,6 +738,7 @@ void ide_undecoded_slave(ide_hwif_t *hwif)
 	ide_drive_t *drive0 = &hwif->drives[0];
 	ide_drive_t *drive1 = &hwif->drives[1];
 
+	ideinfo("ide_undecoded_slave\n");
 	if (drive0->present == 0 || drive1->present == 0)
 		return;
 
@@ -758,6 +772,7 @@ static void probe_hwif(ide_hwif_t *hwif)
 	unsigned long flags;
 	unsigned int irqd;
 
+	ideinfo("probe_hwif\n");
 	if (hwif->noprobe)
 		return;
 
@@ -808,8 +823,16 @@ static void probe_hwif(ide_hwif_t *hwif)
 	 *  
 	 *  BenH.
 	 */
-	if (wait_hwif_ready(hwif) == -EBUSY)
-		printk(KERN_DEBUG "%s: Wait for ready failed before probe !\n", hwif->name);
+	 
+	//@ Revised for Hitachi 2.5" 80G HDD. By ABEVAU 20070117 
+	if (wait_hwif_ready(hwif) == -EBUSY){
+		writel((u32)1, (void __iomem *)(0xb801205c|hwif->index <<8));	
+		writel((u32)0, (void __iomem *)(0xb801205c|hwif->index <<8));
+		writel((u32)1, (void __iomem *)(0xb801205c|hwif->index <<8));
+		
+		if (wait_hwif_ready(hwif) == -EBUSY)	
+			printk(KERN_DEBUG "%s: Wait for ready failed before probe !\n", hwif->name);
+	}
 
 	/*
 	 * Second drive should only exist if first drive was found,
@@ -900,6 +923,7 @@ static int hwif_init(ide_hwif_t *hwif);
 
 int probe_hwif_init_with_fixup(ide_hwif_t *hwif, void (*fixup)(ide_hwif_t *hwif))
 {
+	ideinfo("probe_hwif_init_with_fixup\n");
 	probe_hwif(hwif);
 
 	if (fixup)
@@ -928,6 +952,7 @@ int probe_hwif_init_with_fixup(ide_hwif_t *hwif, void (*fixup)(ide_hwif_t *hwif)
 
 int probe_hwif_init(ide_hwif_t *hwif)
 {
+	ideinfo("probe_hwif_init\n");
 	return probe_hwif_init_with_fixup(hwif, NULL);
 }
 
@@ -978,12 +1003,16 @@ static int ide_init_queue(ide_drive_t *drive)
 	 *	do not.
 	 */
 	 
+	ideinfo("ide_init_queue\n");
+	 
 	q = blk_init_queue(do_ide_request, &ide_lock);
 	if (!q)
 		return 1;
 
 	q->queuedata = drive;
-	blk_queue_segment_boundary(q, 0xffff);
+	//blk_queue_segment_boundary(q, 0xffff);
+	//Modified by Frank(96/12/28) for pli buffer 
+	blk_queue_segment_boundary(q, 0xffffffff);
 
 	if (!hwif->rqsize) {
 		if (hwif->no_lba48 || hwif->no_lba48_dma)
@@ -1045,6 +1074,7 @@ static int init_irq (ide_hwif_t *hwif)
 	ide_hwif_t *match = NULL;
 
 
+	ideinfo("init_irq\n");
 	BUG_ON(in_interrupt());
 	BUG_ON(irqs_disabled());	
 	down(&ide_cfg_sem);
@@ -1060,7 +1090,8 @@ static int init_irq (ide_hwif_t *hwif)
 				hwif->sharing_irq = h->sharing_irq = 1;
 				if (hwif->chipset != ide_pci ||
 				    h->chipset != ide_pci) {
-					save_match(hwif, h, &match);
+				    	// marked by Frank Ting 95/4/20 to improve IDE0/1 performance
+					//save_match(hwif, h, &match);
 				}
 			}
 			if (hwif->serialized) {
@@ -1128,6 +1159,8 @@ static int init_irq (ide_hwif_t *hwif)
 #endif /* CONFIG_IDEPCI_SHARE_IRQ */
 		}
 
+		sa = SA_SHIRQ;	// added by Frank 94/7/14
+		
 		if (hwif->io_ports[IDE_CONTROL_OFFSET])
 			/* clear nIEN */
 			hwif->OUTB(0x08, hwif->io_ports[IDE_CONTROL_OFFSET]);
@@ -1218,6 +1251,9 @@ static struct kobject *ata_probe(dev_t dev, int *part, void *data)
 	ide_hwif_t *hwif = data;
 	int unit = *part >> PARTN_BITS;
 	ide_drive_t *drive = &hwif->drives[unit];
+	
+	ideinfo("ata_probe\n");
+	
 	if (!drive->present)
 		return NULL;
 
@@ -1362,6 +1398,7 @@ static int hwif_init(ide_hwif_t *hwif)
 {
 	int old_irq;
 
+	ideinfo("hwif_init\n");
 	/* Return success if no device is connected */
 	if (!hwif->present)
 		return 1;
@@ -1433,6 +1470,7 @@ int ideprobe_init (void)
 	unsigned int index;
 	int probe[MAX_HWIFS];
 
+	ideinfo("ideprobe_init\n");
 	memset(probe, 0, MAX_HWIFS * sizeof(int));
 	for (index = 0; index < MAX_HWIFS; ++index)
 		probe[index] = !ide_hwifs[index].present;

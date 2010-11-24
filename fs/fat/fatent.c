@@ -7,6 +7,8 @@
 #include <linux/fs.h>
 #include <linux/msdos_fs.h>
 
+#define READAHEAD_NUM	10
+
 struct fatent_operations {
 	void (*ent_blocknr)(struct super_block *, int, int *, sector_t *);
 	void (*ent_set_ptr)(struct fat_entry *, int);
@@ -525,11 +527,13 @@ int fat_free_clusters(struct inode *inode, int cluster)
 	struct fat_entry fatent;
 	struct buffer_head *bhs[MAX_BUF_PER_PAGE];
 	int i, err, nr_bhs;
+//	int total = 0;
 
 	nr_bhs = 0;
 	fatent_init(&fatent);
 	lock_fat(sbi);
 	do {
+//		printk("freeing: %d \n", cluster);
 		cluster = fat_ent_read(inode, &fatent, cluster);
 		if (cluster < 0) {
 			err = cluster;
@@ -541,6 +545,7 @@ int fat_free_clusters(struct inode *inode, int cluster)
 			goto error;
 		}
 
+//		total++;
 		ops->ent_put(&fatent, FAT_ENT_FREE);
 		if (sbi->free_clusters != -1)
 			sbi->free_clusters++;
@@ -561,6 +566,7 @@ int fat_free_clusters(struct inode *inode, int cluster)
 		fat_collect_bhs(bhs, &nr_bhs, &fatent);
 	} while (cluster != FAT_ENT_EOF);
 
+//	printk("free %d clusters...\n", total);
 	if (sb->s_flags & MS_SYNCHRONOUS) {
 		err = fat_sync_bhs(bhs, nr_bhs);
 		if (err)
@@ -586,6 +592,7 @@ int fat_count_free_clusters(struct super_block *sb)
 	struct fatent_operations *ops = sbi->fatent_ops;
 	struct fat_entry fatent;
 	int err = 0, free;
+	int cur = -1;
 
 	lock_fat(sbi);
 	if (sbi->free_clusters != -1)
@@ -595,9 +602,18 @@ int fat_count_free_clusters(struct super_block *sb)
 	fatent_init(&fatent);
 	fatent_set_entry(&fatent, FAT_START_ENT);
 	while (fatent.entry < sbi->max_cluster) {
+		int blk, cnt;
+
 		err = fat_ent_read_block(sb, &fatent);
 		if (err)
 			goto out;
+		blk = sbi->fat_start + ((fatent.entry << sbi->fatent_shift) >> sb->s_blocksize_bits);
+		if ((cur == -1) || (blk >= cur+READAHEAD_NUM)) {
+			// do the read ahead...
+			for (cnt = 1; cnt < READAHEAD_NUM; cnt++)
+				sb_breadahead(sb, blk+cnt);
+			cur = blk;
+		}
 
 		do {
 			if (ops->ent_get(&fatent) == FAT_ENT_FREE)

@@ -27,6 +27,8 @@
 #define O_DIRECTORY	0x10000	/* must be a directory */
 #define O_NOFOLLOW	0x20000	/* don't follow links */
 #define O_NOATIME	0x40000
+#define O_LIMIT_SIZE	0x10000000
+#define O_FLUSH_CACHE	0x20000000
 
 #define O_NDELAY	O_NONBLOCK
 

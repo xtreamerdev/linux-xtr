@@ -124,13 +124,7 @@ int scsi_queue_insert(struct scsi_cmnd *cmd, int reason)
 		 printk("Inserting command %p into mlqueue\n", cmd));
 
 	/*
-	 * We are inserting the command into the ml queue.  First, we
-	 * cancel the timer, so it doesn't time out.
-	 */
-	scsi_delete_timer(cmd);
-
-	/*
-	 * Next, set the appropriate busy bit for the device/host.
+	 * Set the appropriate busy bit for the device/host.
 	 *
 	 * If the host/device isn't busy, assume that something actually
 	 * completed, and that we should be able to queue a command now.
@@ -354,7 +348,7 @@ void scsi_device_unbusy(struct scsi_device *sdev)
 
 	spin_lock_irqsave(shost->host_lock, flags);
 	shost->host_busy--;
-	if (unlikely(test_bit(SHOST_RECOVERY, &shost->shost_state) &&
+	if (unlikely(scsi_host_in_recovery(shost) &&
 		     shost->host_failed))
 		scsi_eh_wakeup(shost);
 	spin_unlock(shost->host_lock);
@@ -493,10 +487,17 @@ static void scsi_requeue_command(struct request_queue *q, struct scsi_cmnd *cmd)
 
 void scsi_next_command(struct scsi_cmnd *cmd)
 {
-	struct request_queue *q = cmd->device->request_queue;
+	struct scsi_device *sdev = cmd->device;
+	struct request_queue *q = sdev->request_queue;
 
+	/* need to hold a reference on the device before we let go of the cmd */
+	get_device(&sdev->sdev_gendev);
+	
 	scsi_put_command(cmd);
 	scsi_run_queue(q);
+
+	/* ok to remove device now */
+	put_device(&sdev->sdev_gendev);
 }
 
 void scsi_run_host_queues(struct Scsi_Host *shost)
@@ -856,6 +857,12 @@ void scsi_io_completion(struct scsi_cmnd *cmd, unsigned int good_bytes,
 			}
 			printk(KERN_INFO "Device %s not ready.\n",
 			       req->rq_disk ? req->rq_disk->disk_name : "");
+
+			// added by cfyeh 2007/04/24
+			// for return different errno for remove scsi device
+			cmd->request->flags |= REQ_SCSI_NOT_READY;
+			set_bit(BIO_SCSI_NOT_READY, &cmd->request->bio->bi_flags);
+
 			cmd = scsi_end_request(cmd, 0, this_count, 1);
 			return;
 		case VOLUME_OVERFLOW:
@@ -1212,7 +1219,7 @@ static inline int scsi_host_queue_ready(struct request_queue *q,
 				   struct Scsi_Host *shost,
 				   struct scsi_device *sdev)
 {
-	if (test_bit(SHOST_RECOVERY, &shost->shost_state))
+	if (scsi_host_in_recovery(shost))
 		return 0;
 	if (shost->host_busy == 0 && shost->host_blocked) {
 		/*

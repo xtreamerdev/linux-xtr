@@ -24,6 +24,7 @@
  * into the context register.
  */
 extern unsigned long pgd_current[];
+extern unsigned long dvr_asid;
 
 #define TLBMISS_HANDLER_SETUP_PGD(pgd) \
 	pgd_current[smp_processor_id()] = (unsigned long)(pgd)
@@ -86,13 +87,18 @@ get_new_mmu_context(struct mm_struct *mm, unsigned long cpu)
 {
 	unsigned long asid = asid_cache(cpu);
 
+repeat:
 	if (! ((asid += ASID_INC) & ASID_MASK) ) {
 		if (cpu_has_vtag_icache)
 			flush_icache_all();
+//		printk("***Pay Attention*** ASID Reallocation...\n");
 		local_flush_tlb_all();	/* start new asid cycle */
 		if (!asid)		/* fix version if needed */
 			asid = ASID_FIRST_VERSION;
 	}
+	if ((asid & ASID_MASK) == dvr_asid)
+		goto repeat;
+
 	cpu_context(cpu, mm) = asid_cache(cpu) = asid;
 }
 
@@ -120,6 +126,7 @@ static inline void switch_mm(struct mm_struct *prev, struct mm_struct *next,
 	local_irq_save(flags);
 
 	/* Check if our ASID is of an older version and thus invalid */
+	if ((cpu_context(cpu, next) & ASID_MASK) != dvr_asid)
 	if ((cpu_context(cpu, next) ^ asid_cache(cpu)) & ASID_VERSION_MASK)
 		get_new_mmu_context(next, cpu);
 
@@ -183,11 +190,15 @@ drop_mmu_context(struct mm_struct *mm, unsigned cpu)
 	local_irq_save(flags);
 
 	if (cpu_isset(cpu, mm->cpu_vm_mask))  {
-		get_new_mmu_context(mm, cpu);
-		write_c0_entryhi(cpu_asid(cpu, mm));
+//		get_new_mmu_context(mm, cpu);
+//		write_c0_entryhi(cpu_asid(cpu, mm));
+		local_flush_tlb_all();
 	} else {
 		/* will get a new context next time */
-		cpu_context(cpu, mm) = 0;
+		if ((cpu_context(cpu, mm) & ASID_MASK) == dvr_asid)
+			local_flush_tlb_all();
+		else
+			cpu_context(cpu, mm) = 0;
 	}
 
 	local_irq_restore(flags);

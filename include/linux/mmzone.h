@@ -16,7 +16,7 @@
 
 /* Free memory management - zoned buddy allocator.  */
 #ifndef CONFIG_FORCE_MAX_ZONEORDER
-#define MAX_ORDER 11
+#define MAX_ORDER 13
 #else
 #define MAX_ORDER CONFIG_FORCE_MAX_ZONEORDER
 #endif
@@ -66,8 +66,9 @@ struct per_cpu_pageset {
 #define ZONE_DMA		0
 #define ZONE_NORMAL		1
 #define ZONE_HIGHMEM		2
+#define ZONE_DVR		3
 
-#define MAX_NR_ZONES		3	/* Sync this with ZONES_SHIFT */
+#define MAX_NR_ZONES		4	/* Sync this with ZONES_SHIFT */
 #define ZONES_SHIFT		2	/* ceil(log2(MAX_NR_ZONES)) */
 
 
@@ -96,8 +97,8 @@ struct per_cpu_pageset {
  * Use the first form when the left most bit is not a "loner", otherwise
  * use the second.
  */
-/* #define GFP_ZONETYPES	(GFP_ZONEMASK + 1) */		/* Non-loner */
-#define GFP_ZONETYPES	((GFP_ZONEMASK + 1) / 2 + 1)		/* Loner */
+#define GFP_ZONETYPES	(GFP_ZONEMASK + 1) 			/* Non-loner */
+/* #define GFP_ZONETYPES	((GFP_ZONEMASK + 1) / 2 + 1) */	/* Loner */
 
 /*
  * On machines where it is needed (eg PCs) we divide physical memory
@@ -205,6 +206,11 @@ struct zone {
 
 	unsigned long		spanned_pages;	/* total size, including holes */
 	unsigned long		present_pages;	/* amount of memory (excluding holes) */
+
+        /*
+         * Used to determine if flag GFP_EXHAUST can be used.
+         */
+        unsigned long           exhaustable;
 
 	/*
 	 * rarely used fields:
@@ -354,6 +360,11 @@ static inline int is_normal_idx(int idx)
 {
 	return (idx == ZONE_NORMAL);
 }
+
+static inline int is_dvr_idx(int idx)
+{
+	return (idx == ZONE_DVR);
+}
 /**
  * is_highmem - helper function to quickly check if a struct zone is a 
  *              highmem zone or not.  This is an attempt to keep references
@@ -368,6 +379,11 @@ static inline int is_highmem(struct zone *zone)
 static inline int is_normal(struct zone *zone)
 {
 	return zone == zone->zone_pgdat->node_zones + ZONE_NORMAL;
+}
+
+static inline int is_dvr(struct zone *zone)
+{
+	return zone == zone->zone_pgdat->node_zones + ZONE_DVR;
 }
 
 /* These two functions are used to setup the per zone pages min values */

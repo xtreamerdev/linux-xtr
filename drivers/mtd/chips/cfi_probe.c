@@ -196,6 +196,9 @@ static int __xipram cfi_chip_setup(struct map_info *map,
 	__u32 base = 0;
 	int num_erase_regions = cfi_read_query(map, base + (0x10 + 28)*ofs_factor);
 	int i;
+#ifdef CONFIG_REALTEK_VENUS
+	uint32_t EraseRegionInfo_temp;
+#endif
 
 	xip_enable(base, map, cfi);
 #ifdef DEBUG_CFI
@@ -248,6 +251,17 @@ static int __xipram cfi_chip_setup(struct map_info *map,
 	cfi->cfiq->InterfaceDesc = le16_to_cpu(cfi->cfiq->InterfaceDesc);
 	cfi->cfiq->MaxBufWriteSize = le16_to_cpu(cfi->cfiq->MaxBufWriteSize);
 
+#ifdef CONFIG_REALTEK_VENUS
+	// We can only use a smaller portion of the whole Flash.
+	if(map->size < (1<<cfi->cfiq->DevSize)) {
+		int exp, assigned_size;
+
+		printk("Warning: the assigned flash size is 0x%x, and the detected one is 0x%x. Use the former one.\n", map->size, 1<<cfi->cfiq->DevSize);
+		for(exp=0,assigned_size=map->size;assigned_size>1;assigned_size>>=1)
+			exp++;
+		cfi->cfiq->DevSize=exp;
+	}
+#endif
 #ifdef DEBUG_CFI
 	/* Dump the information therein */
 	print_cfi_ident(cfi->cfiq);
@@ -262,6 +276,15 @@ static int __xipram cfi_chip_setup(struct map_info *map,
 		       (cfi->cfiq->EraseRegionInfo[i] & 0xffff) + 1);
 #endif
 	}
+
+#ifdef CONFIG_REALTEK_VENUS
+// We reverse erase regions because parallel flash in Venus is upside down in address.
+	for (i=0; i<cfi->cfiq->NumEraseRegions/2; i++) {
+		EraseRegionInfo_temp = cfi->cfiq->EraseRegionInfo[i];
+		cfi->cfiq->EraseRegionInfo[i] = cfi->cfiq->EraseRegionInfo[cfi->cfiq->NumEraseRegions-i-1];
+		cfi->cfiq->EraseRegionInfo[cfi->cfiq->NumEraseRegions-i-1] = EraseRegionInfo_temp;
+	}
+#endif
 
 	printk(KERN_INFO "%s: Found %d x%d devices at 0x%x in %d-bit bank\n",
 	       map->name, cfi->interleave, cfi->device_type*8, base,

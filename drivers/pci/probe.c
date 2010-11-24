@@ -553,7 +553,7 @@ static int pci_setup_device(struct pci_dev * dev)
 	dev->class = class;
 	class >>= 8;
 
-	pr_debug("PCI: Found %s [%04x/%04x] %06x %02x\n", pci_name(dev),
+	printk("PCI: Found %s [%04x/%04x] %06x %02x\n", pci_name(dev),
 		 dev->vendor, dev->device, class, dev->hdr_type);
 
 	/* "Unknown power state" */
@@ -812,7 +812,7 @@ unsigned int __devinit pci_scan_child_bus(struct pci_bus *bus)
 	pr_debug("PCI: Scanning bus %04x:%02x\n", pci_domain_nr(bus), bus->number);
 
 	/* Go find them, Rover! */
-	for (devfn = 0; devfn < 0x100; devfn += 8)
+	for (devfn = 0; devfn < 0x10; devfn += 8)
 		pci_scan_slot(bus, devfn);
 
 	/*

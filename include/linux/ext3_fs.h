@@ -74,6 +74,7 @@ struct statfs;
  * The second extended file system magic number
  */
 #define EXT3_SUPER_MAGIC	0xEF53
+#define EXTK_SUPER_MAGIC	0x35FE
 
 /*
  * Maximal count of links to a file
@@ -185,6 +186,10 @@ struct ext3_group_desc
 #define EXT3_NOTAIL_FL			0x00008000 /* file tail should not be merged */
 #define EXT3_DIRSYNC_FL			0x00010000 /* dirsync behaviour (directories only) */
 #define EXT3_TOPDIR_FL			0x00020000 /* Top of directory hierarchies*/
+#ifdef EXT3_ABCOPY
+#define EXT3_RTL_PARENT			0x00040000 /* realtek, copy without copy data blocks */
+#define EXT3_RTL_CHILD			0x00080000 /* realtek, copy child */
+#endif
 #define EXT3_RESERVED_FL		0x80000000 /* reserved for ext3 lib */
 
 #define EXT3_FL_USER_VISIBLE		0x0003DFFF /* User visible flags */
@@ -224,6 +229,10 @@ struct ext3_new_group_data {
 /*
  * ioctl commands
  */
+#ifdef EXT3_ABCOPY
+#define EXT3_IOC_SETDEBUG		_IOW('f', 9, long)
+#define EXT3_IOC_XFLAGS			_IOR('f', 10, long)
+#endif
 #define	EXT3_IOC_GETFLAGS		_IOR('f', 1, long)
 #define	EXT3_IOC_SETFLAGS		_IOW('f', 2, long)
 #define	EXT3_IOC_GETVERSION		_IOR('f', 3, long)

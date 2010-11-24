@@ -16,6 +16,7 @@ menu "USB Gadget Support"
 
 config USB_GADGET
 	tristate "Support for USB Gadgets"
+	depends on !REALTEK_VENUS_USB
 	help
 	   USB is a master/slave protocol, organized with one master
 	   host (such as a PC) controlling up to 127 peripheral devices.

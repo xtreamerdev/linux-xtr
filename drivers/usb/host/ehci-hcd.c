@@ -25,7 +25,11 @@
 #endif
 
 #include <linux/module.h>
+#ifndef CONFIG_REALTEK_VENUS_USB	//cfyeh+ 2005/11/07
 #include <linux/pci.h>
+#else
+#include <linux/device.h>
+#endif /* CONFIG_REALTEK_VENUS_USB */	//cfyeh- 2005/11/07
 #include <linux/dmapool.h>
 #include <linux/kernel.h>
 #include <linux/delay.h>
@@ -51,6 +55,20 @@
 #include <asm/system.h>
 #include <asm/unaligned.h>
 
+#ifdef CONFIG_REALTEK_VENUS_USB	//cfyeh+ 2005/11/07
+#include <venus.h>
+#endif /* CONFIG_REALTEK_VENUS_USB */	//cfyeh- 2005/11/07
+//cfyeh+ 2005/10/05
+#ifdef CONFIG_REALTEK_VENUS_USB_TEST_MODE	//cfyeh+ 2005/11/07
+#ifdef CONFIG_PROC_FS
+#include <linux/proc_fs.h>
+#include <linux/types.h>
+#include <asm/uaccess.h>
+#include <rl5829_reg.h>
+#include <rl5829.h>
+#endif	//CONFIG_PROC_FS
+//cfyeh- 2005/10/05
+#endif /* CONFIG_REALTEK_VENUS_USB_TEST_MODE */	//cfyeh- 2005/11/07
 
 /*-------------------------------------------------------------------------*/
 
@@ -142,6 +160,1765 @@ MODULE_PARM_DESC (park, "park setting; 1-3 back-to-back async packets");
 #include "ehci-dbg.c"
 
 /*-------------------------------------------------------------------------*/
+//#if CONFIG_REALTEK_VENUS_USB_TEST_MODE
+//cfyeh+ : 2006/09/08
+//add for sysfs
+extern int gUsbGetDescriptor; // cfyeh+ : add for sysfs on usb
+#define max_packet_size(mMaxPacketSize) ((mMaxPacketSize) & 0x07ff)
+// gUsbGetDescriptor = 1 for the command phase
+// gUsbGetDescriptor = 2 for the data phase
+// gUsbGetDescriptor = 3 for the status phase
+static struct ehci_qtd *ehci_qtd_alloc (struct ehci_hcd *ehci, int flags);
+static int qtd_fill (struct ehci_qtd *qtd, dma_addr_t buf, size_t len, int token, int maxpacket);
+static void qtd_list_free (struct ehci_hcd *ehci, struct urb *urb, struct list_head	*qtd_list) ;
+static u32	backup_token;
+
+static struct list_head *
+hub_qh_urb_transaction (
+	struct ehci_hcd		*ehci,
+	struct urb		*urb,
+	struct list_head	*head,
+	int			flags
+)
+{
+	struct ehci_qtd		*qtd = NULL, *qtd_prev = NULL;
+	dma_addr_t		buf = 0;
+	int			len = 0, maxpacket = 0;
+	int			is_input = 0;
+
+	switch(gUsbGetDescriptor)
+	{
+	case 1:
+	printk("Get Descriptor : command phase\n");
+		/*
+		 * URBs map to sequences of QTDs:  one logical transaction
+		 */
+		qtd = ehci_qtd_alloc (ehci, flags);
+		if (unlikely (!qtd))
+			return NULL;
+		list_add_tail (&qtd->qtd_list, head);
+		qtd->urb = urb;
+	
+		backup_token = QTD_STS_ACTIVE;
+		backup_token |= (EHCI_TUNE_CERR << 10);
+		/* for split transactions, SplitXState initialized to zero */
+	
+		len = urb->transfer_buffer_length;
+		is_input = usb_pipein (urb->pipe);
+		if (usb_pipecontrol (urb->pipe)) {
+			/* SETUP pid */
+			qtd_fill (qtd, urb->setup_dma, sizeof (struct usb_ctrlrequest),
+				backup_token | (2 /* "setup" */ << 8) | QTD_IOC, 8);
+	
+			/* ... and always at least one more pid */
+			backup_token ^= QTD_TOGGLE;
+			qtd_prev = qtd;
+			qtd = ehci_qtd_alloc (ehci, flags);
+			if (unlikely (!qtd))
+				goto cleanup;
+			qtd->urb = urb;
+			qtd_prev->hw_next = EHCI_LIST_END;
+			qtd_prev->hw_alt_next = EHCI_LIST_END;
+		} 
+
+		break;
+	case 2:
+	printk("Get Descriptor : data phase\n");
+		/*
+		 * URBs map to sequences of QTDs:  one logical transaction
+		 */
+		qtd = ehci_qtd_alloc (ehci, flags);
+		if (unlikely (!qtd))
+			return NULL;
+		list_add_tail (&qtd->qtd_list, head);
+		qtd->urb = urb;
+
+		/*
+		 * data transfer stage:  buffer setup
+		 */
+		buf = urb->transfer_dma;
+		backup_token |= (1 /* "in" */ << 8);
+	
+		maxpacket = max_packet_size(usb_maxpacket(urb->dev, urb->pipe, !is_input));
+	
+		/*
+		 * buffer gets wrapped in one or more qtds;
+		 * last one may be "short" (including zero len)
+		 * and may serve as a control status ack
+		 */
+		qtd_fill (qtd, buf, 18, backup_token, maxpacket);
+		qtd->hw_next = EHCI_LIST_END;
+		qtd->hw_alt_next = EHCI_LIST_END;
+	
+		break;
+	case 3:
+	printk("Get Descriptor : status phase\n");
+		/*
+		 * control requests may need a terminating data "status" ack;
+		 * bulk ones may need a terminating short packet (zero length).
+		 */
+		//gUsbGetDescriptor = 0;
+		{
+			int	one_more = 0;
+	
+			if (usb_pipecontrol (urb->pipe)) {
+				one_more = 1;
+				backup_token ^= 0x0100;	/* "in" <--> "out"  */
+				backup_token |= QTD_TOGGLE;	/* force DATA1 */
+			} else if (usb_pipebulk (urb->pipe)
+					&& (urb->transfer_flags & URB_ZERO_PACKET)
+					&& !(urb->transfer_buffer_length % maxpacket)) {
+				one_more = 1;
+			}
+			if (one_more) {
+				//qtd_prev = qtd;
+				qtd = ehci_qtd_alloc (ehci, flags);
+				if (unlikely (!qtd))
+					goto cleanup;
+				qtd->urb = urb;
+				//qtd_prev->hw_next = QTD_NEXT (qtd->qtd_dma);
+				list_add_tail (&qtd->qtd_list, head);
+	
+				/* never any data in such packets */
+				qtd_fill (qtd, 0, 0, backup_token | QTD_IOC, 0);
+				qtd->hw_next = EHCI_LIST_END;
+				qtd->hw_alt_next = EHCI_LIST_END;
+			}
+		}
+		break;
+	default:
+		break;
+	}
+	/* by default, enable interrupt on urb completion */
+	if (likely (!(urb->transfer_flags & URB_NO_INTERRUPT)))
+		qtd->hw_token |= __constant_cpu_to_le32 (QTD_IOC);
+	return head;
+
+cleanup:
+	qtd_list_free (ehci, urb, head);
+	return NULL;
+}
+//cfyeh- : 2006/09/08
+//#endif /* CONFIG_REALTEK_VENUS_USB_TEST_MODE */
+
+#ifdef CONFIG_REALTEK_VENUS_USB_TEST_MODE	//cfyeh+ 2005/11/07
+//cfyeh+ 2005/10/05
+#ifdef CONFIG_PROC_FS
+///////////////////////////////////////usb ehci_regs count///////////////////////////////////////
+static char ehci_power_seq_flag = '0';
+
+static int ehci_power_seq_write_proc(struct file *file, const char *buffer,
+				unsigned long count, void *data)
+{
+	int tmp = 0;
+	int tmp_src = 0;
+	unsigned int value;
+	
+	if (count < 2) 
+		return -EFAULT;
+	
+	tmp_src = ehci_power_seq_flag - '0';
+	if (buffer && !copy_from_user(&ehci_power_seq_flag, buffer, 1)) {
+		tmp = ehci_power_seq_flag - '0';
+		if(!(tmp < 0) && (tmp <= 6))
+		{
+			if(tmp_src != tmp)
+			{
+				switch (tmp){
+					case 1:
+						printk("set 0xb8000000 bit 17 = 0\n");
+						value = readl((void __iomem *)0xb8000000);
+						value &= ~(1<<17);
+						writel(value, (void __iomem *)0xb8000000);
+						break;
+					case 2:
+						printk("set 0xb8000000 bit 17 = 1\n");
+						value = readl((void __iomem *)0xb8000000);
+						value |= (1<<17);
+						writel(value, (void __iomem *)0xb8000000);
+						break;
+					case 3:
+						printk("set 0xb8000000 bit 15 = 0\n");
+						value = readl((void __iomem *)0xb8000000);
+						value &= ~(1<<15);
+						writel(value, (void __iomem *)0xb8000000);
+						break;
+					case 4:
+						printk("set 0xb8000000 bit 15 = 1\n");
+						value = readl((void __iomem *)0xb8000000);
+						value |= (1<<15);
+						writel(value, (void __iomem *)0xb8000000);
+						break;
+					case 5:
+						printk("set 0xb8000004 bit 3 = 0\n");
+						value = readl((void __iomem *)0xb8000004);
+						value &= ~(1<<3);
+						writel(value, (void __iomem *)0xb8000004);
+						break;
+					case 6:
+						printk("set 0xb8000004 bit 3 = 1\n");
+						value = readl((void __iomem *)0xb8000004);
+						value |= (1<<3);
+						writel(value, (void __iomem *)0xb8000004);
+						break;
+					default:
+						printk("Not thing to do!!!\n");
+						break;
+				}
+				printk("0xb8000000 = %.8x\n", readl((void __iomem *)0xb8000000));
+				printk("0xb8000004 = %.8x\n", readl((void __iomem *)0xb8000004));
+			}
+		}
+		return count;
+	}
+	
+	return -EFAULT;
+}
+
+static int ehci_power_seq_read_proc(char *page, char **start, off_t off,
+				  int count, int *eof, void *data)
+{	int len = 0;
+
+	len = sprintf(page, "%c\n", ehci_power_seq_flag);
+	printk("0xb8000000 = %.8x\n", readl((void __iomem *)0xb8000000));
+	printk("0xb8000004 = %.8x\n", readl((void __iomem *)0xb8000004));
+
+      if (len <= off+count) *eof = 1;
+      *start = page + off;
+      len -= off;
+      if (len>count) len = count;
+      if (len<0) len = 0;
+      return len;
+}
+
+static int ehci_regs_read_proc(char *page, char **start, off_t off,
+				  int count, int *eof, void *data)
+{	
+	int i;
+	u32 regs=0xb8013000;
+	
+	for(i=0;i<22;i++)
+	{
+		if((i%4)==0)
+			printk("0x%.8x : ", regs);
+		printk("%.8x ", readl((void __iomem *)regs));
+		regs+=4;
+		if((i%4)==3)
+			printk("\n");		
+	}
+	printk("\n");		
+
+	regs=0xb8013800;
+	
+	for(i=0;i<5;i++)
+	{
+		if((i%4)==0)
+			printk("0x%.8x : ", regs);
+		printk("%.8x ", readl((void __iomem *)regs));
+		regs+=4;
+		if((i%4)==3)
+			printk("\n");		
+	}
+	printk("\n");
+
+      return 0;
+}
+
+///////////////////////////////////////usb ehci port power ///////////////////////////////////////
+extern int  usb_hub_init(void);
+extern void usb_hub_cleanup(void);
+static int ehci_start (struct usb_hcd *hcd);	
+static struct usb_hcd *connected_ehci_hcd = NULL;
+static int ehci_suspend (struct usb_hcd *hcd, pm_message_t message);
+static int ehci_resume (struct usb_hcd *hcd);
+static int ehci_port_power_proc(int port_power)
+{
+	if(port_power == 0)
+	{
+		usb_hub_cleanup();
+	}
+	
+	outl((inl(VENUS_USB_EHCI_PORTSC_0) & ~(1<<12))|(port_power<<12),
+			VENUS_USB_EHCI_PORTSC_0);
+	
+	if(port_power == 1)
+	{
+		usb_hub_init();
+		ehci_resume(connected_ehci_hcd);
+	}
+	
+
+	return 0;
+}
+
+static int ehci_port_power_write_proc(struct file *file, const char *buffer,
+		unsigned long count, void *data)
+{
+	int tmp = 0, tmp2 = 0;
+	char tmp_buf[3];
+	if (count < 2)
+		return -EFAULT;
+	
+	if (buffer && !copy_from_user(&tmp_buf, buffer, 2)) {
+		tmp2= tmp_buf[0]-'0';
+		if((tmp2>= 0) && (tmp2 <=9))
+			tmp = tmp2;
+		tmp2= tmp_buf[1]-'0';
+		if((tmp2>= 0) && (tmp2 <=9))
+			tmp = tmp*10 + tmp2;
+		if((tmp>=0) && (tmp <=1))
+		{
+			ehci_port_power_proc(tmp);
+		}
+		
+		return count;
+	}
+	return -EFAULT;
+	
+}
+
+static int ehci_port_power_read_proc(char *page, char **start, off_t off,
+		int count, int *eof, void *data)
+{
+	int len = 0;
+	int tmp = 0;
+	
+	tmp = (inl(VENUS_USB_EHCI_PORTSC_0)>>12) & 1;
+	printk("ehci port power = %d\n",tmp);
+       
+	if (len <= off+count) *eof = 1;
+	*start = page + off;
+	len -= off;
+	if (len>count) len = count;
+	if (len<0) len = 0;
+	return len;
+}
+
+///////////////////////////////////////usb ehci phy swing ///////////////////////////////////////
+
+static int ehci_phy_swing(int swing_mode)
+{
+	USBPHY_Register_Setting();
+	USBPHY_SetReg_Default_32(swing_mode);
+	return 0;
+}
+
+static int ehci_phy_swing_write_proc(struct file *file, const char *buffer,
+		unsigned long count, void *data)
+{
+	int tmp = 0, tmp2 = 0;
+	char tmp_buf[3];
+	if (count < 2)
+		return -EFAULT;
+	
+	if (buffer && !copy_from_user(&tmp_buf, buffer, 2)) {
+		tmp2= tmp_buf[0]-'0';
+		if((tmp2>= 0) && (tmp2 <=9))
+			tmp = tmp2;
+		tmp2= tmp_buf[1]-'0';
+		if((tmp2>= 0) && (tmp2 <=9))
+			tmp = tmp*10 + tmp2;
+		
+		if((tmp>=0) && (tmp <=15))
+		{
+			ehci_phy_swing(tmp);
+		}
+		return count;
+	}
+	return -EFAULT;	
+}
+
+static int ehci_phy_swing_read_proc(char *page, char **start, off_t off,
+		int count, int *eof, void *data)
+{
+	int len = 0;
+	int tmp = 0;
+	
+	tmp = USBPHY_GetReg(USBPHY_22);
+	printk("phy swing value = 0x%x\n",tmp);
+	
+	if (len <= off+count) *eof = 1;
+	*start = page + off;
+	len -= off;
+	if (len>count) len = count;
+	if (len<0) len = 0;
+	return len;
+}
+
+///////////////////////////////////////usb proc count///////////////////////////////////////
+//for setting VENUS_USB_HOST_WRAPPER bit3~bit1
+//write for setting 
+//read for getting setting
+//value range form 0 to 7
+static int ehci_debug_mode(int debug_mode)
+{
+	//change to usb debug mode
+	//printk("0x%.8x = 0x%.8x\n", (u32)0xb80000ac, readl((void __iomem *)0xb80000ac));
+	writel(0x5ad, (void __iomem *)0xb80000ac);
+	//printk("0x%.8x = 0x%.8x\n", (u32)0xb80000ac, readl((void __iomem *)0xb80000ac));
+	//set usb wrapper
+	outl(inl(VENUS_USB_HOST_WRAPPER) & ~(0x1f << 1), VENUS_USB_HOST_WRAPPER);
+	outl(inl(VENUS_USB_HOST_WRAPPER) | (debug_mode << 1), VENUS_USB_HOST_WRAPPER);
+	return 0;
+}
+
+static int ehci_debug_mode_flag = 0;
+static int ehci_debug_mode_write_proc(struct file *file, const char *buffer,
+				unsigned long count, void *data)
+{
+	int tmp = 0, tmp2 = 0;
+	char tmp_buf[3];
+      if (count < 2) 
+	    return -EFAULT;
+      
+      if (buffer && !copy_from_user(&tmp_buf, buffer, 2)) {
+	      tmp2= tmp_buf[0]-'0';
+	      if((tmp2>= 0) && (tmp2 <=9))
+		      tmp = tmp2;
+	      tmp2= tmp_buf[1]-'0';
+	      if((tmp2>= 0) && (tmp2 <=9))
+		      tmp = tmp*10 + tmp2;
+		if((tmp>=0) && (tmp <=31))
+		{
+			//printk("0x%.8x = 0x%.8x\n", (u32)0xb8013800, readl((void __iomem *)0xb8013800));
+			ehci_debug_mode(tmp);
+			//printk("0x%.8x = 0x%.8x\n", (u32)0xb8013800, readl((void __iomem *)0xb8013800));
+		}
+		return count;
+	}
+      return -EFAULT;
+
+}
+
+static int ehci_debug_mode_read_proc(char *page, char **start, off_t off,
+				  int count, int *eof, void *data)
+{	
+	int len = 0;
+	int tmp = 0;
+	
+	tmp = (inl(VENUS_USB_HOST_WRAPPER) >> 1 ) & 0x1f;
+	ehci_debug_mode_flag = tmp;
+	len = sprintf(page, "%d\n", ehci_debug_mode_flag);
+	//printk("0x%.8x = 0x%.8x\n", (u32)0xb8013800, readl((void __iomem *)0xb8013800));
+
+      if (len <= off+count) *eof = 1;
+      *start = page + off;
+      len -= off;
+      if (len>count) len = count;
+      if (len<0) len = 0;
+      return len;
+}
+
+///////////////////////////////////////ehci suspend/resume ///////////////////////////////////////
+//for ehci suspend / resume
+//write 1 to ehci_suspend to make ehci suspend
+//write 1 to ehci_resume to make ehci resume
+static char ehci_suspend_flag = '0';
+static char ehci_resume_flag = '0';
+//static struct usb_hcd *connected_ehci_hcd = NULL;
+static int ehci_suspend (struct usb_hcd *hcd, pm_message_t message);
+static int ehci_resume (struct usb_hcd *hcd);
+static int ehci_hub_suspend (struct usb_hcd *hcd);
+static int ehci_hub_resume (struct usb_hcd *hcd);	
+static int ehci_suspend_write_proc(struct file *file, const char *buffer,
+				unsigned long count, void *data)
+{
+        struct ehci_hcd         *ehci = hcd_to_ehci (connected_ehci_hcd);
+
+	if (count < 2) 
+		return -EFAULT;
+      
+	if (buffer && !copy_from_user(&ehci_suspend_flag, buffer, 1)) {
+		if (time_before (jiffies, ehci->next_statechange))
+			msleep (100);
+
+		usb_lock_device (connected_ehci_hcd->self.root_hub);
+		ehci_hub_suspend (connected_ehci_hcd);
+		usb_unlock_device (connected_ehci_hcd->self.root_hub);
+
+		ehci_suspend_flag = '1';
+		ehci_resume_flag = '0';
+		return count;
+	}
+	return -EFAULT;
+}
+
+static int ehci_suspend_read_proc(char *page, char **start, off_t off,
+				  int count, int *eof, void *data)
+{	int len = 0;
+	
+	len = sprintf(page, "%c\n", ehci_suspend_flag);
+
+      if (len <= off+count) *eof = 1;
+      *start = page + off;
+      len -= off;
+      if (len>count) len = count;
+      if (len<0) len = 0;
+      return len;
+}
+
+static int ehci_resume_write_proc(struct file *file, const char *buffer,
+				unsigned long count, void *data)
+{
+	struct ehci_hcd         *ehci = hcd_to_ehci (connected_ehci_hcd);
+
+	if (count < 2) 
+    		return -EFAULT;
+	
+  	if (buffer && !copy_from_user(&ehci_resume_flag, buffer, 1)) {
+		if (time_before (jiffies, ehci->next_statechange))
+			msleep (100);
+	
+		usb_lock_device (connected_ehci_hcd->self.root_hub);
+		ehci_hub_resume ((struct usb_hcd *)connected_ehci_hcd);
+		usb_unlock_device (connected_ehci_hcd->self.root_hub);
+
+		ehci_suspend_flag = '0';
+		ehci_resume_flag = '1';
+		return count;
+      }
+      return -EFAULT;
+}
+
+static int ehci_resume_read_proc(char *page, char **start, off_t off,
+				  int count, int *eof, void *data)
+{
+	int len = 0;
+
+	len = sprintf(page, "%c\n", ehci_resume_flag);
+
+      if (len <= off+count) *eof = 1;
+      *start = page + off;
+      len -= off;
+      if (len>count) len = count;
+      if (len<0) len = 0;
+      return len;
+}
+
+///////////////////////////////////////usb self loop back test///////////////////////////////////////
+//for usb self loop back test
+//write 2 to usb_slb_test to test OHCI self loop back funciotn
+//write 1 to usb_slb_test to test EHCI self loop back funciotn
+//write 0 to usb_slb_test to turn off usb loop back test function
+static char usb_slb_flag = '0';
+static int usb_slb_test(int speed)
+{
+#define USB_TEST_PSL(x)	(x) //2 bit
+#define USB_TEST_SEED(x)	((x)<<2) //8 bit
+#define USB_TEST_SPEED(x)	((x)<<10) //2 bit
+#define USB_TEST_RST(x)	((x)<<2) //1 bit
+#define USB_TEST_EN(x)	((x)<<1) //1 bit
+#define USB_TEST_DONE(x)	(((x)>>13)&0x1) //1 bit
+#define USB_TEST_FAIL(x)	(((x)>>12)&0x1) //1 bit
+
+	int ret;
+	unsigned int tmp;
+	int i;
+	unsigned char seed;//8bit
+	
+	if(!speed)
+	{
+		USBPHY_SetReg_Default_38(0);
+		printk("TURN OFF self loop back test\n");	
+		return 0;
+	}
+	
+	//debug mode
+	/*
+	tmp = inl(VENUS_USB_HOST_WRAPPER);
+	tmp &= ~0xe;
+	tmp |= 0xe;
+	outl(tmp, VENUS_USB_HOST_WRAPPER);
+	*/
+	//printk("delay 10 sec for debug\n");
+	//mdelay(10000);
+
+	//disable irq
+	printk("disable irq\n");
+	disable_irq(2);
+	mdelay(2000);
+	
+	seed=0x44;
+	for(i=0;i<4;i++)
+	//for(i=1;i<2;i++)
+	{
+		printk("USB_TEST_PSL = 0x%.8x, USB_TEST_SEED = 0x%.8x\n", i, seed);
+	
+		//step 0
+		USBPHY_SetReg_Default_38(0);
+		printk("Step 0: before setup usb phy regs = 0x%.8x\n", inl(VENUS_USB_EHCI_INSNREG05));
+		
+		//delay
+		mdelay(100);
+		
+		//step 1
+		USBPHY_SetReg_Default_38(1);
+		printk("Step 1: setup usb phy regs = 0x%.8x\n", inl(VENUS_USB_EHCI_INSNREG05));
+	
+		//step 2
+		tmp = inl(VENUS_USB_HOST_SELF_LOOP_BACK) & ~USB_TEST_PSL(0x3) & ~USB_TEST_SEED(0xff) & ~USB_TEST_SPEED(0x3);
+		tmp |= USB_TEST_PSL(i) | USB_TEST_SEED(seed) | USB_TEST_SPEED(speed);
+		outl(tmp, VENUS_USB_HOST_SELF_LOOP_BACK);
+		printk("Step 2: VENUS_USB_HOST_SELF_LOOP_BACK(0xb8013810) = 0x%.8x\n",tmp);	
+		
+		//step 3
+		tmp = inl(VENUS_USB_HOST_RESET_UTMI) & ~USB_TEST_RST(0x1) & ~USB_TEST_EN(0x1);
+		tmp |= USB_TEST_RST(0x1) | USB_TEST_EN(0x0);
+		outl(tmp, VENUS_USB_HOST_RESET_UTMI);
+		printk("Step 3: VENUS_USB_HOST_RESET_UTMI(0xb801380c) = 0x%.8x\n",tmp);	
+		
+		//step 4
+		tmp = inl(VENUS_USB_HOST_RESET_UTMI) & ~USB_TEST_RST(0x1) & ~USB_TEST_EN(0x1);
+		tmp |= USB_TEST_RST(0x0) | USB_TEST_EN(0x0);
+		outl(tmp, VENUS_USB_HOST_RESET_UTMI);
+		printk("Step 4: VENUS_USB_HOST_RESET_UTMI(0xb801380c) = 0x%.8x\n",tmp);	
+	
+		//step 5
+		tmp = inl(VENUS_USB_HOST_RESET_UTMI) & ~USB_TEST_RST(0x1) & ~USB_TEST_EN(0x1);
+		tmp |= USB_TEST_RST(0x0) | USB_TEST_EN(0x1);
+		outl(tmp, VENUS_USB_HOST_RESET_UTMI);
+		printk("Step 5: VENUS_USB_HOST_RESET_UTMI(0xb801380c) = 0x%.8x\n",tmp);	
+		
+		//step 6
+		//done
+		//while(!USB_TEST_DONE(inl(VENUS_USB_HOST_RESET_UTMI)));
+		do
+		{
+			tmp = inl(VENUS_USB_HOST_SELF_LOOP_BACK);
+			printk("Step 6:  VENUS_USB_HOST_SELF_LOOP_BACK(0xb8013810) = 0x%.8x\n",tmp);	
+			tmp = (tmp>>13)&0x1;
+			printk("Step 6:  done ? %s!\n",tmp ? "YES" : "NO");	
+			
+		}while(!tmp);
+		//fail?
+		ret = USB_TEST_FAIL(inl(VENUS_USB_HOST_SELF_LOOP_BACK));
+		
+		printk("%s self loop back test return %s!\n\n",(speed==1) ? "HS" : "FS/LS", ret ? "FAIL":"OK");	
+	}
+	//set usb_slb_flag back to 0
+	usb_slb_flag = '0';
+
+	//enable irq
+	printk("enable irq\n");
+	enable_irq(2);
+	mdelay(2000);
+	
+	return ret;
+}
+
+static int usb_slb_write_proc(struct file *file, const char *buffer,
+				unsigned long count, void *data)
+{
+      if (count < 2) 
+	    return -EFAULT;
+      
+      if (buffer && !copy_from_user(&usb_slb_flag, buffer, 1)) {
+	    switch(usb_slb_flag)
+	    {
+	    case '2'://for FS/LS self loop back test
+		printk("FS/LS self loop back test\n");	
+	    	usb_slb_test(2);
+	    break;
+	    case '1'://for HS self loop back test
+		printk("HS self loop back test\n");	
+	    	usb_slb_test(1);
+	    break;
+	    case '0'://turn off self loop back test
+	    	usb_slb_test(0);
+	    break;
+	    default :
+	    	usb_slb_flag = '0';
+	    break;	    
+	    }
+	    return count;
+      }
+      return -EFAULT;
+
+}
+
+static int usb_slb_read_proc(char *page, char **start, off_t off,
+				  int count, int *eof, void *data)
+{	int len = 0;
+
+	len = sprintf(page, "%c\n", usb_slb_flag);
+
+      if (len <= off+count) *eof = 1;
+      *start = page + off;
+      len -= off;
+      if (len>count) len = count;
+      if (len<0) len = 0;
+      return len;
+}
+
+///////////////////////////////////////ehci enumerate bus ///////////////////////////////////////
+//for ehci enumerate bus
+//write 1 to ehci_enum_flag to force ehci to re-enumerate bus
+static char usb_enum_flag = '0';
+static int ehci_enum_write_proc(struct file *file, const char *buffer,
+				unsigned long count, void *data)
+{
+      if (count < 2) 
+	    return -EFAULT;
+      
+      if (buffer && !copy_from_user(&usb_enum_flag, buffer, 1)) {
+		printk("%s: USB Enumerate bus!\n",__FUNCTION__ );//cfyeh
+		ehci_resume (connected_ehci_hcd);
+		usb_enum_flag = '0';
+		return count;
+     }
+      return -EFAULT;
+
+}
+
+static int ehci_enum_read_proc(char *page, char **start, off_t off,
+				  int count, int *eof, void *data)
+{	int len = 0;
+
+	len = sprintf(page, "%c\n", usb_enum_flag);
+
+      if (len <= off+count) *eof = 1;
+      *start = page + off;
+      len -= off;
+      if (len>count) len = count;
+      if (len<0) len = 0;
+      return len;
+}
+
+///////////////////////////////////////ehci reset port///////////////////////////////////////
+//for ehci reset port
+//write 1 to ehci_port_reset to force ehci to reset port
+///*
+static int ehci_port_reset(struct usb_hcd *hcd)
+{
+	struct ehci_hcd		*ehci = hcd_to_ehci (hcd);
+	unsigned int tmp;
+	
+	//disable irq
+	mdelay(2000);
+	printk("disable irq\n");
+	disable_irq(2);
+	
+	//set port reset=1 & port enable=0
+	tmp = ehci->regs->port_status[0];
+	printk("Step 0: before ehci regs (port status) = 0x%.8x\n",tmp);
+	tmp |= PORT_RESET;
+	tmp &= ~PORT_PE;
+	ehci->regs->port_status[0] = tmp;
+	printk("Step 1: ehci regs (port status) = 0x%.8x\n",tmp);
+	
+	//wait 50ms
+	mdelay(50);
+	
+	//clear port reset
+	do
+	{
+		tmp = ehci->regs->port_status[0];
+		tmp &= ~PORT_RESET;
+		ehci->regs->port_status[0] = tmp;
+		printk("Step 2: ehci regs (port status) = 0x%.8x\n",tmp);	
+	}while (tmp & PORT_RESET);
+	
+	//enable irq
+	mdelay(2000);
+	printk("enable irq\n");
+	enable_irq(2);
+	
+	return 0;
+}
+
+static char ehci_reset_flag = '0';
+static int ehci_reset_write_proc(struct file *file, const char *buffer,
+				unsigned long count, void *data)
+{
+      if (count < 2) 
+	    return -EFAULT;
+      
+      if (buffer && !copy_from_user(&ehci_reset_flag, buffer, 1)) {
+		ehci_port_reset(connected_ehci_hcd); 
+		ehci_reset_flag = '0';
+		return count;
+	}
+      return -EFAULT;
+
+}
+
+static int ehci_reset_read_proc(char *page, char **start, off_t off,
+				  int count, int *eof, void *data)
+{	int len = 0;
+
+	len = sprintf(page, "%c\n", ehci_reset_flag);
+
+      if (len <= off+count) *eof = 1;
+      *start = page + off;
+      len -= off;
+      if (len>count) len = count;
+      if (len<0) len = 0;
+      return len;
+}
+//*/
+
+///////////////////////////////////////ehci test mode///////////////////////////////////////
+//for ehci test mode
+//write 0 to ehci_test_mode to turn down ehci test mode
+//write 1 to ehci_test_mode to test TEST_J signal without device
+//write 2 to ehci_test_mode to test TEST_K signal without device
+//write 3 to ehci_test_mode to test TEST_SE0_NAK signal without device
+//write 4 to ehci_test_mode to test TEST_PACKET with dummy device
+//write 5 to ehci_test_mode to test TEST_FORCE_ENABLE with real device
+extern struct usb_hcd *connected_ohci_hcd;
+unsigned int force_hs_mode = (unsigned int)(1 == 1);
+static char ehci_test_mode_flag = '0';
+//extern int  usb_hub_init(void);
+//extern void usb_hub_cleanup(void);
+//static int ehci_start (struct usb_hcd *hcd);	
+static int ehci_test_mode(struct usb_hcd *hcd, int test_mode)
+{
+#define USB_TEST_FORCE_HS_MODE(x)	((x)<<16) //1 bit
+#define USB_TEST_SIM_MODE(x)	((x)<<17) //1 bit
+	
+	struct ehci_hcd		*ehci = hcd_to_ehci (hcd);
+	unsigned int volatile tmp;
+	unsigned int suspend_mux=0;
+	//unsigned int schedule_enable=0;
+	
+	if(6 == test_mode)
+	{
+		force_hs_mode ? (force_hs_mode=0) : (force_hs_mode=1);
+		printk("<1> force_hs_mode = %d.\n", force_hs_mode);
+		return 0;
+	}
+	//char test[][] = ("HCReset", "TEST_J", "TEST_K", "TEST_SE0_NAK", "TEST_PACKET", "TEST_FORCE_ENABLE");	
+	
+	//usb2 spec 4.14 p.114
+	printk("test mode = %d\n",test_mode /*test[test_mode]*/);
+
+	if(0 != test_mode)
+	{
+		//disable irq
+		printk("disable irq\n");
+		disable_irq(2);
+		mdelay(2000);
+	}
+	
+	outl( inl(VENUS_USB_HOST_USBIP_INPUT) | (1 << 27) | (1 << 30), VENUS_USB_HOST_USBIP_INPUT);  // UTMI_Suspend_mux = 1
+	//outl( (inl(VENUS_USB_HOST_USBIP_INPUT) & ~(1 << 27)) | (1 << 30), VENUS_USB_HOST_USBIP_INPUT);  // UTMI_Suspend_mux = 0
+	suspend_mux = ((inl(VENUS_USB_HOST_USBIP_INPUT) & (1 <<27)) == (1 <<27));
+	printk("UTMI suspend mux (VENUS_USB_HOST_USBIP_INPUT 0xb8013808 bit27)= %d\n",suspend_mux);	
+
+#if 0//cfyeh
+// add by tenno, test for device removal detection in suspend mode
+	if (0 == test_mode){  // occupy this mode
+		unsigned int volatile tmp1, tmp0;
+			
+		//clean usb hub function
+		printk("clean usb hub function \n");
+		usb_hub_cleanup();//clean usb hub function
+		mdelay(10);
+		
+		// reset host controller
+		printk("reset host controller\n");
+			printk("...Clear RUN = 0\n");
+			outl(inl(VENUS_USB_EHCI_USBCMD) & (unsigned int)~1,VENUS_USB_EHCI_USBCMD);	// clear RUN = 0
+			
+			printk("...Wait for HCHalted = 1");
+			do{
+				tmp0 = inl(VENUS_USB_EHCI_USBSTS); // polling USBSTS
+			} while ((unsigned int)(1 << 12) != ((unsigned int)(1 << 12) & tmp0));  // wait until HCHalted = 1
+			printk("...ok\n");
+			
+			printk("...Set HCRESET = 1\n");
+			outl(inl(VENUS_USB_EHCI_USBCMD)| (unsigned int)(1 << 1),VENUS_USB_EHCI_USBCMD);	// set HCRESET = 1
+			
+			printk("...Wait for HCRESET = 0");
+			do{
+				tmp0 = inl(VENUS_USB_EHCI_USBCMD); // polling USBCMD
+			} while ((unsigned int)(1 << 1) == ((unsigned int)(1 << 1) & tmp0));  // wait until HCRESET = 0
+			printk("...ok\n");
+		
+		// initialize host controller
+		printk("initialize host controller\n");
+			printk("...Wait for HCHalted = 1");
+			do{
+				tmp0 = inl(VENUS_USB_EHCI_USBSTS); // polling USBSTS
+			} while ((unsigned int)(1 << 12) != ((unsigned int)(1 << 12) & tmp0));  // wait until HCHalted = 1
+			printk("...ok\n");
+			
+			printk("...Set RUN = 1\n");
+			outl(inl(VENUS_USB_EHCI_USBCMD) | (unsigned int)1,VENUS_USB_EHCI_USBCMD);	// set RUN = 1
+			
+			printk("...Set ConfigFlag = 1\n");
+			outl(inl(VENUS_USB_EHCI_CONFIGFLAG) | (unsigned int)1,VENUS_USB_EHCI_CONFIGFLAG);	// set ConfigFlag = 1
+			
+			printk("...Set PortPower = 1\n");
+			outl(inl(VENUS_USB_EHCI_PORTSC_0)| (unsigned int)(1 << 12), VENUS_USB_EHCI_PORTSC_0);	// set PortPower = 1
+
+		// initialize port
+		printk("initialize port\n");
+			printk("...Wait for CurrentConnectStatus = 1");
+			do{
+				tmp0 = inl(VENUS_USB_EHCI_PORTSC_0); // polling PORTSC
+			} while ((unsigned int)1 != ((unsigned int)1 & tmp0));  // wait until CurrentConnectStatus = 1
+			printk("...ok\n");
+			
+			printk("...Set PortReset = 1\n");
+			outl(inl(VENUS_USB_EHCI_PORTSC_0)| (unsigned int)(1 << 8),VENUS_USB_EHCI_PORTSC_0);	// set PortReset = 1
+			
+			printk("...Wait 50 mS");
+			mdelay(50);
+			printk("...ok\n");
+			
+			printk("...Clear PortReset = 0\n");
+			outl(inl(VENUS_USB_EHCI_PORTSC_0) & (unsigned int)~(1 << 8), VENUS_USB_EHCI_PORTSC_0);	// clear PortReset = 0
+			
+		
+			printk("...Wait for PortEnabled = 1");
+			do{
+				tmp0 = inl(VENUS_USB_EHCI_PORTSC_0); // polling PORTSC
+			} while ((unsigned int)(1 << 2) != ((unsigned int)(1 << 2) & tmp0));  // wait until PortEnabled = 1
+			printk("...ok\n");
+			
+		// suspend device
+		printk("Suspend device\n");
+			printk("...Set Suspend = 1\n");
+			outl(inl(VENUS_USB_EHCI_PORTSC_0) | (unsigned int)(1 << 7), VENUS_USB_EHCI_PORTSC_0);	// clear PortReset = 0
+		
+			printk("...Wait for Suspend = 1");
+			do{
+				tmp0 = inl(VENUS_USB_EHCI_PORTSC_0); // polling PORTSC
+			} while ((unsigned int)(1 << 7) != ((unsigned int)(1 << 7) & tmp0));  // wait until Suspend = 1
+			printk("...ok\n");
+		
+			printk("...Wait 50 mS");
+			mdelay(50);
+			printk("...ok\n");
+			
+		// detect device removal
+		printk("Detect device removal\n");
+		
+			tmp0 = (3<<10);
+			while(1){
+				tmp1 = ehci->regs->port_status[0] & ~(3<<10);
+				if (tmp0 != tmp1)
+				{
+					printk("ehci regs (port status) connect ? %s - 0x%.8x     \n",
+					(PORT_CONNECT == (tmp1 & PORT_CONNECT)) ? "Yes" : "NO ", tmp1);
+					tmp0 = tmp1;
+				}
+			}
+	}
+// add by tenno, test for device removal detection in suspend mode
+#endif //cfyeh
+
+// add by tenno, test for EHCI test mode "TEST_FORCE_ENABLE"
+	if (5 == test_mode){ // occupy this mode
+		unsigned int volatile tmp1, tmp0;
+			
+		//clean usb hub function
+		printk("clean usb hub function \n");
+		usb_hub_cleanup();//clean usb hub function
+		mdelay(10);
+		
+		// reset host controller
+		printk("reset host controller\n");
+			printk("...Clear RUN = 0\n");
+			outl(inl(VENUS_USB_EHCI_USBCMD) & (unsigned int)~1,VENUS_USB_EHCI_USBCMD);	// clear RUN = 0
+			
+			printk("...Wait for HCHalted = 1");
+			do{
+				tmp0 = inl(VENUS_USB_EHCI_USBSTS); // polling USBSTS
+			} while ((unsigned int)(1 << 12) != ((unsigned int)(1 << 12) & tmp0));  // wait until HCHalted = 1
+			printk("...ok\n");
+			
+			printk("...Set HCRESET = 1\n");
+			outl(inl(VENUS_USB_EHCI_USBCMD) & (unsigned int)(1 << 1),VENUS_USB_EHCI_USBCMD);	// set HCRESET = 1
+			
+			printk("...Wait for HCRESET = 0");
+			do{
+				tmp0 = inl(VENUS_USB_EHCI_USBCMD); // polling USBCMD
+			} while ((unsigned int)(1 << 1) == ((unsigned int)(1 << 1) & tmp0));  // wait until HCRESET = 0
+			printk("...ok\n");
+		
+		// initialize host controller
+		printk("initialize host controller\n");
+			printk("...Wait for HCHalted = 1");
+			do{
+				tmp0 = inl(VENUS_USB_EHCI_USBSTS); // polling USBSTS
+			} while ((unsigned int)(1 << 12) != ((unsigned int)(1 << 12) & tmp0));  // wait until HCHalted = 1
+			printk("...ok\n");
+			
+			printk("...Set RUN = 1\n");
+			outl(inl(VENUS_USB_EHCI_USBCMD) | (unsigned int)1,VENUS_USB_EHCI_USBCMD);	// set RUN = 1
+			
+			printk("...Set ConfigFlag = 1\n");
+			outl(inl(VENUS_USB_EHCI_CONFIGFLAG) | (unsigned int)1, VENUS_USB_EHCI_CONFIGFLAG);	// set ConfigFlag = 1
+			
+			printk("...Set PortPower = 1\n");
+			outl(inl(VENUS_USB_EHCI_PORTSC_0) | (unsigned int)(1 << 12),VENUS_USB_EHCI_PORTSC_0);	// set PortPower = 1
+
+		//use force_hs_mode to emulate device attaching
+		if (force_hs_mode){
+			outl(inl(VENUS_USB_HOST_SELF_LOOP_BACK) | USB_TEST_FORCE_HS_MODE(1), VENUS_USB_HOST_SELF_LOOP_BACK);
+			printk("emulate device attaching \n");			
+			mdelay(10);
+		}
+
+		// initialize port
+		printk("initialize port\n");
+			printk("...Wait for CurrentConnectStatus = 1");
+			do{
+				tmp0 = inl(VENUS_USB_EHCI_PORTSC_0); // polling PORTSC
+			} while ((unsigned int)1 != ((unsigned int)1 & tmp0));  // wait until CurrentConnectStatus = 1
+			printk("...ok\n");
+			
+			printk("...Set PortReset = 1\n");
+			outl(inl(VENUS_USB_EHCI_PORTSC_0) | (unsigned int)(1 << 8),VENUS_USB_EHCI_PORTSC_0);	// set PortReset = 1
+			
+			printk("...Wait 50 mS");
+			mdelay(50);
+			printk("...ok\n");
+			
+			printk("...Clear PortReset = 0\n");
+			outl(inl(VENUS_USB_EHCI_PORTSC_0) & (unsigned int)~(1 << 8),VENUS_USB_EHCI_PORTSC_0);	// clear PortReset = 0
+		
+			printk("...Wait for PortEnabled = 1");
+			do{
+				tmp0 = inl(VENUS_USB_EHCI_PORTSC_0); // polling PORTSC
+			} while ((unsigned int)(1 << 2) != ((unsigned int)(1 << 2) & tmp0));  // wait until PortEnabled = 1
+			printk("...ok\n");
+			
+                        printk("...Check Frame Index is going");
+			do{
+				tmp0 = inl(VENUS_USB_EHCI_FRINDEX); // polling FRINDEX
+			} while (tmp0 == inl(VENUS_USB_EHCI_FRINDEX));  // wait until FRINDEX is going
+			printk("...ok\n");
+
+			mdelay(100);
+			
+		// Enter test mode TEST_FORCE_ENABLE (Fake)
+		printk("Enter test mode TEST_FORCE_ENABLE (Fake)\n");
+			printk("...Clear ASE = PSE = 0\n");
+			outl(inl(VENUS_USB_EHCI_USBCMD) & (unsigned int)~(3 << 4),VENUS_USB_EHCI_USBCMD);	// clear ASE = PSE = 0
+			
+			printk("...Wait for ASS = PSS = 0");
+			do{
+				tmp0 = inl(VENUS_USB_EHCI_USBSTS); // polling USBSTS
+			} while ((unsigned int)(3 << 14) == ((unsigned int)(3 << 14) & tmp0));  // wait until ASS = PSS = 0
+			printk("...ok\n");
+
+#if 1 // cfyeh - test 
+		// detect device removal
+		printk("Detect device removal\n");
+		
+			tmp0 = (3<<10);
+			while(1){
+				tmp1 = ehci->regs->port_status[0] & ~(3<<10);
+				if (tmp0 != tmp1)
+				{
+					printk("ehci regs (port status) connect ? %s - 0x%.8x     \n",
+					(PORT_CONNECT == (tmp1 & PORT_CONNECT)) ? "Yes" : "NO ", tmp1);
+					tmp0 = tmp1;
+				}
+				if(PORT_CONNECT != (tmp1 & PORT_CONNECT))
+					break;
+			}
+		return 0;
+#else	
+	        //clear force_hs_mode setting
+		tmp = inl(VENUS_USB_HOST_SELF_LOOP_BACK) & ~USB_TEST_FORCE_HS_MODE(0x1) & ~USB_TEST_SIM_MODE(0x1);
+		outl(tmp, VENUS_USB_HOST_SELF_LOOP_BACK);
+
+		//re-enable ASE PSE
+		//ehci->regs->command |= schedule_enable;
+		//enable irq
+		if(0 == test_mode)
+		{
+			mdelay(2000);
+			printk("enable irq\n");
+			enable_irq(2);
+		}
+
+		//re-enumerate bus
+		//ehci_resume (connected_ehci_hcd);
+
+		return 0;
+#endif
+	}
+// add by tenno, test for EHCI test mode "TEST_FORCE_ENABLE"
+			
+					
+	if(test_mode == 0)//HCReset
+	{
+		//step 0 foroce hs mode turn off 
+		tmp = inl(VENUS_USB_HOST_SELF_LOOP_BACK) & ~USB_TEST_FORCE_HS_MODE(0x1) & ~USB_TEST_SIM_MODE(0x1);
+		tmp |= USB_TEST_SIM_MODE(0) | USB_TEST_FORCE_HS_MODE(0);
+		outl(tmp, VENUS_USB_HOST_SELF_LOOP_BACK);
+		printk("Step 0:  clear force_hs_mode 0xb8013810 = 0x%.8x -> 0x%.8x\n",tmp, inl(VENUS_USB_HOST_SELF_LOOP_BACK));
+
+		do
+		{
+			tmp = ehci->regs->status;
+			printk("VENUS_USB_EHCI_USBSTS 0x%.8x\n", tmp);
+		}while(!(tmp & STS_HALT));
+
+		//step 1
+		tmp = ehci->regs->command;
+		tmp |= CMD_RESET;
+		ehci->regs->command = tmp;
+		printk("Step 1: set Host reset ehci regs (command) = 0x%.8x -> 0x%.8x\n",tmp,ehci->regs->command);
+		do
+		{
+			tmp = ehci->regs->command;
+		}while(tmp & CMD_RESET);
+	
+		//step 2
+		tmp = ehci->regs->command;
+		tmp |= CMD_RUN;
+		//ehci->regs->command = tmp;
+#if 0 
+		ehci_start(connected_ehci_hcd);
+		printk("Step 2: run ehci_start(), ehci command regs = 0x%.8x\n",ehci->regs->command);
+#else
+		ehci_resume(connected_ehci_hcd);
+		printk("Step 2: run ehci_resume(), ehci command regs = 0x%.8x\n",ehci->regs->command);
+#endif
+		//re-init usb hub function
+		printk("re-init usb hub function \n");
+		usb_hub_init();//re-init usb hub function
+	
+	        //clear force_hs_mode setting
+		tmp = inl(VENUS_USB_HOST_SELF_LOOP_BACK) & ~USB_TEST_FORCE_HS_MODE(0x1) & ~USB_TEST_SIM_MODE(0x1);
+		outl(tmp, VENUS_USB_HOST_SELF_LOOP_BACK);
+	
+		//re-enable ASE PSE
+		//ehci->regs->command |= schedule_enable;
+		//enable irq
+		printk("enable irq\n");
+		mdelay(2000);
+		enable_irq(2);
+	
+		//re-enumerate bus
+		//ehci_resume (connected_ehci_hcd);
+	}
+	else
+	{
+		//cfyeh for usb phy
+		if(test_mode == 5)
+		{
+			USBPHY_SetReg_Default_31();
+
+			USBPHY_SetReg_Default_38(0);
+		}
+
+		//clean usb hub function
+		printk("clean usb hub function \n");
+		usb_hub_cleanup();//clean usb hub function
+		mdelay(10);
+
+		//force_hs_mode setting
+		//force_hs_mode = ((test_mode == 4) /*|| (test_mode == 5)*/);
+		
+		tmp = inl(VENUS_USB_HOST_SELF_LOOP_BACK) & ~USB_TEST_FORCE_HS_MODE(0x1) & ~USB_TEST_SIM_MODE(0x1);
+		if (force_hs_mode) tmp |= USB_TEST_FORCE_HS_MODE(1);
+		outl(tmp, VENUS_USB_HOST_SELF_LOOP_BACK);
+		printk("Step 0-1: set force_hs_mode (VENUS_USB_HOST_SELF_LOOP_BACK)0xb8013810 = 0x%.8x -> 0x%.8x\n",tmp,inl(VENUS_USB_HOST_SELF_LOOP_BACK));	
+
+		mdelay(10);
+
+		if (force_hs_mode){
+			////////////////////reset port////////////////////////////
+			//set port reset=1 & port enable=0
+			tmp = ehci->regs->port_status[0];
+			printk("Step 0-2: before port reset ehci regs (port status) = 0x%.8x\n",tmp);
+			tmp |= PORT_RESET;
+			tmp &= ~PORT_PE;
+			ehci->regs->port_status[0] = tmp;
+			printk("Step 0-3: reseting port ehci regs (port status) = 0x%.8x -> 0x%.8x\n",tmp,ehci->regs->port_status[0]);
+	
+			//wait 50ms
+			mdelay(50);
+			
+			//clear port reset
+			tmp = ehci->regs->port_status[0];
+			tmp &= ~PORT_RESET;
+			ehci->regs->port_status[0] = tmp;
+			//while (ehci->regs->port_status[0] & PORT_RESET);
+			printk("Step 0-4: ehci regs (port status) = 0x%.8x -> 0x%.8x\n",tmp,ehci->regs->port_status[0]);
+		}
+		
+		//step 1 test mode procedure
+		tmp = ehci->regs->command;
+		//schedule_enable = tmp & (CMD_ASE | CMD_PSE)
+		tmp &= ~(CMD_ASE | CMD_PSE);
+		ehci->regs->command = tmp;
+		printk("Step 1: ehci regs (command) = 0x%.8x -> 0x%.8x\n",tmp,ehci->regs->command);
+		
+
+		if(suspend_mux)  // UTMI_Suspend_mux = 1
+		{
+			//step 2
+			tmp = ehci->regs->port_status[0];
+			tmp |= PORT_SUSPEND;
+			ehci->regs->port_status[0] = tmp;
+			printk("Step 2: ehci regs (port status) = 0x%.8x -> 0x%.8x\n",tmp,ehci->regs->port_status[0]);
+		}
+
+				
+		//step 3
+		tmp = ehci->regs->command;
+		tmp &= ~(CMD_RUN);
+		ehci->regs->command = tmp;
+		//mdelay(4);
+		//udelay(500);
+		//while((ehci->regs->command & CMD_RUN));
+		
+		// ensure HC_Halted = 1
+		//while(!(ehci->regs->status & STS_HALT));
+		printk("Step 3: ehci regs (command) = 0x%.8x -> 0x%.8x\n",tmp,ehci->regs->command);
+
+		//for delay 2mS
+		{
+			int i;
+			for (i=0;i<3000;i++)
+			{
+				tmp = inl(VENUS_USB_EHCI_HCCAPBASE);
+			}
+		}
+				
+		if(!suspend_mux)  // UTMI_Suspend_mux = 0
+		{
+			//step 2
+			tmp = ehci->regs->port_status[0];
+			tmp |= PORT_SUSPEND;
+			ehci->regs->port_status[0] = tmp;
+			printk("Step 2: ehci regs (port status) = 0x%.8x -> 0x%.8x\n",tmp,ehci->regs->port_status[0]);
+			//delay 10ms
+			//mdelay(10);
+		}
+		
+		//step 4
+		tmp = ehci->regs->port_status[0];
+		tmp &= ~(0xf << 16);
+		tmp |= test_mode << 16;
+		ehci->regs->port_status[0] = tmp;
+		printk("Step 4: ehci regs (port status) = 0x%.8x -> 0x%.8x\n",tmp,ehci->regs->port_status[0]);
+
+
+		if (test_mode == 5){
+		
+			unsigned int volatile test_ehci = 0;
+			unsigned int volatile test_ohci = 0;
+			unsigned int volatile test_dis = 0;
+
+			//step ?? to ensure HC_Halted = 1
+			//while(!(ehci->regs->status & STS_HALT));
+/*			
+			//step 5
+			tmp = ehci->regs->command;
+			tmp |= CMD_RUN;
+			ehci->regs->command = tmp;
+			tmp = ehci->regs->command;
+			printk("Step 5: ehci regs (command) = 0x%.8x -> 0x%.8x\n",tmp,ehci->regs->command);
+*/	
+			do
+			{
+				tmp = ehci->regs->port_status[0];
+				if (test_ehci != (tmp & ~(3<<10)))
+				{
+					printk("ehci regs (port status) connect ? %s - 0x%.8x     \n",(tmp & PORT_CONNECT) ? "Yes" : "NO ", tmp);
+					test_ehci = (tmp & ~(3<<10));
+				}
+				
+				tmp = inl(VENUS_USB_OHCI_PORT_STATUS_1);
+				if (test_ohci != (tmp & ~(1)))
+				{
+					printk("ohci regs (port status) connect ? %s - 0x%.8x     \n",(tmp & 1) ? "Yes" : "NO ", tmp);
+					test_ohci = (tmp & ~(1));
+				}				
+
+				tmp = inl(VENUS_USB_HOST_USBIP_INPUT);
+				if (test_dis != (tmp & ~(1 << 26)))
+				{
+					printk("host_disc_mux ? %s - 0x%.8x     \n",(tmp & (1 << 26)) ? "Yes" : "NO ", tmp);
+					test_dis = (tmp & ~(1 << 26));
+				}				
+
+			}while((ehci->regs->port_status[0] & PORT_CONNECT)/*ehci_test_mode_flag != '0'*/);
+		}
+	}
+
+	return 0;
+}
+
+static int ehci_test_mode_write_proc(struct file *file, const char *buffer,
+				unsigned long count, void *data)
+{
+	int tmp = 0;
+	int tmp_src = 0;
+	if (count < 2) 
+		return -EFAULT;
+	
+	tmp_src = ehci_test_mode_flag - '0';
+	if (buffer && !copy_from_user(&ehci_test_mode_flag, buffer, 1)) {
+		tmp = ehci_test_mode_flag - '0';
+		if(!(tmp < 0) && (tmp <= 6))
+		{
+			if(tmp_src != tmp)
+			{	
+				if((tmp_src == 5)&&(tmp==0))
+					outl(inl(VENUS_USB_EHCI_USBCMD) & (unsigned int)~1, VENUS_USB_EHCI_USBCMD);
+				ehci_test_mode(connected_ehci_hcd, tmp); 
+			}
+		}
+		return count;
+	}
+	
+	return -EFAULT;
+}
+
+static int ehci_test_mode_read_proc(char *page, char **start, off_t off,
+				  int count, int *eof, void *data)
+{	int len = 0;
+
+	len = sprintf(page, "%c\n", ehci_test_mode_flag);
+
+      if (len <= off+count) *eof = 1;
+      *start = page + off;
+      len -= off;
+      if (len>count) len = count;
+      if (len<0) len = 0;
+      return len;
+}
+///////////////////////////////////////usb test device /////////////////
+char ehci_test_device_flag = '0';
+static int ehci_test_device_write_proc(struct file *file, const char *buffer,
+				unsigned long count, void *data)
+{
+	//int tmp = 0;
+	if (count < 2) 
+		return -EFAULT;
+	
+	if (buffer && !copy_from_user(&ehci_test_device_flag, buffer, 1)) {
+		return count;
+	}
+	
+	return -EFAULT;
+}
+
+static int ehci_test_device_read_proc(char *page, char **start, off_t off,
+				  int count, int *eof, void *data)
+{
+	int len = 0;
+	struct ehci_hcd		*ehci = hcd_to_ehci (connected_ehci_hcd);
+	unsigned int volatile tmp1;
+
+	// detect device removal
+	tmp1 = ehci->regs->port_status[0] & ~(3<<10);
+	if(PORT_CONNECT == (tmp1 & PORT_CONNECT))
+	{
+		ehci_test_device_flag = '1';
+	}
+	else
+	{
+		ehci_test_device_flag = '0';
+	}
+	
+	len = sprintf(page, "%c\n", ehci_test_device_flag);
+
+      if (len <= off+count) *eof = 1;
+      *start = page + off;
+      len -= off;
+      if (len>count) len = count;
+      if (len<0) len = 0;
+      return len;
+}
+
+
+///////////////////////////////////////usb proc template///////////////////////////////////////
+char ehci_get_desc_flag = '0';
+extern char ehci_get_desc_code;
+// ehci_get_desc_flag = 1 for the command phase
+// ehci_get_desc_flag = 2 for the data phase
+// ehci_get_desc_flag = 3 for the status phase
+static u32	test_token;
+
+static struct list_head *
+test_qh_urb_transaction (
+	struct ehci_hcd		*ehci,
+	struct urb		*urb,
+	struct list_head	*head,
+	int			flags
+)
+{
+	struct ehci_qtd		*qtd = NULL, *qtd_prev = NULL;
+	dma_addr_t		buf = 0;
+	int			len = 0, maxpacket = 0;
+	int			is_input = 0;
+
+	switch(ehci_get_desc_flag)
+	{
+	case '1':
+		/*
+		 * URBs map to sequences of QTDs:  one logical transaction
+		 */
+		qtd = ehci_qtd_alloc (ehci, flags);
+		if (unlikely (!qtd))
+			return NULL;
+		list_add_tail (&qtd->qtd_list, head);
+		qtd->urb = urb;
+	
+		test_token = QTD_STS_ACTIVE;
+		test_token |= (EHCI_TUNE_CERR << 10);
+		/* for split transactions, SplitXState initialized to zero */
+	
+		len = urb->transfer_buffer_length;
+		is_input = usb_pipein (urb->pipe);
+		if (usb_pipecontrol (urb->pipe)) {
+			/* SETUP pid */
+			qtd_fill (qtd, urb->setup_dma, sizeof (struct usb_ctrlrequest),
+				test_token | (2 /* "setup" */ << 8) | QTD_IOC, 8);
+	
+			/* ... and always at least one more pid */
+			test_token ^= QTD_TOGGLE;
+			qtd_prev = qtd;
+			qtd = ehci_qtd_alloc (ehci, flags);
+			if (unlikely (!qtd))
+				goto cleanup;
+			qtd->urb = urb;
+			qtd_prev->hw_next = EHCI_LIST_END;
+			qtd_prev->hw_alt_next = EHCI_LIST_END;
+		} 
+
+		break;
+	case '2':
+		/*
+		 * URBs map to sequences of QTDs:  one logical transaction
+		 */
+		qtd = ehci_qtd_alloc (ehci, flags);
+		if (unlikely (!qtd))
+			return NULL;
+		list_add_tail (&qtd->qtd_list, head);
+		qtd->urb = urb;
+
+		/*
+		 * data transfer stage:  buffer setup
+		 */
+		buf = urb->transfer_dma;
+		test_token |= (1 /* "in" */ << 8);
+	
+		maxpacket = max_packet_size(usb_maxpacket(urb->dev, urb->pipe, !is_input));
+	
+		/*
+		 * buffer gets wrapped in one or more qtds;
+		 * last one may be "short" (including zero len)
+		 * and may serve as a control status ack
+		 */
+		qtd_fill (qtd, buf, 18, test_token, maxpacket);
+		qtd->hw_next = EHCI_LIST_END;
+		qtd->hw_alt_next = EHCI_LIST_END;
+	
+		break;
+	case '3':
+		/*
+		 * control requests may need a terminating data "status" ack;
+		 * bulk ones may need a terminating short packet (zero length).
+		 */
+		ehci_get_desc_flag = '0';
+		{
+			int	one_more = 0;
+	
+			if (usb_pipecontrol (urb->pipe)) {
+				one_more = 1;
+				test_token ^= 0x0100;	/* "in" <--> "out"  */
+				test_token |= QTD_TOGGLE;	/* force DATA1 */
+			} else if (usb_pipebulk (urb->pipe)
+					&& (urb->transfer_flags & URB_ZERO_PACKET)
+					&& !(urb->transfer_buffer_length % maxpacket)) {
+				one_more = 1;
+			}
+			if (one_more) {
+				//qtd_prev = qtd;
+				qtd = ehci_qtd_alloc (ehci, flags);
+				if (unlikely (!qtd))
+					goto cleanup;
+				qtd->urb = urb;
+				//qtd_prev->hw_next = QTD_NEXT (qtd->qtd_dma);
+				list_add_tail (&qtd->qtd_list, head);
+	
+				/* never any data in such packets */
+				qtd_fill (qtd, 0, 0, test_token | QTD_IOC, 0);
+				qtd->hw_next = EHCI_LIST_END;
+				qtd->hw_alt_next = EHCI_LIST_END;
+			}
+		}
+		break;
+	default:
+		break;
+	}
+	/* by default, enable interrupt on urb completion */
+	if (likely (!(urb->transfer_flags & URB_NO_INTERRUPT)))
+		qtd->hw_token |= __constant_cpu_to_le32 (QTD_IOC);
+	return head;
+
+cleanup:
+	qtd_list_free (ehci, urb, head);
+	return NULL;
+}
+
+static int ehci_get_desc(struct usb_hcd *hcd)
+{
+	unsigned char * buf;
+	int size;
+	int ret;
+	int i;
+	
+	size=0x12;
+	buf = (unsigned char*)kmalloc(size, GFP_KERNEL);
+
+	if(ehci_get_desc_flag != '0')
+		ehci_get_desc_code = '1';
+	else
+		ehci_get_desc_code = '0';
+
+	ret = usb_get_descriptor(hcd->self.root_hub->children[0], USB_DT_DEVICE, 0, buf, size);
+	
+	if(ret > 0)
+	{
+		printk("<1> get device descriptor\n<1>");
+		for( i = 0; i < ret; i++)
+		{
+			printk(" %.2x", buf[i]);
+			if((i % 15) == 0 && (i != 0))
+			printk("\n<1>");
+		}
+		printk("\n");
+	}
+	
+	kfree(buf);
+
+	return ret;
+}
+
+static int ehci_get_desc_write_proc(struct file *file, const char *buffer,
+				unsigned long count, void *data)
+{
+	int tmp=0;
+      if (count < 2) 
+	    return -EFAULT;
+      
+      if (buffer && !copy_from_user(&ehci_get_desc_flag, buffer, 1)) {
+		tmp = ehci_get_desc_flag - '0';
+		if(!(tmp < 0) && (tmp <= 3))
+			ehci_get_desc(connected_ehci_hcd); 
+		//ehci_get_desc_flag = '0';
+		return count;
+	}
+      return -EFAULT;
+
+}
+
+static int ehci_get_desc_read_proc(char *page, char **start, off_t off,
+				  int count, int *eof, void *data)
+{	int len = 0;
+
+	len = sprintf(page, "%c\n", ehci_get_desc_flag);
+
+      if (len <= off+count) *eof = 1;
+      *start = page + off;
+      len -= off;
+      if (len>count) len = count;
+      if (len<0) len = 0;
+      return len;
+}
+
+#if 0//proc read write template
+
+///////////////////////////////////////usb proc template///////////////////////////////////////
+static int ehci_port_reset(struct usb_hcd *hcd)
+{
+
+	return 0;
+}
+
+static char ehci_reset_flag = '0';
+static int ehci_reset_write_proc(struct file *file, const char *buffer,
+				unsigned long count, void *data)
+{
+      if (count < 2) 
+	    return -EFAULT;
+      
+      if (buffer && !copy_from_user(&ehci_reset_flag, buffer, 1)) {
+		ehci_port_reset(connected_ehci_hcd); 
+		ehci_reset_flag = '0';
+		return count;
+	}
+      return -EFAULT;
+
+}
+
+static int ehci_reset_read_proc(char *page, char **start, off_t off,
+				  int count, int *eof, void *data)
+{	int len = 0;
+
+	len = sprintf(page, "%c\n", ehci_reset_flag);
+
+      if (len <= off+count) *eof = 1;
+      *start = page + off;
+      len -= off;
+      if (len>count) len = count;
+      if (len<0) len = 0;
+      return len;
+}
+
+#endif
+
+///////////////////////////////////////ehci_proc_test///////////////////////////////////////
+static void ehci_proc_test(struct usb_hcd *hcd)
+{
+	struct proc_dir_entry *usb_proc_test_dir = NULL;
+	struct proc_dir_entry *ent = NULL;
+	char buf[8];
+
+	connected_ehci_hcd = hcd;
+	sprintf(buf, "ehci");
+	
+	/*
+	//direct for ehci test proc
+	usb_proc_test_dir = proc_mkdir("usb_proc_test", NULL);
+	if (usb_proc_test_dir) {
+		printk("couldn't create usb_proc_test proc dir entry\n");
+	}
+	*/
+
+	ent = create_proc_entry("ehci_power_seq", 0, usb_proc_test_dir);
+	if (!ent) {
+		printk("couldn't create ehci_power_seq proc entry\n");
+	} else {
+		ent->read_proc = ehci_power_seq_read_proc;
+		ent->write_proc = ehci_power_seq_write_proc;
+		//printk("Install /proc/debug_mode\n");
+	}
+
+	ent = create_proc_entry("ehci_regs", 0, usb_proc_test_dir);
+	if (!ent) {
+		printk("couldn't create ehci_regs proc entry\n");
+	} else {
+		ent->read_proc = ehci_regs_read_proc;
+		//ent->write_proc = ehci_debug_mode_write_proc;
+		//printk("Install /proc/debug_mode\n");
+	}
+ 
+	ent = create_proc_entry("ehci_port_power", 0, usb_proc_test_dir);
+	if (!ent) {
+		printk("couldn't create ehci_port_power proc entry\n");
+	} else {
+		ent->read_proc = ehci_port_power_read_proc;
+		ent->write_proc = ehci_port_power_write_proc;
+		//printk("Install /proc/debug_mode\n");
+	}
+
+        ent = create_proc_entry("ehci_phy_swing", 0, usb_proc_test_dir);
+	if (!ent) {
+		printk("couldn't create phy_swing proc entry\n");
+	} else {
+		ent->read_proc = ehci_phy_swing_read_proc;
+		ent->write_proc = ehci_phy_swing_write_proc;
+		//printk("Install /proc/debug_mode\n");
+	}
+
+	ent = create_proc_entry("ehci_debug_mode", 0, usb_proc_test_dir);
+	if (!ent) {
+		printk("couldn't create debug_mode proc entry\n");
+	} else {
+		ent->read_proc = ehci_debug_mode_read_proc;
+		ent->write_proc = ehci_debug_mode_write_proc;
+		//printk("Install /proc/debug_mode\n");
+	}
+	
+	ent = create_proc_entry("ehci_suspend", 0, usb_proc_test_dir);
+	if (!ent) {
+		printk("couldn't create ehci_suspend proc entry\n");
+	} else {
+		ent->read_proc = ehci_suspend_read_proc;
+		ent->write_proc = ehci_suspend_write_proc;
+		//printk("Install /proc/ehci_suspend\n");
+	}
+	
+	ent = create_proc_entry("ehci_resume", 0, usb_proc_test_dir); 
+	if (!ent) {
+		printk("couldn't create ehci_resume proc entry\n");
+	} else {
+		ent->read_proc = ehci_resume_read_proc;
+		ent->write_proc = ehci_resume_write_proc;
+		//printk("Install /proc/ehci_resume\n");
+	}
+
+	ent = create_proc_entry("usb_slb_test", 0, usb_proc_test_dir); 
+	if (!ent) {
+		printk("couldn't create usb_slb_test proc entry\n");
+	} else {
+		ent->read_proc = usb_slb_read_proc;
+		ent->write_proc = usb_slb_write_proc;
+		//printk("Install /proc/usb_slb_test\n");
+	}
+///*
+	ent = create_proc_entry("ehci_port_reset", 0, usb_proc_test_dir); 
+	if (!ent) {
+		printk("couldn't create ehci_port_reset proc entry\n");
+	} else {
+		ent->read_proc = ehci_reset_read_proc;
+		ent->write_proc = ehci_reset_write_proc;
+		//printk("Install /proc/ehci_port_reset\n");
+	}
+//*/	
+	ent = create_proc_entry("ehci_get_desc", 0, usb_proc_test_dir); 
+	if (!ent) {
+		printk("couldn't create ehci_get_desc proc entry\n");
+	} else {
+		ent->read_proc = ehci_get_desc_read_proc;
+		ent->write_proc = ehci_get_desc_write_proc;
+		//printk("Install /proc/ehci_get_desc\n");
+	}
+	
+	ent = create_proc_entry("ehci_enum_bus", 0, usb_proc_test_dir); 
+	if (!ent) {
+		printk("couldn't create ehci_enum_bus proc entry\n");
+	} else {
+		ent->read_proc = ehci_enum_read_proc;
+		ent->write_proc = ehci_enum_write_proc;
+		//printk("Install /proc/ehci_enum_bus\n");
+	}
+	
+	ent = create_proc_entry("ehci_test_mode", 0, usb_proc_test_dir); 
+	if (!ent) {
+		printk("couldn't create ehci_test_mode proc entry\n");
+	} else {
+		ent->read_proc = ehci_test_mode_read_proc;
+		ent->write_proc = ehci_test_mode_write_proc;
+		//printk("Install /proc/ehci_test_mode\n");
+	}
+
+	ent = create_proc_entry("ehci_test_device", 0, usb_proc_test_dir); 
+	if (!ent) {
+		printk("couldn't create ehci_test_device proc entry\n");
+	} else {
+		ent->read_proc = ehci_test_device_read_proc;
+		ent->write_proc = ehci_test_device_write_proc;
+		//printk("Install /proc/ehci_test_device\n");
+	}
+	
+	return;
+}
+
+#else
+static void ehci_proc_test(struct usb_hcd *hcd)
+{
+	return;
+}
+#endif	// CONFIG_PROC_FS
+//cfyeh- 2005/10/05
+#endif /* CONFIG_REALTEK_VENUS_USB_TEST_MODE */	//cfyeh- 2005/11/07
+
+/*-------------------------------------------------------------------------*/
 
 /*
  * handshake - spin reading hc until handshake completes or fails
@@ -215,6 +1992,17 @@ static int ehci_reset (struct ehci_hcd *ehci)
 	ehci_to_hcd(ehci)->state = HC_STATE_HALT;
 	ehci->next_statechange = jiffies;
 	retval = handshake (&ehci->regs->command, CMD_RESET, 0, 250 * 1000);
+
+	printk("[cfyeh] %s before setting VENUS_USB_EHCI_INSNREG01 = 0x%.8x\n", __func__, inl(VENUS_USB_EHCI_INSNREG01));
+	printk("[cfyeh] %s before setting VENUS_USB_EHCI_INSNREG03 = 0x%.8x\n", __func__, inl(VENUS_USB_EHCI_INSNREG03));
+
+	//INSNREH03
+	outl(0x00000001, VENUS_USB_EHCI_INSNREG03);
+	//in/out packet size
+	outl(0x01000040, VENUS_USB_EHCI_INSNREG01);
+
+	printk("[cfyeh] %s after setting VENUS_USB_EHCI_INSNREG01 = 0x%.8x\n", __func__, inl(VENUS_USB_EHCI_INSNREG01));
+	printk("[cfyeh] %s after setting VENUS_USB_EHCI_INSNREG03 = 0x%.8x\n", __func__, inl(VENUS_USB_EHCI_INSNREG03));
 
 	if (retval)
 		return retval;
@@ -297,7 +2085,7 @@ static void ehci_watchdog (unsigned long param)
 	spin_unlock_irqrestore (&ehci->lock, flags);
 }
 
-#ifdef	CONFIG_PCI
+#ifdef	CONFIG_PCI	//cfyeh+ 2005/10/05
 
 /* EHCI 0.96 (and later) section 5.1 says how to kick BIOS/SMM/...
  * off the controller (maybe it can boot from highspeed USB disks).
@@ -369,7 +2157,9 @@ static int ehci_hc_reset (struct usb_hcd *hcd)
 {
 	struct ehci_hcd		*ehci = hcd_to_ehci (hcd);
 	u32			temp;
+#ifdef	CONFIG_PCI
 	unsigned		count = 256/4;
+#endif /* CONFIG_PCI */
 
 	spin_lock_init (&ehci->lock);
 
@@ -452,7 +2242,7 @@ static int ehci_hc_reset (struct usb_hcd *hcd)
 	if (ehci_is_TDI(ehci))
 		ehci_reset (ehci);
 #endif
-
+	
 	ehci_port_power (ehci, 0);
 
 	/* at least the Genesys GL880S needs fixup here */
@@ -499,6 +2289,10 @@ static int ehci_start (struct usb_hcd *hcd)
 	u8                      sbrn = 0;
 	int			first;
 
+#ifdef CONFIG_REALTEK_VENUS_USB_TEST_MODE	//cfyeh+ 2005/11/07
+	ehci_proc_test(hcd);	//cfyeh+ 2005/10/05
+#endif /* CONFIG_REALTEK_VENUS_USB_TEST_MODE */	//cfyeh- 2005/11/07
+	
 	/* skip some things on restart paths */
 	first = (ehci->watchdog.data == 0);
 	if (first) {
@@ -553,7 +2347,7 @@ static int ehci_start (struct usb_hcd *hcd)
 		pci_set_mwi (pdev);
 	}
 #endif
-
+	
 	/*
 	 * dedicate a qh for the async ring head, since we couldn't unlink
 	 * a 'real' qh without stopping the async schedule [4.8].  use it
@@ -657,6 +2451,13 @@ done2:
 	writel (FLAG_CF, &ehci->regs->configured_flag);
 	readl (&ehci->regs->command);	/* unblock posted write */
 
+//cfyeh+ check FRINDEX
+	temp = inl(VENUS_USB_EHCI_FRINDEX); // polling FRINDEX
+	mdelay(1);
+	if(temp == inl(VENUS_USB_EHCI_FRINDEX))  // wait until FRINDEX is going
+		printk("%s %d: EHCI FRINDEX regs error!!!!\n", __FUNCTION__, __LINE__);
+//cfyeh-
+
 	temp = HC_VERSION(readl (&ehci->caps->hc_capbase));
 	ehci_info (ehci,
 		"USB %x.%x %s, EHCI %x.%02x, driver %s\n",
@@ -744,7 +2545,7 @@ static int ehci_get_frame (struct usb_hcd *hcd)
 
 /*-------------------------------------------------------------------------*/
 
-#ifdef	CONFIG_PM
+#if     defined(CONFIG_PM) || defined(CONFIG_REALTEK_VENUS_USB) //cfyeh+ 2005/11/07
 
 /* suspend/resume, section 4.3 */
 
@@ -997,6 +2798,26 @@ static int ehci_urb_enqueue (
 
 	INIT_LIST_HEAD (&qtd_list);
 
+//#if CONFIG_REALTEK_VENUS_USB_TEST_MODE
+	//cfyeh+ : 2006/09/08
+	//add for sysfs
+	if(gUsbGetDescriptor != 0)
+	{
+		if (!hub_qh_urb_transaction (ehci, urb, &qtd_list, mem_flags))
+			return -ENOMEM;
+		return submit_async (ehci, ep, urb, &qtd_list, mem_flags);
+	}
+	//cfyeh- : 2006/09/08
+//#endif /* CONFIG_REALTEK_VENUS_USB_TEST_MODE */
+	
+#ifdef CONFIG_REALTEK_VENUS_USB_TEST_MODE	//cfyeh+ 2005/11/07
+	//cfyeh+ 2005/10/05
+	//test program for SINGLE_STEP_GET_DESCRIPTOR
+	if((ehci_get_desc_flag - '0') == 0)
+	{
+	//cfyeh- 2005/10/05
+#endif /* CONFIG_REALTEK_VENUS_USB_TEST_MODE */	//cfyeh- 2005/11/07
+	
 	switch (usb_pipetype (urb->pipe)) {
 	// case PIPE_CONTROL:
 	// case PIPE_BULK:
@@ -1016,6 +2837,18 @@ static int ehci_urb_enqueue (
 		else
 			return sitd_submit (ehci, urb, mem_flags);
 	}
+
+#ifdef CONFIG_REALTEK_VENUS_USB_TEST_MODE	//cfyeh+ 2005/11/07
+	//cfyeh+ 2005/10/05
+	}
+	else
+	{
+		if (!test_qh_urb_transaction (ehci, urb, &qtd_list, mem_flags))
+			return -ENOMEM;
+		return submit_async (ehci, ep, urb, &qtd_list, mem_flags);
+	}
+	//cfyeh- 2005/10/05
+#endif /* CONFIG_REALTEK_VENUS_USB_TEST_MODE */	//cfyeh- 2005/11/07
 }
 
 static void unlink_async (struct ehci_hcd *ehci, struct ehci_qh *qh)
@@ -1197,7 +3030,7 @@ static const struct hc_driver ehci_driver = {
 	 */
 	.reset =		ehci_hc_reset,
 	.start =		ehci_start,
-#ifdef	CONFIG_PM
+#if     defined(CONFIG_PM) || defined(CONFIG_REALTEK_VENUS_USB)	//cfyeh+ 2005/11/07
 	.suspend =		ehci_suspend,
 	.resume =		ehci_resume,
 #endif
@@ -1224,6 +3057,70 @@ static const struct hc_driver ehci_driver = {
 	.hub_resume =		ehci_hub_resume,
 };
 
+/*-------------------------------------------------------------------------*/
+#ifdef CONFIG_REALTEK_VENUS_USB	//cfyeh+ 2005/11/07
+//cfyeh+ 2005/10/05
+static int ehci_hcd_drv_probe(struct device *dev)
+{
+	return usb_hcd_rbus_probe(&ehci_driver, to_platform_device(dev));
+}
+
+static int ehci_hcd_drv_remove(struct device *dev)
+{
+	struct platform_device	*pdev = to_platform_device(dev);
+	struct usb_hcd		*hcd = dev_get_drvdata(dev);
+	//struct ehci_hcd		*ehci = hcd_to_ehci (hcd);
+
+	usb_hcd_rbus_remove(hcd, pdev);
+	/*
+	if (ohci->transceiver) {
+		(void) otg_set_host(ohci->transceiver, 0);
+		put_device(ohci->transceiver->dev);
+	}
+	*/
+	dev_set_drvdata(dev, NULL);
+
+	return 0;
+}
+
+#ifdef	CONFIG_PM
+static int ehci_hcd_drv_suspend(struct device *dev, pm_message_t state, u32 level)
+{
+	struct platform_device	*pdev = to_platform_device(dev);
+	struct usb_hcd		*hcd = dev_get_drvdata(dev);
+	//struct ehci_hcd		*ehci = hcd_to_ehci (hcd);
+
+	return usb_hcd_rbus_suspend(hcd, pdev, state, level);
+}
+
+static int ehci_hcd_drv_resume(struct device *dev, u32 level)
+{
+	struct platform_device	*pdev = to_platform_device(dev);
+	struct usb_hcd		*hcd = dev_get_drvdata(dev);
+	//struct ehci_hcd		*ehci = hcd_to_ehci (hcd);
+
+	return usb_hcd_rbus_resume(hcd, pdev, level);
+}
+#endif
+
+static struct device_driver ehci_hcd_driver = {
+	.name =		(char *) hcd_name,
+	.bus	=	&platform_bus_type,
+	//.id_table =	pci_ids,
+
+	.probe =	ehci_hcd_drv_probe,
+	.remove =	ehci_hcd_drv_remove,
+
+#ifdef	CONFIG_PM
+	.suspend =	ehci_hcd_drv_suspend,
+	.resume =	ehci_hcd_drv_resume,
+#endif
+};
+
+static struct platform_device *ehci_hcd_devs;
+
+//cfyeh- 2005/10/05
+#endif /* CONFIG_REALTEK_VENUS_USB */	//cfyeh- 2005/11/07
 /*-------------------------------------------------------------------------*/
 
 /* EHCI 1.0 doesn't require PCI */
@@ -1265,6 +3162,10 @@ MODULE_LICENSE ("GPL");
 
 static int __init init (void) 
 {
+#ifdef CONFIG_REALTEK_VENUS_USB	//cfyeh+ 2005/11/07
+	int ret;	//cfyeh+ 2005/10/05
+#endif /* CONFIG_REALTEK_VENUS_USB */	//cfyeh- 2005/11/07
+	
 	if (usb_disabled())
 		return -ENODEV;
 
@@ -1273,12 +3174,36 @@ static int __init init (void)
 		sizeof (struct ehci_qh), sizeof (struct ehci_qtd),
 		sizeof (struct ehci_itd), sizeof (struct ehci_sitd));
 
+#ifdef CONFIG_REALTEK_VENUS_USB	//cfyeh+ 2005/11/07
+	//cfyeh+ 2005/10/05
+	ehci_hcd_devs = platform_device_register_simple((char *)hcd_name,
+							      -1, NULL, 0);
+
+	if (IS_ERR(ehci_hcd_devs)) {
+		ret = PTR_ERR(ehci_hcd_devs);
+		return ret;
+	}
+
+	return driver_register (&ehci_hcd_driver);
+	//cfyeh- 2005/10/05
+#else
 	return pci_register_driver (&ehci_pci_driver);
+#endif /* CONFIG_REALTEK_VENUS_USB */	//cfyeh- 2005/11/07
 }
 module_init (init);
 
 static void __exit cleanup (void) 
 {	
+#ifdef CONFIG_REALTEK_VENUS_USB	//cfyeh+ 2005/11/07
+	//cfyeh+ 2005/10/05
+	struct platform_device *hcd_dev = ehci_hcd_devs;
+	ehci_hcd_devs = NULL;
+
+	driver_unregister (&ehci_hcd_driver);
+	platform_device_unregister(hcd_dev);
+	//cfyeh- 2005/10/05
+#else
 	pci_unregister_driver (&ehci_pci_driver);
+#endif /* CONFIG_REALTEK_VENUS_USB */	//cfyeh- 2005/11/07
 }
 module_exit (cleanup);

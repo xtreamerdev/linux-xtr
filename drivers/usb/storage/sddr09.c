@@ -703,6 +703,13 @@ sddr09_read_data(struct us_data *us,
 	unsigned int len, index, offset;
 	int result;
 
+	// Figure out the initial LBA and page
+	lba = address >> info->blockshift;
+	page = (address & info->blockmask);
+	maxlba = info->capacity >> (info->pageshift + info->blockshift);
+	if (lba >= maxlba)
+		return -EIO;
+
 	// Since we only read in one block at a time, we have to create
 	// a bounce buffer and move the data a piece at a time between the
 	// bounce buffer and the actual transfer buffer.
@@ -713,11 +720,6 @@ sddr09_read_data(struct us_data *us,
 		printk("sddr09_read_data: Out of memory\n");
 		return USB_STOR_TRANSPORT_ERROR;
 	}
-
-	// Figure out the initial LBA and page
-	lba = address >> info->blockshift;
-	page = (address & info->blockmask);
-	maxlba = info->capacity >> (info->pageshift + info->blockshift);
 
 	// This could be made much more efficient by checking for
 	// contiguous LBA's. Another exercise left to the student.
@@ -920,12 +922,19 @@ sddr09_write_data(struct us_data *us,
 		  unsigned int sectors) {
 
 	struct sddr09_card_info *info = (struct sddr09_card_info *) us->extra;
-	unsigned int lba, page, pages;
+	unsigned int lba, maxlba, page, pages;
 	unsigned int pagelen, blocklen;
 	unsigned char *blockbuffer;
 	unsigned char *buffer;
 	unsigned int len, index, offset;
 	int result;
+
+	// Figure out the initial LBA and page
+	lba = address >> info->blockshift;
+	page = (address & info->blockmask);
+	maxlba = info->capacity >> (info->pageshift + info->blockshift);
+	if (lba >= maxlba)
+		return -EIO;
 
 	// blockbuffer is used for reading in the old data, overwriting
 	// with the new data, and performing ECC calculations
@@ -953,10 +962,6 @@ sddr09_write_data(struct us_data *us,
 		return USB_STOR_TRANSPORT_ERROR;
 	}
 
-	// Figure out the initial LBA and page
-	lba = address >> info->blockshift;
-	page = (address & info->blockmask);
-
 	result = USB_STOR_TRANSPORT_GOOD;
 	index = offset = 0;
 
@@ -966,6 +971,14 @@ sddr09_write_data(struct us_data *us,
 
 		pages = min(sectors, info->blocksize - page);
 		len = (pages << info->pageshift);
+
+		/* Not overflowing capacity? */
+		if (lba >= maxlba) {
+			US_DEBUGP("Error: Requested lba %u exceeds "
+					"maximum %u\n", lba, maxlba);
+			result = -EIO;
+			break;
+		}
 
 		// Get the data from the transfer buffer
 		usb_stor_access_xfer_buf(buffer, len, us->srb,

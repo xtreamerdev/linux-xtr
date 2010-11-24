@@ -1,0 +1,49 @@
+
+menu "Uncatalogued drivers"
+	depends on REALTEK_VENUS
+
+config REALTEK_IR
+	tristate "IR Receiver Driver"
+	depends on REALTEK_VENUS
+	default m
+	help
+	  IR Receiver Character Device Driver
+config REALTEK_VFD
+	tristate "VFD Driver"
+	depends on REALTEK_VENUS
+	default m
+	help
+	  VFD Control Character Device Driver
+config REALTEK_GPIO
+	tristate "GPIO Driver"
+	depends on REALTEK_VENUS
+	default n
+	help
+	  GPIO Device Driver
+config REALTEK_I2CSLAVE
+        tristate "I2C Slave Driver"
+        depends on REALTEK_VENUS && (!I2C)
+        default n
+        help
+          I2C Slave Device Driver
+config REALTEK_GPIO_RESCUE_FOR_PC_INSTALL
+	tristate "GPIO Driver for rescue kernel to install from PC"
+	depends on REALTEK_GPIO
+	default n
+	help
+	  GPIO Device Driver for Rescue Kernel
+config REALTEK_SE
+	tristate "SE Driver"
+	depends on REALTEK_VENUS
+	default m
+	help
+	  Streaming Engine Driver
+config REALTEK_RPC
+        tristate "Use RPC to communicate with lx5280."
+        depends on REALTEK_VENUS
+        default m
+        help
+          Use RPC mechanism
+
+endmenu
+

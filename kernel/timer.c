@@ -33,6 +33,7 @@
 #include <linux/posix-timers.h>
 #include <linux/cpu.h>
 #include <linux/syscalls.h>
+#include <linux/auth.h>
 
 #include <asm/uaccess.h>
 #include <asm/unistd.h>
@@ -890,6 +891,20 @@ static void run_timer_softirq(struct softirq_action *h)
 
 	if (time_after_eq(jiffies, base->timer_jiffies))
 		__run_timers(base);
+
+#ifdef  CONFIG_REALTEK_DETECT_OCCUPY
+	if (occupy_interval != 0) {
+		if (jiffies-occupy_info.time > occupy_interval) {
+			occupy_info.time = jiffies;
+			printk("pid: %d, name: %s \n", occupy_info.task->pid, occupy_info.task->comm);
+			printk("schedule policy: %d, real: %d, s_prio: %d, d_prio: %d \n", 
+					occupy_info.task->policy,
+					occupy_info.task->rt_priority,
+					occupy_info.task->static_prio,
+					occupy_info.task->prio);
+		}
+	}
+#endif
 }
 
 /*

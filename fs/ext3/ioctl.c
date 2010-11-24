@@ -14,6 +14,13 @@
 #include <linux/time.h>
 #include <asm/uaccess.h>
 
+#ifdef EXT3_ABCOPY
+#define EXT3_INODE_PARENT              0x00000001
+#define EXT3_INODE_CHILD               0x00000002
+#define EXT3_INODE_LINK                0x00000004
+
+int ext3_debug = 0;
+#endif
 
 int ext3_ioctl (struct inode * inode, struct file * filp, unsigned int cmd,
 		unsigned long arg)
@@ -25,6 +32,24 @@ int ext3_ioctl (struct inode * inode, struct file * filp, unsigned int cmd,
 	ext3_debug ("cmd = %u, arg = %lu\n", cmd, arg);
 
 	switch (cmd) {
+#ifdef EXT3_ABCOPY
+	case EXT3_IOC_XFLAGS:
+	        flags = 0;
+		if (ei->i_flags & EXT3_RTL_PARENT) {
+		  flags |= EXT3_INODE_PARENT;
+		}
+		if (ei->i_flags & EXT3_RTL_CHILD) {
+		  flags |= EXT3_INODE_CHILD;
+		}
+		if (inode->i_nlink > 1) 
+		  flags |= EXT3_INODE_LINK;
+		return put_user(flags, (int __user *) arg);
+	case EXT3_IOC_SETDEBUG:
+		if (get_user(ext3_debug, (int __user *) arg)) 
+			return -EFAULT;
+		printk("debug is set to %d\n", ext3_debug);
+		return 1;
+#endif
 	case EXT3_IOC_GETFLAGS:
 		flags = ei->i_flags & EXT3_FL_USER_VISIBLE;
 		return put_user(flags, (int __user *) arg);

@@ -14,6 +14,7 @@
 
 static int __init ide_generic_init(void)
 {
+	printk(KERN_INFO " ide generic info: ide_generic_init\n");
 	if (ide_hwifs[0].io_ports[IDE_DATA_OFFSET])
 		ide_get_lock(NULL, NULL); /* for atari only */
 

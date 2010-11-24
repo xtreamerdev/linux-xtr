@@ -39,6 +39,10 @@
 
 #include <asm/io.h>
 
+extern int ide_debug;
+
+#include "debug.h"
+
 static int proc_ide_read_imodel
 	(char *page, char **start, off_t off, int count, int *eof, void *data)
 {
@@ -556,6 +560,8 @@ void proc_ide_create(void)
 
 void proc_ide_destroy(void)
 {
+	ideinfo("proc_ide_destroy\n");
 	remove_proc_entry("drivers", proc_ide_root);
+	ideinfo("proc_ide_destroy2\n");
 	remove_proc_entry("ide", NULL);
 }

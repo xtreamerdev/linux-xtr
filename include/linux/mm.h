@@ -162,6 +162,8 @@ extern unsigned int kobjsize(const void *objp);
 #define VM_NONLINEAR	0x00800000	/* Is non-linear (remap_file_pages) */
 #define VM_MAPPED_COPY	0x01000000	/* T if mapped copy of data (nommu mmap) */
 
+#define VM_DVR		0x80000000	/* special usage for DVR */
+
 #ifndef VM_STACK_DEFAULT_FLAGS		/* arch can override this */
 #define VM_STACK_DEFAULT_FLAGS VM_DATA_DEFAULT_FLAGS
 #endif
@@ -342,6 +344,11 @@ static inline void put_page(struct page *page)
 }
 
 #endif		/* CONFIG_HUGETLB_PAGE */
+
+static inline int is_page_cache_freeable(struct page *page)
+{
+      return page_count(page) - !!PagePrivate(page) == 2;
+}
 
 /*
  * Multiple processes may "see" the same page. E.g. for untouched
@@ -681,6 +688,7 @@ static inline pmd_t *pmd_alloc(struct mm_struct *mm, pud_t *pud, unsigned long a
 #endif
 #endif /* CONFIG_MMU */
 
+extern void drain_pcp_pages(unsigned int cpu);
 extern void free_area_init(unsigned long * zones_size);
 extern void free_area_init_node(int nid, pg_data_t *pgdat,
 	unsigned long * zones_size, unsigned long zone_start_pfn, 
@@ -856,6 +864,8 @@ int in_gate_area_no_task(unsigned long addr);
 #define in_gate_area(task, addr) ({(void)task; in_gate_area_no_task(addr);})
 #endif	/* __HAVE_ARCH_GATE_AREA */
 
+int drop_caches_sysctl_handler(struct ctl_table *, int, struct file *,
+                                        void __user *, size_t *, loff_t *);
 /* /proc/<pid>/oom_adj set to -17 protects from the oom-killer */
 #define OOM_DISABLE -17
 

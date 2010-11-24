@@ -91,6 +91,8 @@ struct us_unusual_dev {
 		/* Need delay after Command phase */		\
 	US_FLAG(NO_WP_DETECT,	0x00000200)			\
 		/* Don't check for write-protect */		\
+	US_FLAG(MAX_SECTORS_64, 0x00000400)			\
+		/* Sets max_sectors to 64 */
 
 #define US_FLAG(name, value)	US_FL_##name = value ,
 enum { US_DO_ALL_FLAGS };
@@ -117,6 +119,7 @@ enum { US_DO_ALL_FLAGS };
  */
 
 #define US_IOBUF_SIZE		64	/* Size of the DMA-mapped I/O buffer */
+#define US_SENSE_SIZE 18 /* Size of the autosense data buffer */
 
 typedef int (*trans_cmnd)(struct scsi_cmnd *, struct us_data*);
 typedef int (*trans_reset)(struct us_data*);
@@ -158,7 +161,8 @@ struct us_data {
 
 	/* SCSI interfaces */
 	struct scsi_cmnd	*srb;		 /* current srb		*/
-
+	unsigned int tag; /* current dCBWTag */
+	
 	/* thread information */
 	int			pid;		 /* control thread	 */
 
@@ -167,6 +171,7 @@ struct us_data {
 	struct usb_ctrlrequest	*cr;		 /* control requests	 */
 	struct usb_sg_request	current_sg;	 /* scatter-gather req.  */
 	unsigned char		*iobuf;		 /* I/O buffer		 */
+	unsigned char		*sensebuf;	 /* sense data buffer */
 	dma_addr_t		cr_dma;		 /* buffer DMA addresses */
 	dma_addr_t		iobuf_dma;
 
@@ -196,9 +201,5 @@ extern void fill_inquiry_response(struct us_data *us,
  * single queue element srb for write access */
 #define scsi_unlock(host)	spin_unlock_irq(host->host_lock)
 #define scsi_lock(host)		spin_lock_irq(host->host_lock)
-
-
-/* Vendor ID list for devices that require special handling */
-#define USB_VENDOR_ID_GENESYS		0x05e3	/* Genesys Logic */
 
 #endif

@@ -18,6 +18,10 @@
  */
 #define	AS_EIO		(__GFP_BITS_SHIFT + 0)	/* IO error on async write */
 #define AS_ENOSPC	(__GFP_BITS_SHIFT + 1)	/* ENOSPC on async write */
+#define AS_LIMIT_SIZE	(__GFP_BITS_SHIFT + 5)
+#define AS_CROSS_SYNC	(__GFP_BITS_SHIFT + 6)
+#define AS_FLUSH_CACHE	(__GFP_BITS_SHIFT + 7)
+#define AS_RECORD_DIRTY	(__GFP_BITS_SHIFT + 8)
 
 static inline unsigned int __nocast mapping_gfp_mask(struct address_space * mapping)
 {

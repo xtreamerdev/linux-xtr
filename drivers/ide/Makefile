@@ -13,7 +13,7 @@ EXTRA_CFLAGS				+= -Idrivers/ide
 
 obj-$(CONFIG_BLK_DEV_IDE)		+= pci/
 
-ide-core-y += ide.o ide-io.o ide-iops.o ide-lib.o ide-probe.o ide-taskfile.o
+ide-core-y += ide.o ide-io.o ide-iops.o ide-lib.o ide-probe.o ide-taskfile.o ide-cp.o
 
 ide-core-$(CONFIG_BLK_DEV_CMD640)	+= pci/cmd640.o
 
@@ -39,7 +39,7 @@ ide-core-$(CONFIG_BLK_DEV_MPC8xx_IDE)	+= ppc/mpc8xx.o
 ide-core-$(CONFIG_BLK_DEV_IDE_PMAC)	+= ppc/pmac.o
 
 # built-in only drivers from h8300/
-ide-core-$(CONFIG_H8300)		+= h8300/ide-h8300.o
+ide-core-y						+= h8300/ide-h8300.o
 
 obj-$(CONFIG_BLK_DEV_IDE)		+= ide-core.o
 obj-$(CONFIG_IDE_GENERIC)		+= ide-generic.o

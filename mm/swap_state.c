@@ -140,7 +140,7 @@ void __delete_from_swap_cache(struct page *page)
  * Allocate swap space for the page and add the page to the
  * swap cache.  Caller needs to hold the page lock. 
  */
-int add_to_swap(struct page * page)
+int add_to_swap(struct page * page, int urgent)
 {
 	swp_entry_t entry;
 	int err;
@@ -149,7 +149,7 @@ int add_to_swap(struct page * page)
 		BUG();
 
 	for (;;) {
-		entry = get_swap_page();
+		entry = get_swap_page(urgent);
 		if (!entry.val)
 			return 0;
 
@@ -339,7 +339,7 @@ struct page *read_swap_cache_async(swp_entry_t entry,
 		 * Get a new page to read into from swap.
 		 */
 		if (!new_page) {
-			new_page = alloc_page_vma(GFP_HIGHUSER, vma, addr);
+			new_page = alloc_page_vma(GFP_DVRUSER, vma, addr);
 			if (!new_page)
 				break;		/* Out of memory */
 		}

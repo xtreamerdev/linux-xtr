@@ -1,4 +1,4 @@
-EXTRA_CFLAGS := -Werror
+#EXTRA_CFLAGS := -Werror
 
 obj-$(CONFIG_OPROFILE) += oprofile.o
 
@@ -10,6 +10,7 @@ DRIVER_OBJS = $(addprefix ../../../drivers/oprofile/, \
 
 oprofile-y				:= $(DRIVER_OBJS) common.o
 
-oprofile-$(CONFIG_CPU_MIPS32_R1)		+= op_model_mipsxx.o
-oprofile-$(CONFIG_CPU_MIPS64_R1)		+= op_model_mipsxx.o
+oprofile-$(CONFIG_CPU_MIPS32)		+= op_model_mipsxx.o
+oprofile-$(CONFIG_CPU_MIPS64)		+= op_model_mipsxx.o
 oprofile-$(CONFIG_CPU_RM9000)		+= op_model_rm9000.o
+oprofile-$(CONFIG_VENUS_OPROFILE_CLOCK)	+= op_model_venus.o

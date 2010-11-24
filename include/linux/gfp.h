@@ -14,6 +14,7 @@ struct vm_area_struct;
 /* Zone modifiers in GFP_ZONEMASK (see linux/mmzone.h - low two bits) */
 #define __GFP_DMA	0x01
 #define __GFP_HIGHMEM	0x02
+#define __GFP_DVR	0x03
 
 /*
  * Action modifiers - doesn't change the zoning
@@ -39,6 +40,8 @@ struct vm_area_struct;
 #define __GFP_COMP	0x4000u	/* Add compound page metadata */
 #define __GFP_ZERO	0x8000u	/* Return zeroed page on success */
 #define __GFP_NOMEMALLOC 0x10000u /* Don't use emergency reserves */
+#define __GFP_EXHAUST	0x20000u  /* Exhaust all zone memory */
+#define __GFP_HUGEFREE	0x40000u  /* Free a chunk of memory when needed */
 
 #define __GFP_BITS_SHIFT 20	/* Room for 20 __GFP_FOO bits */
 #define __GFP_BITS_MASK ((1 << __GFP_BITS_SHIFT) - 1)
@@ -55,6 +58,8 @@ struct vm_area_struct;
 #define GFP_KERNEL	(__GFP_WAIT | __GFP_IO | __GFP_FS)
 #define GFP_USER	(__GFP_WAIT | __GFP_IO | __GFP_FS)
 #define GFP_HIGHUSER	(__GFP_WAIT | __GFP_IO | __GFP_FS | __GFP_HIGHMEM)
+#define GFP_DVRNOFS	(__GFP_WAIT | __GFP_IO | __GFP_DVR)
+#define GFP_DVRUSER	(__GFP_WAIT | __GFP_IO | __GFP_FS | __GFP_DVR)
 
 /* Flag - indicates that the buffer will be suitable for DMA.  Ignored on some
    platforms, used as appropriate on others */

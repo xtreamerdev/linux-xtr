@@ -15,14 +15,6 @@
 #include <asm/scatterlist.h>
 #include <linux/dma-mapping.h>
 #include <linux/dmapool.h>
-
-
-#ifdef CONFIG_USB_DEBUG
-	#define DEBUG
-#else
-	#undef DEBUG
-#endif
-
 #include <linux/usb.h>
 #include "hcd.h"
 
@@ -114,10 +106,12 @@ void *hcd_buffer_alloc (
 	int 			i;
 
 	/* some USB hosts just use PIO */
+#ifndef CONFIG_REALTEK_VENUS_USB        //cfyeh+ 2005/11/07
 	if (!bus->controller->dma_mask) {
 		*dma = ~(dma_addr_t) 0;
 		return kmalloc (size, mem_flags);
 	}
+#endif /* CONFIG_REALTEK_VENUS_USB */	//cfyeh- 2005/11/07
 
 	for (i = 0; i < HCD_BUFFER_POOLS; i++) {
 		if (size <= pool_max [i])
@@ -139,10 +133,12 @@ void hcd_buffer_free (
 	if (!addr)
 		return;
 
+#ifndef CONFIG_REALTEK_VENUS_USB        //cfyeh+ 2005/11/07
 	if (!bus->controller->dma_mask) {
 		kfree (addr);
 		return;
 	}
+#endif /* CONFIG_REALTEK_VENUS_USB */	//cfyeh+ 2005/11/07
 
 	for (i = 0; i < HCD_BUFFER_POOLS; i++) {
 		if (size <= pool_max [i]) {

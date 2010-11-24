@@ -91,19 +91,7 @@
 
 static void scsi_disk_release(struct kref *kref);
 
-struct scsi_disk {
-	struct scsi_driver *driver;	/* always &sd_template */
-	struct scsi_device *device;
-	struct kref	kref;
-	struct gendisk	*disk;
-	unsigned int	openers;	/* protected by BKL for now, yuck */
-	sector_t	capacity;	/* size in 512-byte sectors */
-	u32		index;
-	u8		media_present;
-	u8		write_prot;
-	unsigned	WCE : 1;	/* state of disk WCE bit */
-	unsigned	RCD : 1;	/* state of disk RCD bit, unused */
-};
+#include "sd.h"
 
 static DEFINE_IDR(sd_index_idr);
 static DEFINE_SPINLOCK(sd_index_lock);
@@ -780,8 +768,26 @@ static int sd_prepare_flush(request_queue_t *q, struct request *rq)
 
 static void sd_rescan(struct device *dev)
 {
-	struct scsi_disk *sdkp = dev_get_drvdata(dev);
-	sd_revalidate_disk(sdkp->disk);
+	/*
+	 * Bugzilla Bug 5237
+	 * scsi_eh not get released by disconnecting the device when doing rescan
+	 * http://bugzilla.kernel.org/show_bug.cgi?id=5237
+	 *
+	 * patch
+	 * http://bugzilla.kernel.org/attachment.cgi?id=6452&action=view
+	 */
+	struct scsi_disk *sdkp;
+
+	down(&sd_ref_sem);
+	sdkp = dev_get_drvdata(dev);
+	if (sdkp)
+		kref_get(&sdkp->kref);
+	up(&sd_ref_sem);
+
+	if (sdkp) {
+		sd_revalidate_disk(sdkp->disk);
+		kref_put(&sdkp->kref, scsi_disk_release);
+	}
 }
 
 
@@ -987,7 +993,7 @@ static void
 sd_spinup_disk(struct scsi_disk *sdkp, char *diskname,
 	       struct scsi_request *SRpnt, unsigned char *buffer) {
 	unsigned char cmd[10];
-	unsigned long spintime_value = 0;
+	unsigned long spintime_expire = 0;
 	int retries, spintime;
 	unsigned int the_result;
 	struct scsi_sense_hdr sshdr;
@@ -1074,12 +1080,27 @@ sd_spinup_disk(struct scsi_disk *sdkp, char *diskname,
 				scsi_wait_req(SRpnt, (void *)cmd, 
 					      (void *) buffer, 0/*512*/, 
 					      SD_TIMEOUT, SD_MAX_RETRIES);
-				spintime_value = jiffies;
+				spintime_expire = jiffies + 100 * HZ;
+				spintime = 1;
 			}
-			spintime = 1;
 			/* Wait 1 second for next try */
 			msleep(1000);
 			printk(".");
+
+			/*
+			 * Wait for USB flash devices with slow firmware.
+			 * Yes, this sense key/ASC combination shouldn't
+			 * occur here. It's characteristic of these devices.
+			 */
+			} else if (sense_valid &&
+					sshdr.sense_key == UNIT_ATTENTION &&
+					sshdr.asc == 0x28) {
+				if (!spintime) {
+					spintime_expire = jiffies + 5 * HZ;
+					spintime = 1;
+				}
+				/* Wait 1 second for next try */
+				msleep(1000);
 		} else {
 			/* we don't understand the sense code, so it's
 			 * probably pointless to loop */
@@ -1091,8 +1112,7 @@ sd_spinup_disk(struct scsi_disk *sdkp, char *diskname,
 			break;
 		}
 				
-	} while (spintime &&
-		 time_after(spintime_value + 100 * HZ, jiffies));
+	} while (spintime && time_before_eq(jiffies, spintime_expire));
 
 	if (spintime) {
 		if (scsi_status_is_good(the_result))

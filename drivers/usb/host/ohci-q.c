@@ -570,6 +570,16 @@ td_fill (struct ohci_hcd *ohci, u32 info,
 	/* HC might read the TD (or cachelines) right away ... */
 	wmb ();
 	td->ed->hwTailP = td->hwNextTD;
+	
+	/*
+	printk("@@ td 0x%.8x @@\n", td);
+	printk("   hwINFO\t0x%.8x\n", td->hwINFO);
+	printk("   hwCBP\t0x%.8x\n", td->hwCBP);
+	printk("   hwNextTD\t0x%.8x\n", td->hwNextTD);
+	printk("   hwBE \t0x%.8x\n", td->hwBE);
+	printk("   hwPSW[0]\t0x%.8x\n", td->hwPSW[0]);
+	printk("   hwPSW[1]\t0x%.8x\n", td->hwPSW[1]);
+	*/
 }
 
 /*-------------------------------------------------------------------------*/
@@ -863,6 +873,8 @@ ed_halted (struct ohci_hcd *ohci, struct td *td, int cc, struct td *rev)
 	return rev;
 }
 
+//#define USB_DEBUG_OHCI_HCCA_DATA
+
 /* replies to the request have to be on a FIFO basis so
  * we unreverse the hc-reversed done-list
  */
@@ -871,6 +883,22 @@ static struct td *dl_reverse_done_list (struct ohci_hcd *ohci)
 	u32		td_dma;
 	struct td	*td_rev = NULL;
 	struct td	*td = NULL;
+
+#ifdef USB_DEBUG_OHCI_HCCA_DATA	
+	int		i = 0;
+	unsigned int	regs = (unsigned int) ohci->hcca;
+
+	for(i=0;i<100;i++)
+	{
+		if((i%4)==0)
+			printk("0x%.8x : ", regs);
+		printk("%.8x ", readl((void __iomem *)regs));
+		regs+=4;
+		if((i%4)==3)
+			printk("\n");		
+	}
+	printk("\n");		
+#endif /* USB_DEBUG_OHCI_HCCA_DATA */
 
 	td_dma = hc32_to_cpup (ohci, &ohci->hcca->done_head);
 	ohci->hcca->done_head = 0;

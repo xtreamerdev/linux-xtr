@@ -48,6 +48,9 @@ static long ratelimit_pages = 32;
 static long total_pages;	/* The total number of pages in the machine. */
 static int dirty_exceeded;	/* Dirty mem may be over limit */
 
+extern struct address_space    *as_record_dirty;
+extern unsigned long           *vm_record_dirty;
+
 /*
  * When balance_dirty_pages decides that the caller needs to perform some
  * non-background writeback, this is how many pages it will attempt to write.
@@ -666,6 +669,11 @@ int fastcall set_page_dirty(struct page *page)
 
 	if (likely(mapping)) {
 		int (*spd)(struct page *) = mapping->a_ops->set_page_dirty;
+		if (mapping == as_record_dirty) {
+			int quo = page->index/32;
+			int mod = page->index%32;
+			vm_record_dirty[quo] |= 1 << mod;
+		}
 		if (spd)
 			return (*spd)(page);
 		return __set_page_dirty_buffers(page);

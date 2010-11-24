@@ -268,7 +268,6 @@ __do_page_cache_readahead(struct address_space *mapping, struct file *filp,
 		goto out;
 
  	end_index = ((isize - 1) >> PAGE_CACHE_SHIFT);
-
 	/*
 	 * Preallocate as many pages as we will need.
 	 */
@@ -300,7 +299,15 @@ __do_page_cache_readahead(struct address_space *mapping, struct file *filp,
 	 * will then handle the error.
 	 */
 	if (ret)
-		read_pages(mapping, filp, &page_pool, ret);
+	{
+        int iret;
+//printk(KERN_WARNING " readahead offset %li nr_to_read %li ",offset,nr_to_read);
+//printk(KERN_WARNING " ** 1 ret = %i ",ret);
+        iret=read_pages(mapping, filp, &page_pool, ret);
+        if(iret<0) // jason add for error handle 2006.12.26
+            goto out;
+//printk(KERN_WARNING " ** 2 read_pages iret = %i \n",iret);
+	}
 	BUG_ON(!list_empty(&page_pool));
 out:
 	return ret;
@@ -403,7 +410,10 @@ static int make_ahead_window(struct address_space *mapping, struct file *filp,
 {
 	int block, ret;
 
-	ra->ahead_size = get_next_ra_size(ra);
+	if (test_bit(AS_LIMIT_SIZE, &mapping->flags))
+		ra->ahead_size = 1;
+	else
+		ra->ahead_size = get_next_ra_size(ra);
 	ra->ahead_start = ra->start + ra->size;
 
 	block = force || (ra->prev_page >= ra->ahead_start);
@@ -468,7 +478,10 @@ page_cache_readahead(struct address_space *mapping, struct file_ra_state *ra,
 	 * sequential access
 	 */
 	if (sequential && ra->size == 0) {
-		ra->size = get_init_ra_size(newsize, max);
+		if (test_bit(AS_LIMIT_SIZE, &mapping->flags))
+			ra->size = 1;
+		else
+			ra->size = get_init_ra_size(newsize, max);
 		ra->start = offset;
 		if (!blockable_page_cache_readahead(mapping, filp, offset,
 							 ra->size, ra, 1))
@@ -495,6 +508,8 @@ page_cache_readahead(struct address_space *mapping, struct file_ra_state *ra,
 	 */
 	if (!sequential) {
 		ra_off(ra);
+		if (test_bit(AS_LIMIT_SIZE, &mapping->flags))
+			newsize = 1;
 		blockable_page_cache_readahead(mapping, filp, offset,
 				 newsize, ra, 1);
 		goto out;

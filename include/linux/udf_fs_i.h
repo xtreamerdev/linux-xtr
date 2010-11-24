@@ -74,5 +74,7 @@ struct udf_inode_info
 #define UDF_GETEABLOCK  _IOR('l', 0x41, void *)
 #define UDF_GETVOLIDENT _IOR('l', 0x42, void *)
 #define UDF_RELOCATE_BLOCKS _IOWR('l', 0x43, long)
+#define UDF_ABCUT	_IOW('l', 0x44, long long)
+#define UDF_ABCUT_INFO	_IO('l', 0x45)
 
 #endif /* _UDF_FS_I_H */

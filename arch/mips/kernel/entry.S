@@ -30,9 +30,64 @@
 
 	.text
 	.align	5
+#ifdef CONFIG_REALTEK_USE_FAST_INTERRUPT
+FEXPORT(fast_ret_from_irq)
+/*
+ *       LONG_L  t0, PT_STATUS(sp)               # returning to kernel mode?
+ *       andi    t0, t0, KU_USER
+ *       beqz    t0, resume_kernel
+ */
+	local_irq_disable
+        .set    noat
+        FAST_RESTORE_ALL
+        .set    at
+#endif
+
+#ifdef CONFIG_REALTEK_USE_SHADOW_REGISTERS
+FEXPORT(ret_from_irq)
+        LONG_L  t0, PT_STATUS(sp)               # returning to kernel mode?
+        andi    t0, t0, KU_USER
+        beqz    t0, resume_kernel
+
+my_resume_userspace:
+        local_irq_disable               # make sure we dont miss an
+                                        # interrupt setting need_resched
+                                        # between sampling and return
+        LONG_L  a2, TI_FLAGS($28)       # current->work
+        andi    t0, a2, _TIF_WORK_MASK  # (ignoring syscall_trace)
+        bnez    t0, my_work_pending
+        j       my_restore_all
+
+my_work_pending:
+        MY_SAVE_ON_DEMAND
+        andi    t0, a2, _TIF_NEED_RESCHED # a2 is preloaded with TI_FLAGS
+        beqz    t0, my_work_notifysig
+my_work_resched:
+        jal     schedule
+
+        local_irq_disable               # make sure need_resched and
+                                        # signals dont change between
+                                        # sampling and return
+        LONG_L  a2, TI_FLAGS($28)
+        andi    t0, a2, _TIF_WORK_MASK  # is there any work to be done
+                                        # other than syscall tracing?
+        beqz    t0, restore_all
+        andi    t0, a2, _TIF_NEED_RESCHED
+        bnez    t0, my_work_resched
+
+my_work_notifysig:                      # deal with pending signals and
+                                        # notify-resume requests
+        move    a0, sp
+        li      a1, 0
+        jal     do_notify_resume        # a2 already loaded
+        j       restore_all
+#endif
+
 FEXPORT(ret_from_exception)
 	preempt_stop
+#ifndef CONFIG_REALTEK_USE_SHADOW_REGISTERS
 FEXPORT(ret_from_irq)
+#endif
 	LONG_L	t0, PT_STATUS(sp)		# returning to kernel mode?
 	andi	t0, t0, KU_USER
 	beqz	t0, resume_kernel
@@ -83,6 +138,13 @@ FEXPORT(restore_partial)		# restore partial frame
 	RESTORE_SOME
 	RESTORE_SP_AND_RET
 	.set	at
+
+#ifdef CONFIG_REALTEK_USE_SHADOW_REGISTERS
+FEXPORT(my_restore_all)                 # restore full frame
+        .set    noat
+        MY_RESTORE_ALL
+        .set    at
+#endif
 
 work_pending:
 	andi	t0, a2, _TIF_NEED_RESCHED # a2 is preloaded with TI_FLAGS

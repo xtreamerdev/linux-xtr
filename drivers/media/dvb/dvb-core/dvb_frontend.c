@@ -431,8 +431,10 @@ static int dvb_frontend_thread(void *data)
 			update_delay(&quality, &delay, fepriv->min_delay, s & FE_HAS_LOCK);
 
 			/* we're tuned, and the lock is still good... */
-			if (s & FE_HAS_LOCK)
+			if (s & FE_HAS_LOCK){
+				delay = HZ >> 1;    /* kevin_add for speed up update speed */
 				continue;
+			}
 			else {
 				/* if we _WERE_ tuned, but now don't have a lock,
 				 * need to zigzag */
@@ -783,6 +785,17 @@ static int dvb_frontend_ioctl(struct inode *inode, struct file *file,
 			err = fe->ops->get_frontend(fe, (struct dvb_frontend_parameters*) parg);
 		}
 		break;
+    case FE_USER_CMD:
+        if (fe->ops->user_cmd){
+            struct dvb_fe_user_cmd*     p_user_cmd_arg= (struct dvb_fe_user_cmd*)parg;
+            err= fe->ops->user_cmd(fe,
+                                   p_user_cmd_arg->cmd,
+                                   p_user_cmd_arg->arg_in,
+                                   p_user_cmd_arg->n_arg_in,
+                                   p_user_cmd_arg->arg_out,
+                                   p_user_cmd_arg->n_arg_out);
+        }
+        break;
 	};
 
 	up (&fepriv->sem);
@@ -843,12 +856,34 @@ static int dvb_frontend_release(struct inode *inode, struct file *file)
 	return dvb_generic_release (inode, file);
 }
 
+static int
+dvb_frontend_mmap(
+    struct file*                file,
+    struct vm_area_struct*      vma)
+{
+#ifndef USE_USER_MEMORY
+	struct dvb_device *dvbdev = file->private_data;
+	struct dvb_frontend *fe = dvbdev->priv;
+    	int user_cmd_arg_list[2];
+
+	if (fe->ops->user_cmd){
+		user_cmd_arg_list[0]= (int)file;
+		user_cmd_arg_list[1]= (int)vma;
+		return fe->ops->user_cmd(fe, RTD2830_MMAP, user_cmd_arg_list, 2, NULL, 0);
+	}
+#endif // ifndef USE_USER_MEMORY
+	return -EPERM;
+}
+
 static struct file_operations dvb_frontend_fops = {
 	.owner		= THIS_MODULE,
 	.ioctl		= dvb_generic_ioctl,
 	.poll		= dvb_frontend_poll,
 	.open		= dvb_frontend_open,
-	.release	= dvb_frontend_release
+	.release	= dvb_frontend_release,
+	// @FIXME: Richard add this
+	// Problem: how to unmmap.
+	.mmap           = dvb_frontend_mmap,
 };
 
 int dvb_register_frontend(struct dvb_adapter* dvb,

@@ -27,8 +27,14 @@
  */
 
 /*-------------------------------------------------------------------------*/
+#ifdef CONFIG_REALTEK_VENUS_USB	//cfyeh+ 2005/11/07
+//cfyeh+ 2005/10/05
+//for usb phy 
+#include <rl5829.h>	//cfyeh
+#include <rl5829_reg.h>	//cfyeh
+#endif /* CONFIG_REALTEK_VENUS_USB */	//cfyeh- 2005/11/07
 
-#ifdef	CONFIG_PM
+#if     defined(CONFIG_PM) || defined(CONFIG_REALTEK_VENUS_USB) //cfyeh+ 2005/11/07
 
 static int ehci_hub_suspend (struct usb_hcd *hcd)
 {
@@ -161,7 +167,7 @@ static int ehci_hub_resume (struct usb_hcd *hcd)
 #define ehci_hub_suspend	NULL
 #define ehci_hub_resume		NULL
 
-#endif	/* CONFIG_PM */
+#endif	/* CONFIG_PM || CONFIG_REALTEK_VENUS_USB */
 
 /*-------------------------------------------------------------------------*/
 
@@ -295,7 +301,9 @@ ehci_hub_descriptor (
 /*-------------------------------------------------------------------------*/
 
 #define	PORT_WAKE_BITS 	(PORT_WKOC_E|PORT_WKDISC_E|PORT_WKCONN_E)
-
+#ifdef CONFIG_REALTEK_VENUS_USB_1261 //cfyeh+ for LS device 2005/12/07
+static int LS_device = 0;
+#endif /* CONFIG_REALTEK_VENUS_USB_1261 *///cfyeh- 2005/12/07
 static int ehci_hub_control (
 	struct usb_hcd	*hcd,
 	u16		typeReq,
@@ -481,6 +489,24 @@ static int ehci_hub_control (
 		dbg_port (ehci, "GetStatus", wIndex + 1, temp);
 		// we "know" this alignment is good, caller used kmalloc()...
 		*((__le32 *) buf) = cpu_to_le32 (status);
+#ifdef CONFIG_REALTEK_VENUS_USB_1261 //cfyeh+ for LS device 2005/12/07
+		if(LS_device==1)
+		{
+			LS_device=0;
+		}
+		else
+		{
+			//cfyeh+ 2005/12/07
+			//for trigger GPIO4 high
+			//writel(1<<4, 0xb801b108);
+			//for test low speed device
+			//to write 0xb8013810 bit[11:10]=00
+			writel(readl((void __iomem *)0xb8013810) & ~(u32)(0x3<<10), (void __iomem *)0xb8013810);
+			//for trigger GPIO4 low
+			//writel(0x0, 0xb801b108);
+			//cfyeh- 2005/12/07
+		}
+#endif /* CONFIG_REALTEK_VENUS_USB_1261 */   //cfyeh+ 2005/12/07
 		break;
 	case SetHubFeature:
 		switch (wValue) {
@@ -529,6 +555,18 @@ static int ehci_hub_control (
 					"port %d low speed --> companion\n",
 					wIndex + 1);
 				temp |= PORT_OWNER;
+#ifdef CONFIG_REALTEK_VENUS_USB_1261 //cfyeh+ for LS device 2005/12/07
+				LS_device = 1;
+				//cfyeh+ 2005/12/07
+				//for trigger GPIO4 high
+				//writel(1<<4, 0xb801b108);
+				//for test low speed device
+				//to write 0xb8013810 bit[11:10]=01
+				writel((readl((void __iomem *)0xb8013810) & ~(u32)(0x3<<10))| (0x1 <<10), (void __iomem *)0xb8013810);
+				//for trigger GPIO4 low
+				//writel(0x0, 0xb801b108);
+				//cfyeh- 2005/12/07
+#endif /* CONFIG_REALTEK_VENUS_USB_1261 */  //cfyeh+ 2005/12/07
 			} else {
 				ehci_vdbg (ehci, "port %d reset\n", wIndex + 1);
 				temp |= PORT_RESET;

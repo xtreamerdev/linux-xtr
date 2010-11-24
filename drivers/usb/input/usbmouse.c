@@ -88,6 +88,21 @@ static void usb_mouse_irq(struct urb *urb, struct pt_regs *regs)
 	input_report_rel(dev, REL_Y,     data[2]);
 	input_report_rel(dev, REL_WHEEL, data[3]);
 
+#ifdef CONFIG_REALTEK_VENUS_USB		//cfyeh+ 2005/11/07
+	if(data[0] & 0x01)
+		printk("<1>%s : LEFT Button\n",__FUNCTION__);
+	if(data[0] & 0x02)
+		printk("<1>%s : RIGHT Button\n",__FUNCTION__);
+	if(data[0] & 0x04)
+		printk("<1>%s : MIDDLE Button\n",__FUNCTION__);
+	if(data[0] & 0x08)
+		printk("<1>%s : SIDE Button\n",__FUNCTION__);
+	if(data[0] & 0x10)
+		printk("<1>%s : EXTRA Button\n",__FUNCTION__);
+	
+	printk("<1>%s : X = %.3d, Y = %.3d, WHEEL = %.3d\n",__FUNCTION__, data[1], data[2], data[3]);
+#endif /* CONFIG_REALTEK_VENUS_USB */	//cfyeh+ 2005/11/07
+
 	input_sync(dev);
 resubmit:
 	status = usb_submit_urb (urb, SLAB_ATOMIC);

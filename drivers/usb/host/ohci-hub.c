@@ -9,6 +9,14 @@
 
 /*-------------------------------------------------------------------------*/
 
+#ifdef CONFIG_REALTEK_VENUS_USB	//cfyeh+ 2005/11/07
+//cfyeh+ 2005/10/05
+//for usb phy 
+#include <rl5829_reg.h>
+#include <rl5829.h>
+//cfyeh- 2005/10/05
+#endif /* CONFIG_REALTEK_VENUS_USB */	//cfyeh- 2005/11/07
+
 /*
  * OHCI Root Hub ... the nonsharable stuff
  */
@@ -36,7 +44,7 @@
 
 /*-------------------------------------------------------------------------*/
 
-#if	defined(CONFIG_USB_SUSPEND) || defined(CONFIG_PM)
+#if	defined(CONFIG_USB_SUSPEND) || defined(CONFIG_PM) || defined(CONFIG_REALTEK_VENUS_USB) //cfyeh+ 2005/11/07
 
 #define OHCI_SCHED_ENABLES \
 	(OHCI_CTRL_CLE|OHCI_CTRL_BLE|OHCI_CTRL_PLE|OHCI_CTRL_IE)
@@ -50,6 +58,10 @@ static int ohci_hub_suspend (struct usb_hcd *hcd)
 	struct ohci_hcd		*ohci = hcd_to_ohci (hcd);
 	int			status = 0;
 	unsigned long		flags;
+
+#if defined(CONFIG_REALTEK_VENUS_USB_1261) || defined(CONFIG_REALTEK_VENUS_USB_1261_ECO)
+	return 0;
+#endif /* defined(CONFIG_REALTEK_VENUS_USB_1261) || defined(CONFIG_REALTEK_VENUS_USB_1261_ECO) */
 
 	spin_lock_irqsave (&ohci->lock, flags);
 
@@ -139,6 +151,13 @@ static int ohci_hub_resume (struct usb_hcd *hcd)
 	u32			temp, enables;
 	int			status = -EINPROGRESS;
 
+#if defined(CONFIG_REALTEK_VENUS_USB_1261) || defined(CONFIG_REALTEK_VENUS_USB_1261_ECO)
+	//for pulling 0xb8013800 bit6 high befor resume OHCI port 
+	writel(readl((void __iomem *)0xb8013800)| 1<<6, (void __iomem *)0xb8013800);
+	(void) ohci_init (ohci);
+	return ohci_restart (ohci);
+#endif /* defined(CONFIG_REALTEK_VENUS_USB_1261) || defined(CONFIG_REALTEK_VENUS_USB_1261_ECO) */
+
 	if (time_before (jiffies, ohci->next_statechange))
 		msleep(5);
 
@@ -158,6 +177,10 @@ static int ohci_hub_resume (struct usb_hcd *hcd)
 		}
 	} else switch (ohci->hc_control & OHCI_CTRL_HCFS) {
 	case OHCI_USB_SUSPEND:
+#ifdef CONFIG_REALTEK_VENUS_USB //cfyeh+
+		//for pulling 0xb8013800 bit6 high befor resume OHCI port 
+		writel(readl((void __iomem *)0xb8013800)| 1<<6, (void __iomem *)0xb8013800);
+#endif /* CONFIG_REALTEK_VENUS_USB */ //cfyeh-
 		ohci->hc_control &= ~(OHCI_CTRL_HCFS|OHCI_SCHED_ENABLES);
 		ohci->hc_control |= OHCI_USB_RESUME;
 		ohci_writel (ohci, ohci->hc_control, &ohci->regs->control);
@@ -294,11 +317,14 @@ static void ohci_rh_resume (void *_hcd)
 	ohci_dbg(ohci, "rh_resume ??\n");
 }
 
-#endif	/* CONFIG_USB_SUSPEND || CONFIG_PM */
+#endif	/* CONFIG_USB_SUSPEND || CONFIG_PM || CONFIG_REALTEK_VENUS_USB */
 
 /*-------------------------------------------------------------------------*/
 
 /* build "status change" packet (one or two bytes) from HC registers */
+
+// hack by cfyeh for usb suspend/resume
+extern int usb_ehci_suspend_flag;
 
 static int
 ohci_hub_status_data (struct usb_hcd *hcd, char *buf)
@@ -309,6 +335,13 @@ ohci_hub_status_data (struct usb_hcd *hcd, char *buf)
 	unsigned long	flags;
 
 	spin_lock_irqsave (&ohci->lock, flags);
+
+	// hack by cfyeh for usb suspend/resume
+	if(usb_ehci_suspend_flag == 1)
+	{
+		can_suspend = 0;
+		goto done;
+	}
 
 	/* handle autosuspended root:  finish resuming before
 	 * letting khubd or root hub timer see state changes.
@@ -363,7 +396,7 @@ ohci_hub_status_data (struct usb_hcd *hcd, char *buf)
 done:
 	spin_unlock_irqrestore (&ohci->lock, flags);
 
-#ifdef CONFIG_PM
+#if     defined(CONFIG_PM) || defined(CONFIG_REALTEK_VENUS_USB) //cfyeh+ 2005/11/07
 	/* save power by suspending idle root hubs;
 	 * INTR_RD wakes us when there's work
 	 * NOTE: if we can do this, we don't need a root hub timer!

@@ -124,6 +124,11 @@ struct bio {
 #define BIO_BOUNCED	5	/* bio is a bounce bio */
 #define BIO_USER_MAPPED 6	/* contains user pages */
 #define BIO_EOPNOTSUPP	7	/* not supported */
+
+// added by cfyeh 2007/04/24
+// for return different errno for remove scsi device
+#define BIO_SCSI_NOT_READY	8	/* SCSI device not ready */
+
 #define bio_flagged(bio, flag)	((bio)->bi_flags & (1 << (flag)))
 
 /*

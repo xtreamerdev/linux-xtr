@@ -300,6 +300,7 @@ int kobject_rename(struct kobject * kobj, char *new_name)
 void kobject_del(struct kobject * kobj)
 {
 	sysfs_remove_dir(kobj);
+	kobject_hotplug(kobj, KOBJ_REMOVE); // move to here after sysfs_remove_dir(kobj);
 	unlink(kobj);
 }
 
@@ -311,7 +312,6 @@ void kobject_del(struct kobject * kobj)
 void kobject_unregister(struct kobject * kobj)
 {
 	pr_debug("kobject %s: unregistering\n",kobject_name(kobj));
-	kobject_hotplug(kobj, KOBJ_REMOVE);
 	kobject_del(kobj);
 	kobject_put(kobj);
 }

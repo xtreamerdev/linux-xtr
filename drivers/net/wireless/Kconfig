@@ -361,5 +361,28 @@ config NET_WIRELESS
 	depends on NET_RADIO && (ISA || PCI || PPC_PMAC || PCMCIA)
 	default y
 
+comment "Wireless 802.11 USB devices support"
+	depends on NET_RADIO && USB
+config REALTEK_USB_RTL8187
+	tristate "Realtek RTL8187 chipset 802.11g support"
+	depends on NET_RADIO && INET && USB
+	select REALTEK_IEEE80211
+	---help---
+	  Say Y if you have a USB 802.11g device with Realtek RTL8187
+	  chipset.
+
+config REALTEK_IEEE80211
+	tristate
+
+config REALTEK_IEEE80211_CRYPT
+	tristate "Realtek 802.11 cryptogrophic stack"
+	depends on REALTEK_USB_RTL8187
+	select CRYPTO
+	select CRYPTO_AES
+	select CRYPTO_ARC4
+	select CRYPTO_MICHAEL_MIC
+	---help---
+	  Say Y if you want to use cryptography, like WPA and WEP.
+
 endmenu
 

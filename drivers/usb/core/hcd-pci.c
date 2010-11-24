@@ -17,13 +17,6 @@
  */
 
 #include <linux/config.h>
-
-#ifdef CONFIG_USB_DEBUG
-	#define DEBUG
-#else
-	#undef DEBUG
-#endif
-
 #include <linux/kernel.h>
 #include <linux/module.h>
 #include <linux/pci.h>
@@ -31,7 +24,6 @@
 #include <asm/irq.h>
 #include <linux/usb.h>
 #include "hcd.h"
-
 
 /* PCI-based HCs are common, but plenty of non-PCI HCs are used too */
 
@@ -42,7 +34,7 @@
 /* always called with process context; sleeping is OK */
 
 /**
- * usb_hcd_pci_probe - initialize PCI-based HCDs
+ * usb_hcd_rbus_probe - initialize PCI-based HCDs
  * @dev: USB Host Controller being probed
  * @id: pci hotplug id connecting controller to HCD framework
  * Context: !in_interrupt()
@@ -55,36 +47,34 @@
  */
 int usb_hcd_pci_probe (struct pci_dev *dev, const struct pci_device_id *id)
 {
-	struct hc_driver	*driver;
 	struct usb_hcd		*hcd;
 	int			retval;
-
+	struct hc_driver        *driver;
+	
 	if (usb_disabled())
 		return -ENODEV;
-
 	if (!id || !(driver = (struct hc_driver *) id->driver_data))
-		return -EINVAL;
+ 		return -EINVAL;
 
 	if (pci_enable_device (dev) < 0)
 		return -ENODEV;
 	dev->current_state = PCI_D0;
 	dev->dev.power.power_state = PMSG_ON;
-	
-        if (!dev->irq) {
-        	dev_err (&dev->dev,
+
+	if (!dev->irq) {
+		dev_err (&dev->dev,
 			"Found HC with no IRQ.  Check BIOS/PCI %s setup!\n",
 			pci_name(dev));
-   	        retval = -ENODEV;
+		retval = -ENODEV;
 		goto err1;
-        }
-
-	hcd = usb_create_hcd (driver, &dev->dev, pci_name(dev));
+	}
+	hcd = usb_create_hcd (driver, &dev->dev, pci_name(dev));		
 	if (!hcd) {
 		retval = -ENOMEM;
 		goto err1;
 	}
 
-	if (driver->flags & HCD_MEMORY) {	// EHCI, OHCI
+	if (driver->flags & HCD_MEMORY) {       // EHCI, OHCI
 		hcd->rsrc_start = pci_resource_start (dev, 0);
 		hcd->rsrc_len = pci_resource_len (dev, 0);
 		if (!request_mem_region (hcd->rsrc_start, hcd->rsrc_len,
@@ -99,9 +89,8 @@ int usb_hcd_pci_probe (struct pci_dev *dev, const struct pci_device_id *id)
 			retval = -EFAULT;
 			goto err3;
 		}
-
-	} else { 				// UHCI
-		int	region;
+	} else {				// UHCI
+		int     region;
 
 		for (region = 0; region < PCI_ROM_RESOURCE; region++) {
 			if (!(pci_resource_flags (dev, region) &
@@ -128,10 +117,10 @@ int usb_hcd_pci_probe (struct pci_dev *dev, const struct pci_device_id *id)
 	pci_set_master (dev);
 
 	retval = usb_add_hcd (hcd, dev->irq, SA_SHIRQ);
+	
 	if (retval != 0)
 		goto err4;
 	return retval;
-
  err4:
 	if (driver->flags & HCD_MEMORY) {
 		iounmap (hcd->regs);
@@ -153,7 +142,7 @@ EXPORT_SYMBOL (usb_hcd_pci_probe);
 /* may be called with controller, bus, and devices active */
 
 /**
- * usb_hcd_pci_remove - shutdown processing for PCI-based HCDs
+ * usb_hcd_rbus_remove - shutdown processing for PCI-based HCDs
  * @dev: USB Host Controller being removed
  * Context: !in_interrupt()
  *
@@ -165,9 +154,10 @@ EXPORT_SYMBOL (usb_hcd_pci_probe);
  */
 void usb_hcd_pci_remove (struct pci_dev *dev)
 {
-	struct usb_hcd		*hcd;
-
+	struct usb_hcd          *hcd;
+	
 	hcd = pci_get_drvdata(dev);
+
 	if (!hcd)
 		return;
 

@@ -22,35 +22,73 @@ static u32 urb_compl_count;
 void dibusb_urb_complete(struct urb *urb, struct pt_regs *ptregs)
 {
 	struct usb_dibusb *dib = urb->context;
+	int user_cmd_arg_list_in[2];
+	int user_cmd_arg_list_out[1];
 
 	deb_ts("urb complete feedcount: %d, status: %d, length: %d\n",dib->feedcount,urb->status,
-			urb->actual_length);
+			urb->actual_length);			    
 
 	urb_compl_count++;
 	if (urb_compl_count % 1000 == 0)
-		deb_info("%d urbs completed so far.\n",urb_compl_count);
+		deb_ts("%d urbs completed so far.\n",urb_compl_count);
 
-	switch (urb->status) {
-		case 0:         /* success */
+	switch (urb->status) 
+	{
+		case 0:             /* success */		    
+		    break;
 		case -ETIMEDOUT:    /* NAK */
+		    deb_ts("urb completition kill -ETIMEDOUT\n");
 			break;
 		case -ECONNRESET:   /* kill */
+		    printk("urb completition kill -ESHUTDOWN\n");
+		    return;
 		case -ENOENT:
+		    printk("urb completition kill -ENOENT\n");
+		    return;
 		case -ESHUTDOWN:
-			return;
+		    printk("urb completition kill -ESHUTDOWN\n");
+		    return;			
 		default:        /* error */
-			deb_ts("urb completition error %d.", urb->status);
+			deb_ts("urb completition error %d.\n", urb->status);            
 			break;
 	}
 
-	if (dib->feedcount > 0 && urb->actual_length > 0) {
+#if 1 // the version for rtd2830 utilizing mmap
+    if (dib->fe->ops->user_cmd)
+    {
+        if (urb->actual_length > 0)
+        {
+            user_cmd_arg_list_in[0] = (int)urb->transfer_buffer;
+            user_cmd_arg_list_in[1] = (int)urb->actual_length;            
+            user_cmd_arg_list_out[0]= (int)(&(urb->transfer_buffer));
+
+            dib->fe->ops->user_cmd(dib->fe, RTD2830_CMD_URB_IN,
+                                   user_cmd_arg_list_in, 2,
+                                   user_cmd_arg_list_out, 1);
+        }
+    }
+    else{
+        if (dib->feedcount > 0 && urb->actual_length > 0)
+            if (dib->init_state & DIBUSB_STATE_DVB)
+                dvb_dmx_swfilter(&dib->demux, (u8*) urb->transfer_buffer,urb->actual_length);
+    }
+#else // the original one
+	if (dib->feedcount > 0 && urb->actual_length > 0) 
+	{
 		if (dib->init_state & DIBUSB_STATE_DVB)
+		{
 			dvb_dmx_swfilter(&dib->demux, (u8*) urb->transfer_buffer,urb->actual_length);
+		}
 	} else 
 		deb_ts("URB dropped because of feedcount.\n");
+#endif
 
 	usb_submit_urb(urb,GFP_ATOMIC);
 }
+
+
+
+
 
 static int dibusb_ctrl_feed(struct dvb_demux_feed *dvbdmxfeed, int onoff) 
 {

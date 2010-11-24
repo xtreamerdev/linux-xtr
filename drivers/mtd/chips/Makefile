@@ -24,3 +24,4 @@ obj-$(CONFIG_MTD_RAM)		+= map_ram.o
 obj-$(CONFIG_MTD_ROM)		+= map_rom.o
 obj-$(CONFIG_MTD_SHARP)		+= sharp.o
 obj-$(CONFIG_MTD_ABSENT)	+= map_absent.o
+obj-$(CONFIG_MTD_VENUS_SFC_SST)	+= sst.o

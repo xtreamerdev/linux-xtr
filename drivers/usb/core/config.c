@@ -1,9 +1,4 @@
 #include <linux/config.h>
-
-#ifdef CONFIG_USB_DEBUG
-#define DEBUG
-#endif
-
 #include <linux/usb.h>
 #include <linux/module.h>
 #include <linux/init.h>
@@ -112,8 +107,12 @@ void usb_release_interface_cache(struct kref *ref)
 	struct usb_interface_cache *intfc = ref_to_usb_interface_cache(ref);
 	int j;
 
-	for (j = 0; j < intfc->num_altsetting; j++)
-		kfree(intfc->altsetting[j].endpoint);
+	for (j = 0; j < intfc->num_altsetting; j++) {
+		struct usb_host_interface *alt = &intfc->altsetting[j];
+
+		kfree(alt->endpoint);
+		kfree(alt->string);
+	}	
 	kfree(intfc);
 }
 
@@ -422,8 +421,6 @@ void usb_destroy_configuration(struct usb_device *dev)
 		struct usb_host_config *cf = &dev->config[c];
 
 		kfree(cf->string);
-		cf->string = NULL;
-
 		for (i = 0; i < cf->desc.bNumInterfaces; i++) {
 			if (cf->intf_cache[i])
 				kref_put(&cf->intf_cache[i]->ref, 
@@ -454,8 +451,14 @@ int usb_get_configuration(struct usb_device *dev)
 	}
 
 	if (ncfg < 1) {
+#if 0 
 		dev_err(ddev, "no configurations\n");
 		return -EINVAL;
+#else
+		
+		dev_err(ddev, "no configurations, try to get configurations [cfyeh]\n");
+		ncfg = 1;
+#endif
 	}
 
 	length = ncfg * sizeof(struct usb_host_config);
@@ -470,7 +473,11 @@ int usb_get_configuration(struct usb_device *dev)
 		goto err2;
 	memset(dev->rawdescriptors, 0, length);
 
+#ifdef USB_512B_ALIGNMENT
+	buffer = kmalloc(USB_512B_ALIGNMENT_SIZE, GFP_KERNEL);
+#else
 	buffer = kmalloc(USB_DT_CONFIG_SIZE, GFP_KERNEL);
+#endif /* USB_512B_ALIGNMENT */
 	if (!buffer)
 		goto err2;
 	desc = (struct usb_config_descriptor *)buffer;
@@ -495,7 +502,11 @@ int usb_get_configuration(struct usb_device *dev)
 		    USB_DT_CONFIG_SIZE);
 
 		/* Now that we know the length, get the whole thing */
+#ifdef USB_512B_ALIGNMENT
+		bigbuffer = kmalloc(USB_512B_ALIGNMENT_SIZE, GFP_KERNEL);
+#else
 		bigbuffer = kmalloc(length, GFP_KERNEL);
+#endif /* USB_512B_ALIGNMENT */
 		if (!bigbuffer) {
 			result = -ENOMEM;
 			goto err;

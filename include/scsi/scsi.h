@@ -9,6 +9,7 @@
 #define _SCSI_SCSI_H
 
 #include <linux/types.h>
+#include <linux/usb_setting.h> // add by cfyeh
 
 /*
  *	The maximum sg list length SCSI can cope with

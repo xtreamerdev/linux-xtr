@@ -1,0 +1,46 @@
+#ifndef __LINUX_USB_SETTING_H
+#define __LINUX_USB_SETTING_H
+
+#define USB_TO_NOTIFY_TIER
+#define USB_HACK_DISABLE_PORT_POWER
+//#define USB_TEST_TRANSFER_TIME
+#define USB_EHCI_CHECK_512B_ALIGNMENT
+//#define USB_OHCI_DEBUG_SET_WATCH_POINT
+//#define USB_HACK_TRANSPORT_ERROR
+#define USB_HACK_EHCI_WIFI_UNPLUG_HANG
+//#define USB_TEST_SCSI_READ_FORMAT_CAPACITITES
+#define USB_STORAGE_SPEEDUP_PORT_ONE
+#define USB_HACK_ON_USB_TO_IDE_ERROR
+#define USB_512B_ALIGNMENT
+//#define USB_DEVICE_RETRY_ONCE
+
+
+/************************************************
+ * other setting
+ ************************************************/
+
+#ifdef USB_STORAGE_SPEEDUP_PORT_ONE
+	#define USB_STORAGE_SPEEDUP_DEVPATH	"1.1"
+	#define USB_STORAGE_SPEEDUP_TIME	(2)
+#endif /* USB_STORAGE_SPEEDUP_PORT_ONE */
+
+#ifdef USB_HACK_ON_USB_TO_IDE_ERROR
+// hack for usb to ide, cfyeh add 2007/03/23 +
+	#define USB_HACK_DISABLE_ALL_SCSI_DEVICE
+	#define USB_HACK_SET_US_FLIDX_DISCONNECTING
+	//#undef USB_HACK_SET_US_FLIDX_DISCONNECTING
+
+	#define USB_STORAGE_DATA_ERROR_RETRY_TIMES	(3)
+	#define USB_STORAGE_BULK_RESET_RETRY_TIMES	(1)
+// hack for usb to ide, cfyeh add 2007/03/23 -
+#endif
+
+#ifdef USB_512B_ALIGNMENT
+	#define USB_512B_ALIGNMENT_SIZE		(512)
+#endif /* USB_512B_ALIGNMENT */
+
+#ifdef USB_DEVICE_RETRY_ONCE
+	#define USB_DEVICE_RETRY_DELAY_TIME	(5)
+#endif /* USB_DEVICE_RETRY_ONCE */
+
+#endif /* __LINUX_USB_SETTING_H */

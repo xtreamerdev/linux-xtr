@@ -30,6 +30,8 @@
 #include <asm/uaccess.h>
 #include <asm/io.h>
 
+#include "./h8300/ide-h8300.h"
+
 /*
  *	Conventional PIO operations for ATA devices
  */
@@ -649,15 +651,16 @@ int ide_ata66_check (ide_drive_t *drive, ide_task_t *args)
 	    (args->tfRegister[IDE_SECTOR_OFFSET] > XFER_UDMA_2) &&
 	    (args->tfRegister[IDE_FEATURE_OFFSET] == SETFEATURES_XFER)) {
 #ifndef CONFIG_IDEDMA_IVB
-		if ((drive->id->hw_config & 0x6000) == 0) {
+		// marked by Frank Ting(95/3/6)
+		//if ((drive->id->hw_config & 0x6000) == 0) {
 #else /* !CONFIG_IDEDMA_IVB */
-		if (((drive->id->hw_config & 0x2000) == 0) ||
-		    ((drive->id->hw_config & 0x4000) == 0)) {
+		//if (((drive->id->hw_config & 0x2000) == 0) ||
+		//    ((drive->id->hw_config & 0x4000) == 0)) {
 #endif /* CONFIG_IDEDMA_IVB */
-			printk("%s: Speed warnings UDMA 3/4/5 is not "
-				"functional.\n", drive->name);
-			return 1;
-		}
+		//	printk("%s: Speed warnings UDMA 3/4/5 is not "
+		//		"functional.\n", drive->name);
+		//	return 1;
+		//}
 		if (!HWIF(drive)->udma_four) {
 			printk("%s: Speed warnings UDMA 3/4/5 is not "
 				"functional.\n",
@@ -720,6 +723,9 @@ int ide_driveid_update (ide_drive_t *drive)
 {
 	ide_hwif_t *hwif	= HWIF(drive);
 	struct hd_driveid *id;
+	
+	return 1;
+	
 #if 0
 	id = kmalloc(SECTOR_WORDS*4, GFP_ATOMIC);
 	if (!id)
@@ -745,9 +751,16 @@ int ide_driveid_update (ide_drive_t *drive)
 
 	SELECT_MASK(drive, 1);
 	if (IDE_CONTROL_REG)
-		hwif->OUTB(drive->ctl,IDE_CONTROL_REG);
+		hwif->OUTB(drive->ctl | 2, IDE_CONTROL_REG);
 	msleep(50);
-	hwif->OUTB(WIN_IDENTIFY, IDE_COMMAND_REG);
+	
+	//hwif->OUTB(WIN_IDENTIFY, IDE_COMMAND_REG);
+	//modified by Frank 95/9/11
+	if (drive->media == ide_disk)
+		hwif->OUTB(WIN_IDENTIFY, IDE_COMMAND_REG);
+	else
+		hwif->OUTB(WIN_PIDENTIFY, IDE_COMMAND_REG);
+			
 	timeout = jiffies + WAIT_WORSTCASE;
 	do {
 		if (time_after(jiffies, timeout)) {
@@ -868,6 +881,12 @@ int ide_config_drive_speed (ide_drive_t *drive, u8 speed)
 			error = 0;
 			break;
 		}
+	}
+	// Added by Frank Ting 95/8/24
+	// due to BTC loader resume bug
+	if (i==10 && (OK_STAT(stat, 0, BUSY_STAT|DRQ_STAT|ERR_STAT))){
+		error=0;
+		printk("%s: conditional pass\n", drive->name);
 	}
 
 	SELECT_MASK(drive, 0);
@@ -1014,6 +1033,11 @@ static ide_startstop_t atapi_reset_pollfunc (ide_drive_t *drive)
 
 	if (OK_STAT(stat = hwif->INB(IDE_STATUS_REG), 0, BUSY_STAT)) {
 		printk("%s: ATAPI reset complete\n", drive->name);
+		// added by Frank Ting 95/12/22 to set DMA setting
+		if (hwif->resetproc != NULL) {
+			hwif->resetproc(drive);
+		}		
+		
 	} else {
 		if (time_before(jiffies, hwgroup->poll_timeout)) {
 			if (HWGROUP(drive)->handler != NULL)
@@ -1045,7 +1069,7 @@ static ide_startstop_t reset_pollfunc (ide_drive_t *drive)
 	ide_hwgroup_t *hwgroup	= HWGROUP(drive);
 	ide_hwif_t *hwif	= HWIF(drive);
 	u8 tmp;
-
+	/*
 	if (hwif->reset_poll != NULL) {
 		if (hwif->reset_poll(drive)) {
 			printk(KERN_ERR "%s: host reset_poll failure for %s.\n",
@@ -1053,7 +1077,7 @@ static ide_startstop_t reset_pollfunc (ide_drive_t *drive)
 			return ide_stopped;
 		}
 	}
-
+	*/
 	if (!OK_STAT(tmp = hwif->INB(IDE_STATUS_REG), 0, BUSY_STAT)) {
 		if (time_before(jiffies, hwgroup->poll_timeout)) {
 			if (HWGROUP(drive)->handler != NULL)
@@ -1064,9 +1088,21 @@ static ide_startstop_t reset_pollfunc (ide_drive_t *drive)
 		}
 		printk("%s: reset timed-out, status=0x%02x\n", hwif->name, tmp);
 		drive->failures++;
+		// Added by Frank(96/08/02)
+		hwgroup->polling = 0;	/* done polling */
+		return ide_stopped;
+		//************************
 	} else  {
 		printk("%s: reset: ", hwif->name);
 		if ((tmp = hwif->INB(IDE_ERROR_REG)) == 1) {
+			// Added by Frank(96/08/02)
+			if (hwif->reset_poll(drive)) {
+				printk(KERN_ERR "%s: host reset_poll failure for %s.\n",
+					hwif->name, drive->name);
+				drive->failures++;
+				hwgroup->polling = 0;
+				return ide_stopped;
+			}//************************
 			printk("success\n");
 			drive->failures = 0;
 		} else {
@@ -1165,11 +1201,14 @@ static ide_startstop_t do_reset1 (ide_drive_t *drive, int do_not_try_atapi)
 {
 	unsigned int unit;
 	unsigned long flags;
-	ide_hwif_t *hwif;
+	ide_hwif_t *hwif = HWIF(drive);
 	ide_hwgroup_t *hwgroup;
+	//Added by Frank 96/1/11
+	struct venus_state *state = hwif->hwif_data;
+	//***************************************
 	
 	spin_lock_irqsave(&ide_lock, flags);
-	hwif = HWIF(drive);
+	//hwif = HWIF(drive);
 	hwgroup = HWGROUP(drive);
 
 	/* We must not reset with running handlers */
@@ -1179,10 +1218,21 @@ static ide_startstop_t do_reset1 (ide_drive_t *drive, int do_not_try_atapi)
 	/* For an ATAPI device, first try an ATAPI SRST. */
 	if (drive->media != ide_disk && !do_not_try_atapi) {
 		pre_reset(drive);
+
 		SELECT_DRIVE(drive);
 		udelay (20);
-		hwif->OUTB(WIN_SRST, IDE_COMMAND_REG);
-		hwgroup->poll_timeout = jiffies + WAIT_WORSTCASE;
+		// Modified by Frank 96/1/11 for hardware reset
+		if (state){
+			hwif->OUTB(0x00, state->rst);
+			udelay (25);	// RESET- asserted >25us
+			hwif->OUTB(0x01, state->rst);
+		}else{
+			hwif->OUTB(WIN_SRST, IDE_COMMAND_REG);
+			
+		}
+		hwgroup->poll_timeout = jiffies + WAIT_WORSTCASE*4;
+		// *********************************************
+		
 		hwgroup->polling = 1;
 		__ide_set_handler(drive, &atapi_reset_pollfunc, HZ/20, NULL);
 		spin_unlock_irqrestore(&ide_lock, flags);
@@ -1211,30 +1261,43 @@ static ide_startstop_t do_reset1 (ide_drive_t *drive, int do_not_try_atapi)
 	 * recover from reset very quickly, saving us the first 50ms wait time.
 	 */
 	/* set SRST and nIEN */
-	hwif->OUTBSYNC(drive, drive->ctl|6,IDE_CONTROL_REG);
+	//hwif->OUTBSYNC(drive, drive->ctl|6,IDE_CONTROL_REG);
 	/* more than enough time */
+	printk("%s: ready to reset(x version)\n", drive->name);
+	if ((readl((void __iomem *) 0xb801a200)& 0xffff)!=0x1282){
+		
+		unsigned long value = readl((void __iomem *) 0xb801b034);
+		
+		if ((strcmp(drive->name, "hda")==0)||(strcmp(drive->name, "hdb")==0))
+			value|=0x01;
+		else value|=0x04;
+		writel(value, (void __iomem *) 0xb801b034);
+		udelay(100);
+	}	
+			
+	hwif->OUTB(0x00, state->rst);
 	udelay(10);
-	if (drive->quirk_list == 2) {
+	hwif->OUTB(0x01, state->rst);
+	//if (drive->quirk_list == 2) {
 		/* clear SRST and nIEN */
-		hwif->OUTBSYNC(drive, drive->ctl, IDE_CONTROL_REG);
-	} else {
+	//	hwif->OUTBSYNC(drive, drive->ctl, IDE_CONTROL_REG);
+	//} else {
 		/* clear SRST, leave nIEN */
-		hwif->OUTBSYNC(drive, drive->ctl|2, IDE_CONTROL_REG);
-	}
+	//	hwif->OUTBSYNC(drive, drive->ctl|2, IDE_CONTROL_REG);
+	//}
 	/* more than enough time */
 	udelay(10);
 	hwgroup->poll_timeout = jiffies + WAIT_WORSTCASE;
 	hwgroup->polling = 1;
 	__ide_set_handler(drive, &reset_pollfunc, HZ/20, NULL);
-
 	/*
 	 * Some weird controller like resetting themselves to a strange
 	 * state when the disks are reset this way. At least, the Winbond
 	 * 553 documentation says that
 	 */
-	if (hwif->resetproc != NULL) {
-		hwif->resetproc(drive);
-	}
+	//if (hwif->resetproc != NULL) {
+	//	hwif->resetproc(drive);
+	//}
 	
 #endif	/* OK_TO_RESET_CONTROLLER */
 
@@ -1252,6 +1315,8 @@ ide_startstop_t ide_do_reset (ide_drive_t *drive)
 }
 
 EXPORT_SYMBOL(ide_do_reset);
+
+
 
 /*
  * ide_wait_not_busy() waits for the currently selected device on the hwif

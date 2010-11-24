@@ -722,10 +722,11 @@ int ide_cmd_ioctl (ide_drive_t *drive, unsigned int cmd, unsigned long arg)
 	err = ide_wait_cmd(drive, args[0], args[1], args[2], args[3], argbuf);
 
 	if (!err && xfer_rate) {
-		/* active-retuning-calls future */
+		drive->current_speed = xfer_rate;
 		ide_set_xfer_rate(drive, xfer_rate);
 		ide_driveid_update(drive);
 	}
+
 abort:
 	if (copy_to_user((void __user *)arg, argbuf, argsize))
 		err = -EFAULT;

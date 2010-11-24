@@ -40,6 +40,73 @@
 
 /*-------------------------------------------------------------------------*/
 
+static void ehci_debug_qh(struct ehci_qh *qh)
+{
+	printk("====================================\n");
+	printk(" qh\t\t\t = %p\n", qh);
+	printk(" qh->hw_next\t\t = %p\n", qh->hw_next);
+	printk(" qh->hw_info1\t\t = %p\n", qh->hw_info1);
+	printk(" qh->hw_info2\t\t = %p\n", qh->hw_info2);
+	printk(" qh->hw_current\t\t = %p\n", qh->hw_current);
+	printk(" qh->hw_qtd_next\t = %p\n", qh->hw_qtd_next);
+	printk(" qh->hw_alt_next\t = %p\n", qh->hw_alt_next);
+	printk(" qh->hw_token\t\t = %p\n", qh->hw_token);
+	printk(" qh->hw_buf[0]\t\t = %p\n", qh->hw_buf[0]);
+	printk(" qh->hw_buf[1]\t\t = %p\n", qh->hw_buf[1]);
+	printk(" qh->hw_buf[2]\t\t = %p\n", qh->hw_buf[2]);
+	printk(" qh->hw_buf[3]\t\t = %p\n", qh->hw_buf[3]);
+	printk(" qh->hw_buf[4]\t\t = %p\n", qh->hw_buf[4]);
+	printk(" qh->hw_buf_hi[0]\t = %p\n", qh->hw_buf_hi[0]);
+	printk(" qh->hw_buf_hi[1]\t = %p\n", qh->hw_buf_hi[1]);
+	printk(" qh->hw_buf_hi[2]\t = %p\n", qh->hw_buf_hi[2]);
+	printk(" qh->hw_buf_hi[3]\t = %p\n", qh->hw_buf_hi[3]);
+	printk(" qh->hw_buf_hi[4]\t = %p\n", qh->hw_buf_hi[4]);
+	printk(" qh->qh_dma\t\t = %p\n", qh->qh_dma);
+	printk(" qh->qh_next\t\t = %p\n", qh->qh_next);
+	printk(" qh->qtd_list\t\t = %p\n", qh->qtd_list);
+	printk(" qh->dummy\t\t = %p\n", qh->dummy);
+	printk(" qh->reclaim\t\t = %p\n", qh->reclaim);
+	printk(" qh->ehci\t\t = %p\n", qh->ehci);
+	printk(" qh->kref\t\t = %p\n", qh->kref);
+	printk(" qh->stamp\t\t = %p\n", qh->stamp);
+	printk(" qh->qh_state\t\t = %p\n", qh->qh_state);
+	printk(" qh->usecs\t\t = %p\n", qh->usecs);
+	printk(" qh->gap_uf\t\t = %p\n", qh->gap_uf);
+	printk(" qh->c_usecs\t\t = %p\n", qh->c_usecs);
+	printk(" qh->period\t\t = %p\n", qh->period);
+	printk(" qh->start\t\t = %p\n", qh->start);
+	printk(" qh->dev\t\t = %p\n", qh->dev);
+	printk("====================================\n\n");
+
+	return;
+}
+
+static void ehci_debug_qtd(struct ehci_qtd *qtd)
+{
+	printk("====================================\n");
+	printk(" qtd\t\t\t = %p\n", qtd);
+	printk(" qtd->hw_next\t\t = %p\n", qtd->hw_next);
+	printk(" qtd->hw_alt_next\t = %p\n", qtd->hw_alt_next);
+	printk(" qtd->hw_token\t\t = %p\n", qtd->hw_token);
+	printk(" qtd->hw_buf[0]\t\t = %p\n", qtd->hw_buf[0]);
+	printk(" qtd->hw_buf[1]\t\t = %p\n", qtd->hw_buf[1]);
+	printk(" qtd->hw_buf[2]\t\t = %p\n", qtd->hw_buf[2]);
+	printk(" qtd->hw_buf[3]\t\t = %p\n", qtd->hw_buf[3]);
+	printk(" qtd->hw_buf[4]\t\t = %p\n", qtd->hw_buf[4]);
+	printk(" qtd->hw_buf_hi[0]\t = %p\n", qtd->hw_buf_hi[0]);
+	printk(" qtd->hw_buf_hi[1]\t = %p\n", qtd->hw_buf_hi[1]);
+	printk(" qtd->hw_buf_hi[2]\t = %p\n", qtd->hw_buf_hi[2]);
+	printk(" qtd->hw_buf_hi[3]\t = %p\n", qtd->hw_buf_hi[3]);
+	printk(" qtd->hw_buf_hi[4]\t = %p\n", qtd->hw_buf_hi[4]);
+	printk(" qtd->qtd_dma\t\t = %p\n", qtd->qtd_dma);
+	printk(" qtd->qh_list\t\t = %p\n", qtd->qtd_list);
+	printk(" qtd->urb\t\t = %p\n", qtd->urb);
+	printk(" qtd->length\t\t = %p\n", qtd->length);
+	printk("====================================\n\n");
+
+	return;
+}
+
 /* fill a qtd, returning how much of the buffer we were able to queue up */
 
 static int
@@ -77,6 +144,20 @@ qtd_fill (struct ehci_qtd *qtd, dma_addr_t buf, size_t len,
 	}
 	qtd->hw_token = cpu_to_le32 ((count << 16) | token);
 	qtd->length = count;
+
+#ifdef USB_EHCI_CHECK_512B_ALIGNMENT
+	if ((unsigned int)qtd->hw_buf[0] & (0x200 - 1))
+	{
+		// ehci qtd buffer is not 512 byte boundary
+		//printk("#### Not 512B alignment : qtd->hw_buf[0] = %p, qtd->length = %d\n", qtd->hw_buf[0], count);
+		if(count > (int)(0x400 - ((unsigned int)qtd->hw_buf[0] & (0x400 - 1))))
+		{
+			// ehci qtd hw buffer cross 1k byte boundary
+			printk("#### [cfyeh] Cross 1KB : qtd->hw_buf[0] = %p, qtd->length = %d\n", qtd->hw_buf[0], count);
+			WARN_ON(1);
+		}
+	}
+#endif /* USB_EHCI_CHECK_512B_ALIGNMENT */
 
 	return count;
 }

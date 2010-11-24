@@ -1,0 +1,24 @@
+#used for PC compilation	//For Linux PC
+
+ifneq ($(KERNELRELEASE),)
+obj-m := vcd.o
+vcd-objs := namei.o inode.o dir.o util.o rock.o export.o joliet.o cddata.o
+vcd-objs += audio.o cdxa.o daemon.o utils.o iso.o toc.o hfs.o
+
+else
+KDIR        := /lib/modules/$(shell uname -r)/build
+#KDIR        := /home/david/linux-2.6.12
+PWD         := $(shell pwd)
+
+all:
+	$(MAKE) -C $(KDIR) SUBDIRS=$(PWD) modules
+
+install:
+	$(MAKE) -C $(KDIR) SUBDIRS=$(PWD) modules_install
+endif
+
+
+clean:
+	-rm *.o *.ko .*.cmd *.mod.c
+
+

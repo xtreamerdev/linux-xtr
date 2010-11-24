@@ -51,6 +51,15 @@
 
 #include <asm/uaccess.h>
 
+// #define 	PKTW_DEBUG
+#ifdef PKTW_DEBUG
+#define pktwinfo(fmt, args...) \
+           printk(KERN_INFO "packet info: " fmt, ## args)
+#else
+#define pktwinfo(fmt, args...) 
+#endif
+
+
 #if PACKET_DEBUG
 #define DPRINTK(fmt, args...) printk(KERN_NOTICE fmt, ##args)
 #else
@@ -76,6 +85,9 @@ static mempool_t *psd_pool;
 
 static void pkt_bio_finished(struct pktcdvd_device *pd)
 {
+	
+	pktwinfo("pkt_bio_finished\n");
+
 	BUG_ON(atomic_read(&pd->cdrw.pending_bios) <= 0);
 	if (atomic_dec_and_test(&pd->cdrw.pending_bios)) {
 		VPRINTK("pktcdvd: queue empty\n");
@@ -86,6 +98,7 @@ static void pkt_bio_finished(struct pktcdvd_device *pd)
 
 static void pkt_bio_destructor(struct bio *bio)
 {
+	pktwinfo("pkt_bio_destructor\n");
 	kfree(bio->bi_io_vec);
 	kfree(bio);
 }
@@ -125,6 +138,8 @@ static struct packet_data *pkt_alloc_packet_data(void)
 	int i;
 	struct packet_data *pkt;
 
+	pktwinfo("pkt_alloc_packet_data\n");
+	
 	pkt = kmalloc(sizeof(struct packet_data), GFP_KERNEL);
 	if (!pkt)
 		goto no_pkt;
@@ -176,6 +191,7 @@ static void pkt_free_packet_data(struct packet_data *pkt)
 {
 	int i;
 
+	
 	for (i = 0; i < PACKET_MAX_SIZE; i++) {
 		struct bio *bio = pkt->r_bios[i];
 		if (bio)
@@ -191,6 +207,7 @@ static void pkt_shrink_pktlist(struct pktcdvd_device *pd)
 {
 	struct packet_data *pkt, *next;
 
+	pktwinfo("pkt_shrink_pktlist\n");
 	BUG_ON(!list_empty(&pd->cdrw.pkt_active_list));
 
 	list_for_each_entry_safe(pkt, next, &pd->cdrw.pkt_free_list, list) {
@@ -202,6 +219,7 @@ static int pkt_grow_pktlist(struct pktcdvd_device *pd, int nr_packets)
 {
 	struct packet_data *pkt;
 
+	pktwinfo("pkt_grow_pktlist\n");
 	INIT_LIST_HEAD(&pd->cdrw.pkt_free_list);
 	INIT_LIST_HEAD(&pd->cdrw.pkt_active_list);
 	spin_lock_init(&pd->cdrw.active_list_lock);
@@ -351,6 +369,8 @@ static int pkt_generic_packet(struct pktcdvd_device *pd, struct packet_command *
 	DECLARE_COMPLETION(wait);
 	int err = 0;
 
+	pktwinfo("pkt_generic_packet\n");
+	
 	q = bdev_get_queue(pd->bdev);
 
 	rq = blk_get_request(q, (cgc->data_direction == CGC_DATA_WRITE) ? WRITE : READ,
@@ -399,7 +419,6 @@ static void pkt_dump_sense(struct packet_command *cgc)
 	int i;
 	struct request_sense *sense = cgc->sense;
 
-	printk("pktcdvd:");
 	for (i = 0; i < CDROM_PACKET_SIZE; i++)
 		printk(" %02x", cgc->cmd[i]);
 	printk(" - ");
@@ -449,6 +468,7 @@ static int pkt_set_speed(struct pktcdvd_device *pd, unsigned write_speed, unsign
 	struct request_sense sense;
 	int ret;
 
+	pktwinfo("pkt_set_speed\n");
 	init_cdrom_command(&cgc, NULL, 0, CGC_DATA_NONE);
 	cgc.sense = &sense;
 	cgc.cmd[0] = GPCMD_SET_SPEED;
@@ -504,6 +524,7 @@ static void pkt_iosched_process_queue(struct pktcdvd_device *pd)
 {
 	request_queue_t *q;
 
+	pktwinfo("pkt_iosched_process_queue\n");
 	if (atomic_read(&pd->iosched.attention) == 0)
 		return;
 	atomic_set(&pd->iosched.attention, 0);
@@ -890,6 +911,7 @@ static int pkt_handle_queue(struct pktcdvd_device *pd)
 	struct pkt_rb_node *node, *first_node;
 	struct rb_node *n;
 
+	pktwinfo("pkt_handle_queue\n");
 	VPRINTK("handle_queue\n");
 
 	atomic_set(&pd->scan_queue, 0);
@@ -988,6 +1010,7 @@ static void pkt_start_write(struct pktcdvd_device *pd, struct packet_data *pkt)
 	int f;
 	int frames_write;
 
+	pktwinfo("pkt_start_write\n");
 	for (f = 0; f < pkt->frames; f++) {
 		pages[f] = pkt->pages[(f * CD_FRAMESIZE) / PAGE_SIZE];
 		offsets[f] = (f * CD_FRAMESIZE) % PAGE_SIZE;
@@ -1069,6 +1092,7 @@ static void pkt_finish_packet(struct packet_data *pkt, int uptodate)
 {
 	struct bio *bio, *next;
 
+	pktwinfo("pkt_finish_packet\n");
 	if (!uptodate)
 		pkt->cache_valid = 0;
 
@@ -1087,6 +1111,7 @@ static void pkt_run_state_machine(struct pktcdvd_device *pd, struct packet_data 
 {
 	int uptodate;
 
+	pktwinfo("pkt_run_state_machine\n");
 	VPRINTK("run_state_machine: pkt %d\n", pkt->id);
 
 	for (;;) {
@@ -1147,6 +1172,7 @@ static void pkt_handle_packets(struct pktcdvd_device *pd)
 {
 	struct packet_data *pkt, *next;
 
+	pktwinfo("pkt_handle_packets\n");
 	VPRINTK("pkt_handle_packets\n");
 
 	/*
@@ -1199,6 +1225,7 @@ static int kcdrwd(void *foobar)
 	struct packet_data *pkt;
 	long min_sleep_time, residue;
 
+	pktwinfo("kcdrwd\n");
 	set_user_nice(current, -20);
 
 	for (;;) {
@@ -1241,6 +1268,9 @@ static int kcdrwd(void *foobar)
 			}
 
 			generic_unplug_device(bdev_get_queue(pd->bdev));
+
+			// To avoid enterning sleeping mode before executing kthread_stop()
+			if (kthread_should_stop()) break;		// Added by Frank(96/01/30)
 
 			VPRINTK("kcdrwd: sleeping\n");
 			residue = schedule_timeout(min_sleep_time);
@@ -1330,6 +1360,7 @@ static int pkt_get_disc_info(struct pktcdvd_device *pd, disc_information *di)
 	struct packet_command cgc;
 	int ret;
 
+	pktwinfo("\n");
 	/* set up command and get the disc info */
 	init_cdrom_command(&cgc, di, sizeof(*di), CGC_DATA_READ);
 	cgc.cmd[0] = GPCMD_READ_DISC_INFO;
@@ -1385,6 +1416,7 @@ static int pkt_get_last_written(struct pktcdvd_device *pd, long *last_written)
 	__u32 last_track;
 	int ret = -1;
 
+	pktwinfo("pkt_get_last_written\n");
 	if ((ret = pkt_get_disc_info(pd, &di)))
 		return ret;
 
@@ -1423,6 +1455,7 @@ static int pkt_set_write_settings(struct pktcdvd_device *pd)
 	char buffer[128];
 	int ret, size;
 
+	pktwinfo("pkt_set_write_settings\n");
 	/* doesn't apply to DVD+RW or DVD-RAM */
 	if ((pd->mmc3_profile == 0x1a) || (pd->mmc3_profile == 0x12))
 		return 0;
@@ -1580,6 +1613,7 @@ static int pkt_probe_settings(struct pktcdvd_device *pd)
 	track_information ti;
 	int ret, track;
 
+	pktwinfo("pkt_probe_settings\n");
 	init_cdrom_command(&cgc, buf, sizeof(buf), CGC_DATA_READ);
 	cgc.cmd[0] = GPCMD_GET_CONFIGURATION;
 	cgc.cmd[8] = 8;
@@ -2334,6 +2368,7 @@ static int pkt_new_dev(struct pktcdvd_device *pd, dev_t dev)
 	struct proc_dir_entry *proc;
 	struct block_device *bdev;
 
+	pktwinfo("pkt_new_dev\n");
 	if (pd->pkt_dev == dev) {
 		printk("pktcdvd: Recursive setup not allowed\n");
 		return -EBUSY;
@@ -2402,6 +2437,7 @@ static int pkt_ioctl(struct inode *inode, struct file *file, unsigned int cmd, u
 {
 	struct pktcdvd_device *pd = inode->i_bdev->bd_disk->private_data;
 
+	pktwinfo("pkt_ioctl\n");
 	VPRINTK("pkt_ioctl: cmd %x, dev %d:%d\n", cmd, imajor(inode), iminor(inode));
 	BUG_ON(!pd);
 
@@ -2437,6 +2473,7 @@ static int pkt_media_changed(struct gendisk *disk)
 	struct pktcdvd_device *pd = disk->private_data;
 	struct gendisk *attached_disk;
 
+	pktwinfo("pkt_media_changed\n");
 	if (!pd)
 		return 0;
 	if (!pd->bdev)
@@ -2466,6 +2503,7 @@ static int pkt_setup_dev(struct pkt_ctrl_command *ctrl_cmd)
 	struct gendisk *disk;
 	dev_t dev = new_decode_dev(ctrl_cmd->dev);
 
+	pktwinfo("pkt_setup_dev\n");
 	for (idx = 0; idx < MAX_WRITERS; idx++)
 		if (!pkt_devs[idx])
 			break;
@@ -2534,6 +2572,8 @@ static int pkt_remove_dev(struct pkt_ctrl_command *ctrl_cmd)
 	int idx;
 	dev_t pkt_dev = new_decode_dev(ctrl_cmd->pkt_dev);
 
+	pktwinfo("pkt_remove_dev\n");
+
 	for (idx = 0; idx < MAX_WRITERS; idx++) {
 		pd = pkt_devs[idx];
 		if (pd && (pd->pkt_dev == pkt_dev))
@@ -2589,6 +2629,8 @@ static int pkt_ctl_ioctl(struct inode *inode, struct file *file, unsigned int cm
 	struct pkt_ctrl_command ctrl_cmd;
 	int ret = 0;
 
+	pktwinfo("pkt_ctl_ioctl\n");
+	
 	if (cmd != PACKET_CTRL_CMD)
 		return -ENOTTY;
 

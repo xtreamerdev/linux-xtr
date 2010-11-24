@@ -129,7 +129,7 @@ bad_area_nosemaphore:
 	if (user_mode(regs)) {
 		tsk->thread.cp0_badvaddr = address;
 		tsk->thread.error_code = write;
-#if 0
+
 		printk("do_page_fault() #2: sending SIGSEGV to %s for "
 		       "invalid %s\n%0*lx (epc == %0*lx, ra == %0*lx)\n",
 		       tsk->comm,
@@ -137,7 +137,7 @@ bad_area_nosemaphore:
 		       field, address,
 		       field, (unsigned long) regs->cp0_epc,
 		       field, (unsigned long) regs->regs[31]);
-#endif
+
 		info.si_signo = SIGSEGV;
 		info.si_errno = 0;
 		/* info.si_code has been set above */

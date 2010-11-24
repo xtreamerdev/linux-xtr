@@ -27,6 +27,7 @@ SECTIONS
   /* read-only */
   _text = .;			/* Text and read-only data */
   .text : {
+    arch/mips/kernel/head.o(.init.text)
     *(.text)
     SCHED_TEXT
     LOCK_TEXT
@@ -34,6 +35,11 @@ SECTIONS
     *(.gnu.warning)
   } =0
 
+  .sleep.text : {
+    _sleeptext = .;
+    *(.sleep.text)
+    _esleeptext = .;
+  } =0
   _etext = .;			/* End of text section */
 
   . = ALIGN(16);		/* Exception table */
@@ -56,6 +62,13 @@ SECTIONS
 
     CONSTRUCTORS
   }
+  
+  .sleepdata : {			/* Data */
+    _sleepdata = .;
+    *(.sleep.data)
+    _esleepdata = .;
+  }
+  
   _gp = . + 0x8000;
   .lit8 : { *(.lit8) }
   .lit4 : { *(.lit4) }

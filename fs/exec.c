@@ -234,7 +234,7 @@ static int copy_strings(int argc, char __user * __user * argv,
 			page = bprm->page[i];
 			new = 0;
 			if (!page) {
-				page = alloc_page(GFP_HIGHUSER);
+				page = alloc_page(GFP_DVRUSER);
 				bprm->page[i] = page;
 				if (!page) {
 					ret = -ENOMEM;
@@ -649,6 +649,7 @@ static inline int de_thread(struct task_struct *tsk)
 	}
 	sig->group_exit_task = NULL;
 	sig->notify_count = 0;
+	sig->real_timer.data = (unsigned long)current;
 	spin_unlock_irq(lock);
 
 	/*

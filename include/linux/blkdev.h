@@ -220,6 +220,11 @@ enum rq_flag_bits {
 	__REQ_BAR_PREFLUSH,	/* barrier pre-flush done */
 	__REQ_BAR_POSTFLUSH,	/* barrier post-flush */
 	__REQ_BAR_FLUSH,	/* rq is the flush request */
+
+	// added by cfyeh 2007/04/24
+	// for return different errno for remove scsi device
+	__REQ_SCSI_NOT_READY,	/* hack : for return scsi device removed errno */
+
 	__REQ_NR_BITS,		/* stops here */
 };
 
@@ -248,6 +253,10 @@ enum rq_flag_bits {
 #define REQ_BAR_PREFLUSH	(1 << __REQ_BAR_PREFLUSH)
 #define REQ_BAR_POSTFLUSH	(1 << __REQ_BAR_POSTFLUSH)
 #define REQ_BAR_FLUSH	(1 << __REQ_BAR_FLUSH)
+
+// added by cfyeh 2007/04/24
+// for return different errno for remove scsi device
+#define REQ_SCSI_NOT_READY	(1 << __REQ_SCSI_NOT_READY)
 
 /*
  * State information carried for REQ_PM_SUSPEND and REQ_PM_RESUME

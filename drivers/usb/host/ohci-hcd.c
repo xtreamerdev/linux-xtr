@@ -84,7 +84,9 @@
 
 #include <linux/module.h>
 #include <linux/moduleparam.h>
-#include <linux/pci.h>
+#ifndef CONFIG_REALTEK_VENUS_USB	//cfyeh+ 2005/11/07
+#include <linux/pci.h>	//cfyeh+ 2005/10/05
+#endif /* CONFIG_REALTEK_VENUS_USB */	//cfyeh- 2005/11/07
 #include <linux/kernel.h>
 #include <linux/delay.h>
 #include <linux/ioport.h>
@@ -108,6 +110,9 @@
 #include <asm/unaligned.h>
 #include <asm/byteorder.h>
 
+#ifdef CONFIG_REALTEK_VENUS_USB //cfyeh+ 2005/11/07
+#include <venus.h>
+#endif /* CONFIG_REALTEK_VENUS_USB */   //cfyeh- 2005/11/07
 
 #define DRIVER_VERSION "2004 Nov 08"
 #define DRIVER_AUTHOR "Roman Weissgaerber, David Brownell"
@@ -132,6 +137,303 @@
 #define	IR_DISABLE
 #endif
 
+/*-------------------------------------------------------------------------*/
+#ifdef CONFIG_REALTEK_VENUS_USB_TEST_MODE	//cfyeh+ 2005/11/07
+//cfyeh+ 2005/10/05
+#ifdef CONFIG_PROC_FS
+#include <linux/proc_fs.h>
+#include <linux/types.h>
+#include <asm/uaccess.h>
+
+///////////////////////////////////////usb ohci_regs count///////////////////////////
+//////////////
+static int ohci_regs_read_proc(char *page, char **start, off_t off,
+		int count, int *eof, void *data)
+{
+	int i;
+	u32 regs = 0xb8013400;
+	
+	for(i=0;i<22;i++)
+	{
+		if((i%4)==0)
+			printk("0x%.8x : ", regs);
+
+		printk("%.8x ", readl((void __iomem *)regs));
+		regs+=4;
+
+		if((i%4)==3)
+			printk("\n");
+	}
+
+	printk("\n");
+	regs = 0xb8013800;
+	
+	for(i=0;i<5;i++)
+	{
+		if((i%4)==0)
+			printk("0x%.8x : ", regs);
+
+		printk("%.8x ", readl((void __iomem *)regs));
+		regs+=4;
+
+		if((i%4)==3)
+			printk("\n");
+	}
+
+	printk("\n");
+	return 0;
+}
+
+///////////////////////////////////////usb ohci port power //////////////////////////
+///////////////
+static int ohci_port_power_proc(int port_power)
+{
+	outl((inl(VENUS_USB_OHCI_RH_DESC_A) & ~(1<<9)) | (1<<8), VENUS_USB_OHCI_RH_DESC_A);
+	///*
+	//for per-port power control
+	if(port_power)
+		outl(1 << 8,VENUS_USB_OHCI_PORT_STATUS_1);
+	else
+		outl(1 << 9,VENUS_USB_OHCI_PORT_STATUS_1);
+	//*/
+
+	//for global power control
+	if(port_power)
+		outl(1 << 16, VENUS_USB_OHCI_RH_STATUS);
+	else
+		outl(1 << 0, VENUS_USB_OHCI_RH_STATUS);
+	
+	return 0;
+}
+
+static int ohci_port_power_write_proc(struct file *file, const char *buffer,
+		unsigned long count, void *data)
+{
+	int tmp = 0, tmp2 = 0;
+	char tmp_buf[3];
+	if (count < 2)
+		return -EFAULT;
+	
+	if (buffer && !copy_from_user(&tmp_buf, buffer, 2)) {
+		tmp2= tmp_buf[0]-'0';
+		if((tmp2>= 0) && (tmp2 <=9))
+			tmp = tmp2;
+		tmp2= tmp_buf[1]-'0';
+		if((tmp2>= 0) && (tmp2 <=9))
+			tmp = tmp*10 + tmp2;
+		if((tmp>=0) && (tmp <=1))
+		{
+			ohci_port_power_proc(tmp);
+		}
+		return count;
+	}
+	return -EFAULT;
+}
+
+static int ohci_port_power_read_proc(char *page, char **start, off_t off,
+		int count, int *eof, void *data)
+{
+	int len = 0;
+	int tmp;
+	
+	tmp = (inl(VENUS_USB_OHCI_PORT_STATUS_1)>>8) & 1;
+	printk("ohci port power = %d\n",tmp);
+	if (len <= off+count) *eof = 1;
+	*start = page + off;
+	len -= off;
+	if (len>count) len = count;
+	if (len<0) len = 0;
+	return len;
+}
+
+#if     defined(CONFIG_PM)
+
+static char ohci_suspend_flag = '0';
+static char ohci_resume_flag = '0';
+static struct usb_hcd *connected_ohci_hcd = NULL;
+static int ohci_rbus_suspend (struct usb_hcd *hcd, pm_message_t message);
+static int ohci_rbus_resume (struct usb_hcd *hcd);	
+static int ohci_suspend_write_proc(struct file *file, const char *buffer,
+		      		unsigned long count, void *data)
+{      
+      if (count < 2) 
+	    return -EFAULT;
+      
+      if (buffer && !copy_from_user(&ohci_suspend_flag, buffer, 1)) {
+	    (void) ohci_rbus_suspend(connected_ohci_hcd,0); 
+	    ohci_suspend_flag = '1';
+	    ohci_resume_flag = '0';
+	    return count;
+      }
+      return -EFAULT;
+}
+
+static int ohci_suspend_read_proc(char *page, char **start, off_t off,
+				  int count, int *eof, void *data)
+{
+	int len;
+	
+	len = sprintf(page, "%c\n", ohci_suspend_flag);
+
+      if (len <= off+count) *eof = 1;
+      *start = page + off;
+      len -= off;
+      if (len>count) len = count;
+      if (len<0) len = 0;
+      return len;
+}
+
+static int ohci_resume_write_proc(struct file *file, const char *buffer,
+		      		unsigned long count, void *data)
+{      
+      if (count < 2) 
+	    return -EFAULT;
+      
+      if (buffer && !copy_from_user(&ohci_resume_flag, buffer, 1)) {
+	    (void) ohci_rbus_resume(connected_ohci_hcd); 
+	    ohci_suspend_flag = '0';
+	    ohci_resume_flag = '1';
+	    return count;
+      }
+      return -EFAULT;
+}
+
+static int ohci_resume_read_proc(char *page, char **start, off_t off,
+				  int count, int *eof, void *data)
+{
+	int len;
+	len = sprintf(page, "%c\n", ohci_resume_flag);
+
+      if (len <= off+count) *eof = 1;
+      *start = page + off;
+      len -= off;
+      if (len>count) len = count;
+      if (len<0) len = 0;
+      return len;
+}
+#endif    /* defined(CONFIG_PM) */
+
+///////////////////////////////////////////
+static char ohci_hcd_flag = '0';
+static int ohci_run (struct ohci_hcd *ohci);
+static void ohci_stop (struct usb_hcd *hcd);
+static int ohci_hcd_write_proc(struct file *file, const char *buffer,
+		      		unsigned long count, void *data)
+{   
+      char tmp;
+      
+      if (count < 2) 
+	    return -EFAULT;
+
+      tmp = ohci_hcd_flag;      
+      if (buffer && !copy_from_user(&ohci_hcd_flag, buffer, 1)) {
+	    if(ohci_hcd_flag != tmp)
+	    {
+		    if(ohci_hcd_flag == '0')
+		    {
+			    ohci_stop(connected_ohci_hcd);
+    			    ohci_hcd_flag = '0';
+		    }
+		    else
+		    {
+			    ohci_run((struct ohci_hcd *)(connected_ohci_hcd->hcd_priv));
+    			    ohci_hcd_flag = '1';
+		    }
+	    }
+	    return count;
+      }
+      return -EFAULT;
+}
+
+static int ohci_hcd_read_proc(char *page, char **start, off_t off,
+				  int count, int *eof, void *data)
+{
+	int len;
+	
+	len = sprintf(page, "%c\n", ohci_hcd_flag);
+
+      if (len <= off+count) *eof = 1;
+      *start = page + off;
+      len -= off;
+      if (len>count) len = count;
+      if (len<0) len = 0;
+      return len;
+}
+///////////////////////////////////////////
+//ohci proc test 
+static void ohci_proc_test(struct usb_hcd *hcd)
+{
+	struct proc_dir_entry *usb_proc_test_dir = NULL;
+	struct proc_dir_entry *ent = NULL;
+	char buf[8];
+
+	connected_ohci_hcd = hcd;
+	sprintf(buf, "ohci");
+
+	/*
+	usb_proc_test_dir = proc_mkdir("usb_proc_test", NULL);
+	if (usb_proc_test_dir) {
+		printk("couldn't create usb_proc_test proc dir entry\n");
+	}
+	*/
+	
+#if     defined(CONFIG_PM)
+	ent=create_proc_entry("ohci_suspend", 0, usb_proc_test_dir);
+	if (!ent) {
+		printk("couldn't create ohci_suspend proc entry\n");
+	} else {
+		ent->read_proc = ohci_suspend_read_proc;
+		ent->write_proc = ohci_suspend_write_proc;
+		//printk("Install /proc/ohci_suspend\n");
+	}
+	ent = create_proc_entry("ohci_resume", 0, usb_proc_test_dir); 
+	if (!ent) {
+		printk("couldn't create ohci_resume proc entry\n");
+	} else {
+		ent->read_proc = ohci_resume_read_proc;
+		ent->write_proc = ohci_resume_write_proc;
+		//printk("Install /proc/ohci_resume\n");
+	}
+#endif   /*  defined(CONFIG_PM) */
+
+        ent = create_proc_entry("ohci_regs", 0, usb_proc_test_dir);
+	if (!ent) {
+		printk("couldn't create ohci_regs proc entry\n");
+	} else {
+		ent->read_proc = ohci_regs_read_proc;
+		//ent->write_proc = ehci_debug_mode_write_proc;
+		//printk("Install /proc/debug_mode\n");
+	}
+
+	ent=create_proc_entry("ohci_hcd_control", 0, usb_proc_test_dir);
+	if (!ent) {
+		printk("couldn't create ohci_hcd_control proc entry\n");
+	} else {
+		ent->read_proc = ohci_hcd_read_proc;
+		ent->write_proc = ohci_hcd_write_proc;
+		//printk("Install /proc/ohci_hcd\n");
+	}
+	
+        ent = create_proc_entry("ohci_port_power", 0, usb_proc_test_dir);
+	if (!ent) {
+		printk("couldn't create ohci_port_power proc entry\n");
+	} else {
+		ent->read_proc = ohci_port_power_read_proc;
+		ent->write_proc = ohci_port_power_write_proc;
+		//printk("Install /proc/debug_mode\n");
+		}
+
+	return;
+}
+
+#else
+static void ohci_proc_test(struct usb_hcd *hcd)
+{
+	return;
+}
+#endif	// CONFIG_PROC_FS
+//cfyeh- 2005/10/05
+#endif /* CONFIG_REALTEK_VENUS_USB_TEST_MODE */	//cfyeh- 2005/11/07
 /*-------------------------------------------------------------------------*/
 
 static const char	hcd_name [] = "ohci_hcd";
@@ -426,6 +728,11 @@ static void ohci_usb_reset (struct ohci_hcd *ohci)
 
 /* init memory, and kick BIOS/SMM off */
 
+#ifdef USB_OHCI_DEBUG_SET_WATCH_POINT
+#include <linux/kernel.h>
+static unsigned int watch_address = 0;
+#endif /* USB_OHCI_DEBUG_SET_WATCH_POINT */
+
 static int ohci_init (struct ohci_hcd *ohci)
 {
 	int ret;
@@ -556,6 +863,15 @@ static int ohci_run (struct ohci_hcd *ohci)
 	// flush those writes
 	(void) ohci_readl (ohci, &ohci->regs->control);
 	memset (ohci->hcca, 0, sizeof (struct ohci_hcca));
+
+#ifdef USB_OHCI_DEBUG_SET_WATCH_POINT
+	if(watch_address == 0)
+	{
+		watch_address = (((unsigned int)&(ohci->hcca->done_head)));
+		set_watch_point(watch_address, WATCH_W);
+		printk("##### set watch point at %p\n", watch_address);
+	}
+#endif /* USB_OHCI_DEBUG_SET_WATCH_POINT */
 
 	/* 2msec timelimit here means no irqs/preempt */
 	spin_lock_irq (&ohci->lock);
@@ -690,6 +1006,9 @@ retry:
 
 /*-------------------------------------------------------------------------*/
 
+// hack by cfyeh for usb suspend/resume
+extern int usb_ehci_suspend_flag;
+
 /* an interrupt happens */
 
 static irqreturn_t ohci_irq (struct usb_hcd *hcd, struct pt_regs *ptregs)
@@ -697,6 +1016,12 @@ static irqreturn_t ohci_irq (struct usb_hcd *hcd, struct pt_regs *ptregs)
 	struct ohci_hcd		*ohci = hcd_to_ohci (hcd);
 	struct ohci_regs __iomem *regs = ohci->regs;
  	int			ints; 
+
+	// hack by cfyeh for usb suspend/resume
+	if(usb_ehci_suspend_flag == 1)
+	{
+		return IRQ_HANDLED;
+	}
 
 	/* we can eliminate a (slow) ohci_readl()
 	   if _only_ WDH caused this irq */
@@ -795,7 +1120,7 @@ static void ohci_stop (struct usb_hcd *hcd)
 
 /* must not be called from interrupt context */
 
-#if	defined(CONFIG_USB_SUSPEND) || defined(CONFIG_PM)
+#if	defined(CONFIG_USB_SUSPEND) || defined(CONFIG_PM) || defined(CONFIG_REALTEK_VENUS_USB) //cfyeh+ 2005/11/07
 
 static int ohci_restart (struct ohci_hcd *ohci)
 {
@@ -885,6 +1210,10 @@ MODULE_AUTHOR (DRIVER_AUTHOR);
 MODULE_DESCRIPTION (DRIVER_INFO);
 MODULE_LICENSE ("GPL");
 
+#ifdef CONFIG_REALTEK_VENUS_USB	//cfyeh+ 2005/11/07
+#include "ohci-rbus.c"
+#else
+
 #ifdef CONFIG_PCI
 #include "ohci-pci.c"
 #endif
@@ -919,3 +1248,5 @@ MODULE_LICENSE ("GPL");
 	)
 #error "missing bus glue for ohci-hcd"
 #endif
+#endif /* CONFIG_REALTEK_VENUS_USB */	//cfyeh- 2005/11/07
+

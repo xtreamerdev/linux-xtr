@@ -1035,6 +1035,10 @@ static void kbd_keycode(unsigned int keycode, int down,
 	struct tty_struct *tty;
 	int shift_final;
 
+#ifdef CONFIG_REALTEK_VENUS_USB	//cfyeh+ 2005/11/07
+	printk("%s : keycode = 0x%.2x\n", __FUNCTION__, keycode);
+#endif /* CONFIG_REALTEK_VENUS_USB */	//cfyeh- 2005/11/07
+
 	tty = vc->vc_tty;
 
 	if (tty && (!tty->driver_data)) {

@@ -60,6 +60,13 @@
 #include "scsiglue.h"
 #include "debug.h"
 
+#ifdef USB_HACK_ON_USB_TO_IDE_ERROR
+// hack for usb to ide, cfyeh add 2007/03/23 +
+static int data_error_times = 0;
+static int bulk_reset_times = 0;
+int command_abort_flag = 0; // cfyeh: 2007/03/27
+// hack for usb to ide, cfyeh add 2007/03/23 -
+#endif
 
 /***********************************************************************
  * Data transfer routines
@@ -115,19 +122,6 @@ static void usb_stor_blocking_completion(struct urb *urb, struct pt_regs *regs)
 
 	complete(urb_done_ptr);
 }
- 
-/* This is the timeout handler which will cancel an URB when its timeout
- * expires.
- */
-static void timeout_handler(unsigned long us_)
-{
-	struct us_data *us = (struct us_data *) us_;
-
-	if (test_and_clear_bit(US_FLIDX_URB_ACTIVE, &us->flags)) {
-		US_DEBUGP("Timeout -- cancelling URB\n");
-		usb_unlink_urb(us->current_urb);
-	}
-}
 
 /* This is the common part of the URB message submission code
  *
@@ -138,7 +132,7 @@ static void timeout_handler(unsigned long us_)
 static int usb_stor_msg_common(struct us_data *us, int timeout)
 {
 	struct completion urb_done;
-	struct timer_list to_timer;
+	long timeleft;
 	int status;
 
 	/* don't submit URBs during abort/disconnect processing */
@@ -182,26 +176,21 @@ static int usb_stor_msg_common(struct us_data *us, int timeout)
 		/* cancel the URB, if it hasn't been cancelled already */
 		if (test_and_clear_bit(US_FLIDX_URB_ACTIVE, &us->flags)) {
 			US_DEBUGP("-- cancelling URB\n");
-			usb_unlink_urb(us->current_urb);
+			usb_kill_urb(us->current_urb);
 		}
 	}
  
-	/* submit the timeout timer, if a timeout was requested */
-	if (timeout > 0) {
-		init_timer(&to_timer);
-		to_timer.expires = jiffies + timeout;
-		to_timer.function = timeout_handler;
-		to_timer.data = (unsigned long) us;
-		add_timer(&to_timer);
-	}
-
 	/* wait for the completion of the URB */
-	wait_for_completion(&urb_done);
+	timeleft = wait_for_completion_interruptible_timeout(
+			&urb_done, timeout ? : MAX_SCHEDULE_TIMEOUT);
+	
 	clear_bit(US_FLIDX_URB_ACTIVE, &us->flags);
- 
-	/* clean up the timeout timer */
-	if (timeout > 0)
-		del_timer_sync(&to_timer);
+
+	if (timeleft <= 0) {
+		US_DEBUGP("%s -- cancelling URB\n",
+				timeleft == 0 ? "Timeout" : "Signal");
+		usb_unlink_urb(us->current_urb);
+	}
 
 	/* return the URB status */
 	return us->current_urb->status;
@@ -266,8 +255,9 @@ int usb_stor_clear_halt(struct us_data *us, unsigned int pipe)
 		NULL, 0, 3*HZ);
 
 	/* reset the endpoint toggle */
-	usb_settoggle(us->pusb_dev, usb_pipeendpoint(pipe),
-		usb_pipeout(pipe), 0);
+	if (result >= 0)
+		usb_settoggle(us->pusb_dev, usb_pipeendpoint(pipe),
+				usb_pipeout(pipe), 0);
 
 	US_DEBUGP("%s: result = %d\n", __FUNCTION__, result);
 	return result;
@@ -517,6 +507,22 @@ int usb_stor_bulk_transfer_sg(struct us_data* us, unsigned int pipe,
 	return result;
 }
 
+#ifdef USB_HACK_DISABLE_ALL_SCSI_DEVICE
+// set all scsi_devices SDEV_OFFLINE w/ the same hostchannel:id
+void usb_set_scsi_sibings_device_offline(struct us_data *us)
+{
+	struct scsi_device *sdev;
+
+	list_for_each_entry(sdev, &us_to_host(us)->__devices, siblings) {
+		if (sdev->channel == us->srb->device->channel &&
+				sdev->id == us->srb->device->id)
+			printk("#### [cfyeh-debug] set SDEV_OFFLINE to host %d channel %d id %d lun %d\n", us_to_host(us)->host_no, sdev->channel, sdev->id, sdev->lun);
+			scsi_device_set_state(sdev, SDEV_OFFLINE);
+	}
+	return;
+}
+#endif /* USB_HACK_DISABLE_ALL_SCSI_DEVICE */
+
 /***********************************************************************
  * Transport routines
  ***********************************************************************/
@@ -531,9 +537,36 @@ void usb_stor_invoke_transport(struct scsi_cmnd *srb, struct us_data *us)
 	int need_auto_sense;
 	int result;
 
+#ifdef USB_TEST_TRANSFER_TIME
+	struct timeval time1, time2;
+        int usec,sec;
+
+        do_gettimeofday(&time1);
+#endif
+
 	/* send the command to the transport layer */
 	srb->resid = 0;
 	result = us->transport(srb, us);
+
+#ifdef USB_TEST_TRANSFER_TIME
+        do_gettimeofday(&time2);
+
+	if (result == USB_STOR_TRANSPORT_GOOD)
+	{
+		sec = time2.tv_sec - time1.tv_sec;
+		usec = time2.tv_usec - time1.tv_usec;
+
+		if(usec < 0)
+		{
+		      sec--;
+		      usec+=1000000;
+		}
+
+		printk("%s, size %d, %.2d sec %.6d usec\n",
+				srb->sc_data_direction == DMA_FROM_DEVICE ? "READ " : "WRITE",
+				srb->request_bufflen, sec, usec);
+	}
+#endif
 
 	/* if the command gets aborted by the higher layers, we need to
 	 * short-circuit all other processing
@@ -546,7 +579,16 @@ void usb_stor_invoke_transport(struct scsi_cmnd *srb, struct us_data *us)
 	/* if there is a transport error, reset and don't auto-sense */
 	if (result == USB_STOR_TRANSPORT_ERROR) {
 		US_DEBUGP("-- transport indicates error, resetting\n");
+		// 2007/04/19 cfyeh ++ : disable us->transport_reset(us) to hack some usb hdd w/o enough power supply
+#ifdef USB_HACK_TRANSPORT_ERROR
+		printk("@@@@@@ [cfyeh] %s(%d) hack : transport indicates error, Not to call reset function() !!!\n", __func__, __LINE__);
+#ifdef USB_HACK_DISABLE_ALL_SCSI_DEVICE
+		usb_set_scsi_sibings_device_offline(us);
+#endif /* USB_HACK_DISABLE_ALL_SCSI_DEVICE */
+#else
 		us->transport_reset(us);
+#endif
+		// 2007/04/19 cfyeh --
 		srb->result = DID_ERROR << 16;
 		return;
 	}
@@ -599,6 +641,13 @@ void usb_stor_invoke_transport(struct scsi_cmnd *srb, struct us_data *us)
 	      (srb->cmnd[0] == LOG_SENSE) ||
 	      (srb->cmnd[0] == MODE_SENSE_10))) {
 		US_DEBUGP("-- unexpectedly short transfer\n");
+#if 1 // hack by cfyeh for netac u208 512M
+		if(srb->result == SAM_STAT_GOOD) {
+			//US_DEBUGP("-- hack by cfyeh for netac u208 512M\n");
+			//printk(KERN_EMERG "@@@@@ [cfyeh] hack for netac u208 512M, srb->cmnd[0] = 0x%x,  %s(%d)\n", srb->cmnd[0], __func__, __LINE__);
+			srb->resid = 0;
+		}
+#endif // hack by cfyeh for netac u208 512M
 	}
 
 	/* Now, if we need to do the auto-sense, let's do it */
@@ -610,10 +659,42 @@ void usb_stor_invoke_transport(struct scsi_cmnd *srb, struct us_data *us)
 		unsigned char old_sc_data_direction;
 		unsigned char old_cmd_len;
 		unsigned char old_cmnd[MAX_COMMAND_SIZE];
-		unsigned long old_serial_number;
 		int old_resid;
 
 		US_DEBUGP("Issuing auto-REQUEST_SENSE\n");
+		
+#ifdef USB_HACK_ON_USB_TO_IDE_ERROR
+		// hack for usb to ide, cfyeh add 2007/03/23 +
+		if(command_abort_flag == 1) // cfyeh: 2007/03/27
+		{
+			bulk_reset_times = 0;
+			data_error_times++;
+			printk("@@@@@@ [cfyeh] %s(%d) data_error_times = %d\n",
+				       __func__, __LINE__, data_error_times);
+			if (data_error_times == USB_STORAGE_DATA_ERROR_RETRY_TIMES)
+			{
+				data_error_times = 0;
+#ifdef USB_HACK_DISABLE_ALL_SCSI_DEVICE
+				usb_set_scsi_sibings_device_offline(us);
+				goto out_of_if;
+#endif /* USB_HACK_DISABLE_ALL_SCSI_DEVICE */
+
+#ifdef USB_HACK_SET_US_FLIDX_DISCONNECTING 
+				printk("@@@@@@ [cfyeh] %s(%d) set US_FLIDX_DISCONNECTING\n",
+						__func__, __LINE__);
+				set_bit(US_FLIDX_DISCONNECTING, &us->flags);
+#else
+				printk("@@@@@@ [cfyeh] %s(%d) call usb_disconnect()\n",
+						__func__, __LINE__);
+				usb_disconnect(&us->pusb_dev);
+#endif
+			}
+		}
+#ifdef USB_HACK_DISABLE_ALL_SCSI_DEVICE
+out_of_if:
+#endif /* USB_HACK_DISABLE_ALL_SCSI_DEVICE */
+		// hack for usb to ide, cfyeh add 2007/03/23 -
+#endif
 
 		/* save the old command */
 		memcpy(old_cmnd, srb->cmnd, MAX_COMMAND_SIZE);
@@ -637,19 +718,15 @@ void usb_stor_invoke_transport(struct scsi_cmnd *srb, struct us_data *us)
 
 		/* use the new buffer we have */
 		old_request_buffer = srb->request_buffer;
-		srb->request_buffer = srb->sense_buffer;
+		srb->request_buffer = us->sensebuf;
 
 		/* set the buffer length for transfer */
 		old_request_bufflen = srb->request_bufflen;
-		srb->request_bufflen = 18;
+		srb->request_bufflen = US_SENSE_SIZE;
 
 		/* set up for no scatter-gather use */
 		old_sg = srb->use_sg;
 		srb->use_sg = 0;
-
-		/* change the serial number -- toggle the high bit*/
-		old_serial_number = srb->serial_number;
-		srb->serial_number ^= 0x80000000;
 
 		/* issue the auto-sense command */
 		old_resid = srb->resid;
@@ -657,11 +734,11 @@ void usb_stor_invoke_transport(struct scsi_cmnd *srb, struct us_data *us)
 		temp_result = us->transport(us->srb, us);
 
 		/* let's clean up right away */
+		memcpy(srb->sense_buffer, us->sensebuf, US_SENSE_SIZE);
 		srb->resid = old_resid;
 		srb->request_buffer = old_request_buffer;
 		srb->request_bufflen = old_request_bufflen;
 		srb->use_sg = old_sg;
-		srb->serial_number = old_serial_number;
 		srb->sc_data_direction = old_sc_data_direction;
 		srb->cmd_len = old_cmd_len;
 		memcpy(srb->cmnd, old_cmnd, MAX_COMMAND_SIZE);
@@ -712,14 +789,26 @@ void usb_stor_invoke_transport(struct scsi_cmnd *srb, struct us_data *us)
 			srb->sense_buffer[0] = 0x0;
 		}
 	}
+#ifdef USB_HACK_ON_USB_TO_IDE_ERROR
+	// hack for usb to ide, cfyeh add 2007/03/23 +
+	else
+	{
+		data_error_times = 0;
+	}
+	// hack for usb to ide, cfyeh add 2007/03/23 -
+#endif
 
 	/* Did we transfer less than the minimum amount required? */
 	if (srb->result == SAM_STAT_GOOD &&
 			srb->request_bufflen - srb->resid < srb->underflow)
 		srb->result = (DID_ERROR << 16) | (SUGGEST_RETRY << 24);
 
+#ifdef USB_HACK_ON_USB_TO_IDE_ERROR
+	// hack for usb to ide, cfyeh add 2007/03/23 +
+	bulk_reset_times = 0;
+	// hack for usb to ide, cfyeh add 2007/03/23 -
+#endif
 	return;
-
 	/* abort processing: the bulk-only transport requires a reset
 	 * following an abort */
   Handle_Abort:
@@ -911,7 +1000,15 @@ int usb_stor_Bulk_max_lun(struct us_data *us)
 {
 	int result;
 
+#ifdef USB_HACK_ON_USB_TO_IDE_ERROR
+	// hack for usb to ide, cfyeh add 2007/03/23 +
+	bulk_reset_times = 0;
+	data_error_times = 0;
+	// hack for usb to ide, cfyeh add 2007/03/23 -
+#endif
+
 	/* issue the command */
+	us->iobuf[0] = 0;
 	result = usb_stor_control_msg(us, us->recv_ctrl_pipe,
 				 US_BULK_GET_MAX_LUN, 
 				 USB_DIR_IN | USB_TYPE_CLASS | 
@@ -967,7 +1064,7 @@ int usb_stor_Bulk_transport(struct scsi_cmnd *srb, struct us_data *us)
 	bcb->Signature = cpu_to_le32(US_BULK_CB_SIGN);
 	bcb->DataTransferLength = cpu_to_le32(transfer_length);
 	bcb->Flags = srb->sc_data_direction == DMA_FROM_DEVICE ? 1 << 7 : 0;
-	bcb->Tag = srb->serial_number;
+	bcb->Tag = ++us->tag;
 	bcb->Lun = srb->device->lun;
 	if (us->flags & US_FL_SCM_MULT_TARG)
 		bcb->Lun |= srb->device->id << 4;
@@ -1006,7 +1103,9 @@ int usb_stor_Bulk_transport(struct scsi_cmnd *srb, struct us_data *us)
 					srb->use_sg, &srb->resid);
 		US_DEBUGP("Bulk data transfer result 0x%x\n", result);
 		if (result == USB_STOR_XFER_ERROR)
+		{
 			return USB_STOR_TRANSPORT_ERROR;
+		}
 
 		/* If the device tried to send back more data than the
 		 * amount requested, the spec requires us to transfer
@@ -1056,7 +1155,7 @@ int usb_stor_Bulk_transport(struct scsi_cmnd *srb, struct us_data *us)
 	US_DEBUGP("Bulk Status S 0x%x T 0x%x R %u Stat 0x%x\n",
 			le32_to_cpu(bcs->Signature), bcs->Tag, 
 			residue, bcs->Status);
-	if (bcs->Tag != srb->serial_number || bcs->Status > US_BULK_STAT_PHASE) {
+	if (bcs->Tag != us->tag || bcs->Status > US_BULK_STAT_PHASE) {
 		US_DEBUGP("Bulk logical error\n");
 		return USB_STOR_TRANSPORT_ERROR;
 	}
@@ -1124,7 +1223,7 @@ int usb_stor_Bulk_transport(struct scsi_cmnd *srb, struct us_data *us)
  * It's handy that every transport mechanism uses the control endpoint for
  * resets.
  *
- * Basically, we send a reset with a 20-second timeout, so we don't get
+ * Basically, we send a reset with a 5-second timeout, so we don't get
  * jammed attempting to do the reset.
  */
 static int usb_stor_reset_common(struct us_data *us,
@@ -1145,13 +1244,9 @@ static int usb_stor_reset_common(struct us_data *us,
 	clear_bit(US_FLIDX_ABORTING, &us->flags);
 	scsi_unlock(us_to_host(us));
 
-	/* A 20-second timeout may seem rather long, but a LaCie
-	 * StudioDrive USB2 device takes 16+ seconds to get going
-	 * following a powerup or USB attach event.
-	 */
 	result = usb_stor_control_msg(us, us->send_ctrl_pipe,
 			request, requesttype, value, index, data, size,
-			20*HZ);
+			5*HZ);
 	if (result < 0) {
 		US_DEBUGP("Soft reset failed: %d\n", result);
 		goto Done;
@@ -1173,8 +1268,10 @@ static int usb_stor_reset_common(struct us_data *us,
 	US_DEBUGP("Soft reset: clearing bulk-out endpoint halt\n");
 	result2 = usb_stor_clear_halt(us, us->send_bulk_pipe);
 
-	/* return a result code based on the result of the control message */
-	if (result < 0 || result2 < 0) {
+	/* return a result code based on the result of the clear-halts */
+	if (result >= 0)
+		result = result2;
+	if (result < 0) {
 		US_DEBUGP("Soft reset failed\n");
 		goto Done;
 	}
@@ -1207,6 +1304,37 @@ int usb_stor_CB_reset(struct us_data *us)
  */
 int usb_stor_Bulk_reset(struct us_data *us)
 {
+#ifdef USB_HACK_ON_USB_TO_IDE_ERROR
+	// hack for usb to ide, cfyeh add 2007/03/23 +
+	if(command_abort_flag == 1) // cfyeh: 2007/03/27
+	{
+		data_error_times = 0;
+		bulk_reset_times++;
+		printk("@@@@@@ [cfyeh] %s(%d) bulk_reset_times = %d\n",
+			       __func__, __LINE__, bulk_reset_times);
+		if (bulk_reset_times == USB_STORAGE_BULK_RESET_RETRY_TIMES)
+		{
+			bulk_reset_times = 0;
+#ifdef USB_HACK_DISABLE_ALL_SCSI_DEVICE
+			usb_set_scsi_sibings_device_offline(us);
+			return;
+#endif /* USB_HACK_DISABLE_ALL_SCSI_DEVICE */
+
+#ifdef USB_HACK_SET_US_FLIDX_DISCONNECTING 
+			printk("@@@@@@ [cfyeh] %s(%d) set US_FLIDX_DISCONNECTING\n",
+					__func__, __LINE__);
+			set_bit(US_FLIDX_DISCONNECTING, &us->flags);
+#else
+			printk("@@@@@@ [cfyeh] %s(%d) call usb_disconnect()\n",
+					__func__, __LINE__);
+			usb_disconnect(&us->pusb_dev);
+#endif
+			return;
+		}
+	}
+	// hack for usb to ide, cfyeh add 2007/03/23 -
+#endif
+
 	US_DEBUGP("%s called\n", __FUNCTION__);
 
 	return usb_stor_reset_common(us, US_BULK_RESET_REQUEST, 

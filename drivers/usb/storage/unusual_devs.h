@@ -95,12 +95,29 @@ UNUSUAL_DEV(  0x0436, 0x0005, 0x0100, 0x0100,
 		"CameraMate (DPCM_USB)",
  		US_SC_SCSI, US_PR_DPCM_USB, NULL, 0 ),
 #endif
-
+/*
+ * Pete Zaitcev <zaitcev@yahoo.com>, from Patrick C. F. Ernzer, bz#162559.
+ * The key does not actually break, but it returns zero sense which
+ * makes our SCSI stack to print confusing messages.
+ */
+UNUSUAL_DEV( 0x0457, 0x0150, 0x0100, 0x0100,
+		"USBest Technology", /* sold by Transcend */
+		 "USB Mass Storage Device",
+		US_SC_DEVICE, US_PR_DEVICE, NULL, US_FL_NOT_LOCKABLE ),
+	
 /* Patch submitted by Philipp Friedrich <philipp@void.at> */
 UNUSUAL_DEV(  0x0482, 0x0100, 0x0100, 0x0100,
 		"Kyocera",
 		"Finecam S3x",
 		US_SC_8070, US_PR_CB, NULL, US_FL_FIX_INQUIRY),
+
+/* Patch submitted by Daniel Drake <dsd@gentoo.org>
+ * Device reports nonsense bInterfaceProtocol 6 when connected over USB2 */
+UNUSUAL_DEV( 0x0451, 0x5416, 0x0100, 0x0100,
+		"Neuros Audio",
+		"USB 2.0 HD 2.5",
+		US_SC_DEVICE, US_PR_BULK, NULL,
+		US_FL_NEED_OVERRIDE ),
 
 /* Patch submitted by Philipp Friedrich <philipp@void.at> */
 UNUSUAL_DEV(  0x0482, 0x0101, 0x0100, 0x0100,
@@ -577,18 +594,22 @@ UNUSUAL_DEV(  0x05dc, 0xb002, 0x0000, 0x0113,
  * They were originally reported by Alexander Oltu
  * <alexander@all-2.com> and Peter Marks <peter.marks@turner.com>
  * respectively.
+ * 
+ * US_FL_GO_SLOW and US_FL_MAX_SECTORS_64 added by Phil Dibowitz
+ * <phil@ipom.com> as these flags were made and hard-coded
+ * special-cases were pulled from scsiglue.c.
  */
 UNUSUAL_DEV(  0x05e3, 0x0701, 0x0000, 0xffff,
 		"Genesys Logic",
 		"USB to IDE Optical",
 		US_SC_DEVICE, US_PR_DEVICE, NULL,
-		US_FL_GO_SLOW ),
+		US_FL_GO_SLOW | US_FL_MAX_SECTORS_64 ),
 
 UNUSUAL_DEV(  0x05e3, 0x0702, 0x0000, 0xffff,
 		"Genesys Logic",
 		"USB to IDE Disk",
 		US_SC_DEVICE, US_PR_DEVICE, NULL,
-		US_FL_GO_SLOW ),
+		US_FL_GO_SLOW | US_FL_MAX_SECTORS_64 ),
 
 /* Reported by Hanno Boeck <hanno@gmx.de>
  * Taken from the Lycoris Kernel */
@@ -682,7 +703,7 @@ UNUSUAL_DEV(  0x07ab, 0xfc01, 0x0000, 0x9999,
 #endif
 
 /* Reported by Eero Volotinen <eero@ping-viini.org> */
-UNUSUAL_DEV(  0x07ab, 0xfccd, 0x0406, 0x0406,
+UNUSUAL_DEV(  0x07ab, 0xfccd, 0x0000, 0x9999,
 		"Freecom Technologies",
 		"FHD-Classic",
 		US_SC_DEVICE, US_PR_DEVICE, NULL,
@@ -697,7 +718,7 @@ UNUSUAL_DEV(  0x07af, 0x0004, 0x0100, 0x0133,
 UNUSUAL_DEV(  0x07af, 0x0005, 0x0100, 0x0100, 
 		"Microtech",
 		"USB-SCSI-HD50",
-		US_SC_SCSI, US_PR_BULK, usb_stor_euscsi_init,
+		US_SC_DEVICE, US_PR_DEVICE, usb_stor_euscsi_init,
 		US_FL_SCM_MULT_TARG ), 
 
 #ifdef CONFIG_USB_STORAGE_DPCM
@@ -762,7 +783,16 @@ UNUSUAL_DEV( 0x07c4, 0xa006, 0x0000, 0xffff,
 		US_SC_SCSI, US_PR_DATAFAB, NULL,
 		0 ),
 #endif
-		
+
+/*
+ * David H.rdeman <david@2gen.com>
+ * The key makes the SCSI stack print confusing (but harmless) messages
+ */
+UNUSUAL_DEV( 0x4146, 0xba01, 0x0100, 0x0100,
+		"Iomega",
+		"Micro Mini 1GB",
+		US_SC_DEVICE, US_PR_DEVICE, NULL, US_FL_NOT_LOCKABLE ),
+
 #ifdef CONFIG_USB_STORAGE_SDDR55
 /* Contributed by Peter Waechtler */
 UNUSUAL_DEV( 0x07c4, 0xa103, 0x0000, 0x9999,
@@ -929,6 +959,18 @@ UNUSUAL_DEV( 0x0c0b, 0xa109, 0x0000, 0xffff,
 	       US_FL_SINGLE_LUN ),
 #endif
 
+/* Submitted by: Nick Sillik <n.sillik@temple.edu>
+ * Needed for OneTouch extension to usb-storage
+ *
+ */
+#ifdef CONFIG_USB_STORAGE_ONETOUCH
+	UNUSUAL_DEV( 0x0d49, 0x7010, 0x0000, 0x9999,
+		"Maxtor",
+		"OneTouch External Harddrive",
+		US_SC_DEVICE, US_PR_DEVICE, onetouch_connect_input,
+		0),
+#endif
+
 /* Submitted by Joris Struyve <joris@struyve.be> */
 UNUSUAL_DEV( 0x0d96, 0x410a, 0x0001, 0xffff,
 		"Medion",
@@ -993,6 +1035,14 @@ UNUSUAL_DEV(  0x0ea0, 0x6828, 0x0110, 0x0110,
 		"Flash Disk",
 		US_SC_DEVICE, US_PR_DEVICE, NULL,
 		US_FL_IGNORE_RESIDUE ),
+
+/* Reported by Benjamin Schiller <sbenni@gmx.de>
+ * It is also sold by Easylite as DJ 20 */
+UNUSUAL_DEV( 0x0ed1, 0x7636, 0x0103, 0x0103,
+		"Typhoon",
+		"My DJ 1820",
+		US_SC_DEVICE, US_PR_DEVICE, NULL,
+		US_FL_IGNORE_RESIDUE | US_FL_GO_SLOW | US_FL_MAX_SECTORS_64),
 
 /* Reported by Michael Stattmann <michael@stattmann.com> */
 UNUSUAL_DEV(  0x0fce, 0xd008, 0x0000, 0x0000,

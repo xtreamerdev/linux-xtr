@@ -166,12 +166,14 @@ int fat_notify_change(struct dentry *dentry, struct iattr *attr)
 	lock_kernel();
 
 	/* FAT cannot truncate to a longer file */
+/*
 	if (attr->ia_valid & ATTR_SIZE) {
 		if (attr->ia_size > inode->i_size) {
 			error = -EPERM;
 			goto out;
 		}
 	}
+*/
 
 	error = inode_change_ok(inode, attr);
 	if (error) {
@@ -302,7 +304,31 @@ void fat_truncate(struct inode *inode)
 	unlock_kernel();
 }
 
+int fat_getattr(struct vfsmount *mnt, struct dentry *dentry, struct kstat *kstat)
+{
+	struct inode *inode = dentry->d_inode;
+	struct msdos_sb_info *sbi = MSDOS_SB(inode->i_sb);
+
+	kstat->dev = inode->i_sb->s_dev;
+	kstat->ino = inode->i_ino;
+	kstat->mode = inode->i_mode;
+	kstat->nlink = inode->i_nlink;
+	kstat->uid = inode->i_uid;
+	kstat->gid = inode->i_gid;
+	kstat->rdev = inode->i_rdev;
+	kstat->atime = inode->i_atime;
+	kstat->mtime = inode->i_mtime;
+	kstat->ctime = inode->i_ctime;
+	kstat->size = i_size_read(inode);
+	/* The unit of 'blocks' is 512 bytes */
+	kstat->blocks = inode->i_blocks;
+	kstat->blksize = 512;
+
+	return 0;
+}
+
 struct inode_operations fat_file_inode_operations = {
 	.truncate	= fat_truncate,
 	.setattr	= fat_notify_change,
+	.getattr	= fat_getattr,
 };

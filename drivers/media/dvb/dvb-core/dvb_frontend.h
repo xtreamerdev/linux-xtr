@@ -98,6 +98,7 @@ struct dvb_frontend_ops {
 	int (*set_voltage)(struct dvb_frontend* fe, fe_sec_voltage_t voltage);
 	int (*enable_high_lnb_voltage)(struct dvb_frontend* fe, int arg);
 	int (*dishnetwork_send_legacy_command)(struct dvb_frontend* fe, unsigned int cmd);
+	int (*user_cmd)(struct dvb_frontend* fe, int cmd, int* p_arg_in, int n_arg_in, int* p_arg_out, int n_arg_out);
 };
 
 #define MAX_EVENT 8
@@ -112,10 +113,12 @@ struct dvb_fe_events {
 };
 
 struct dvb_frontend {
-	struct dvb_frontend_ops* ops;
-	struct dvb_adapter *dvb;
-	void* demodulator_priv;
-	void* frontend_priv;
+	struct dvb_frontend_ops* 	ops;
+	struct dvb_adapter*     dvb;		
+	void* 					demodulator_priv;
+	void* 					tuner_priv;     // 20070322 kevin add
+	void* 					frontend_priv;
+	int 					ext_flag;
 };
 
 extern int dvb_register_frontend(struct dvb_adapter* dvb,

@@ -44,6 +44,10 @@ static char *action_to_string(enum kobject_action action)
 		return "offline";
 	case KOBJ_ONLINE:
 		return "online";
+	case KOBJ_OVERCUR:
+		return "over-current";
+	case KOBJ_TIER:
+		return "over-tier";
 	default:
 		return NULL;
 	}

@@ -133,6 +133,18 @@ struct dio {
 };
 
 /*
+ * Release the dvr page.
+ */
+void page_cache_release_dvr(struct page *page)
+{
+	if (PageDVR(page)) {
+	        put_page_testzero(page);
+	} else {
+	        page_cache_release(page);
+	}
+}
+
+/*
  * How many pages are in the queue?
  */
 static inline unsigned dio_pages_present(struct dio *dio)
@@ -364,7 +376,7 @@ static void dio_bio_submit(struct dio *dio)
 static void dio_cleanup(struct dio *dio)
 {
 	while (dio_pages_present(dio))
-		page_cache_release(dio_get_page(dio));
+		page_cache_release_dvr(dio_get_page(dio));
 }
 
 /*
@@ -414,12 +426,25 @@ static int dio_bio_complete(struct dio *dio, struct bio *bio)
 
 			if (dio->rw == READ && !PageCompound(page))
 				set_page_dirty_lock(page);
-			page_cache_release(page);
+			page_cache_release_dvr(page);
 		}
 		bio_put(bio);
 	}
 	finished_one_bio(dio);
+#if 0
 	return uptodate ? 0 : -EIO;
+#else
+	// added by cfyeh 2007/04/24
+	// for return different errno for remove scsi device
+	if(test_bit(BIO_SCSI_NOT_READY, &bio->bi_flags))
+	{
+		return uptodate ? 0 : -ENODEV;
+	}
+	else
+	{
+		return uptodate ? 0 : -EIO;
+	}
+#endif
 }
 
 /*
@@ -680,7 +705,7 @@ submit_page_section(struct dio *dio, struct page *page,
 		 */
 		if (dio->boundary) {
 			ret = dio_send_cur_page(dio);
-			page_cache_release(dio->cur_page);
+			page_cache_release_dvr(dio->cur_page);
 			dio->cur_page = NULL;
 		}
 		goto out;
@@ -691,7 +716,7 @@ submit_page_section(struct dio *dio, struct page *page,
 	 */
 	if (dio->cur_page) {
 		ret = dio_send_cur_page(dio);
-		page_cache_release(dio->cur_page);
+		page_cache_release_dvr(dio->cur_page);
 		dio->cur_page = NULL;
 		if (ret)
 			goto out;
@@ -817,7 +842,7 @@ static int do_direct_IO(struct dio *dio)
 
 				ret = get_more_blocks(dio);
 				if (ret) {
-					page_cache_release(page);
+					page_cache_release_dvr(page);
 					goto out;
 				}
 				if (!buffer_mapped(map_bh))
@@ -858,14 +883,14 @@ do_holes:
 
 				/* AKPM: eargh, -ENOTBLK is a hack */
 				if (dio->rw == WRITE) {
-					page_cache_release(page);
+					page_cache_release_dvr(page);
 					return -ENOTBLK;
 				}
 
 				if (dio->block_in_file >=
 					i_size_read(dio->inode)>>blkbits) {
 					/* We hit eof */
-					page_cache_release(page);
+					page_cache_release_dvr(page);
 					goto out;
 				}
 				kaddr = kmap_atomic(page, KM_USER0);
@@ -904,7 +929,7 @@ do_holes:
 			ret = submit_page_section(dio, page, offset_in_page,
 				this_chunk_bytes, dio->next_block_for_io);
 			if (ret) {
-				page_cache_release(page);
+				page_cache_release_dvr(page);
 				goto out;
 			}
 			dio->next_block_for_io += this_chunk_blocks;
@@ -920,7 +945,7 @@ next_block:
 		}
 
 		/* Drop the ref which was taken in get_user_pages() */
-		page_cache_release(page);
+		page_cache_release_dvr(page);
 		block_in_page = 0;
 	}
 out:
@@ -1046,7 +1071,7 @@ direct_io_worker(int rw, struct kiocb *iocb, struct inode *inode,
 		ret2 = dio_send_cur_page(dio);
 		if (ret == 0)
 			ret = ret2;
-		page_cache_release(dio->cur_page);
+		page_cache_release_dvr(dio->cur_page);
 		dio->cur_page = NULL;
 	}
 	if (dio->bio)

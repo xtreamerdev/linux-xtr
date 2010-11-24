@@ -3,6 +3,7 @@
 
 #include <linux/mod_devicetable.h>
 #include <linux/usb_ch9.h>
+#include <linux/usb_setting.h> // add by cfyeh
 
 #define USB_MAJOR			180
 
@@ -56,6 +57,7 @@ struct usb_host_endpoint {
 	struct usb_endpoint_descriptor	desc;
 	struct list_head		urb_list;
 	void				*hcpriv;
+	struct kobject *kobj; /* For sysfs info */
 
 	unsigned char *extra;   /* Extra descriptors */
 	int extralen;
@@ -228,7 +230,7 @@ struct usb_interface_cache {
 struct usb_host_config {
 	struct usb_config_descriptor	desc;
 
-	char *string;
+	char *string; /* iConfiguration string, if present */
 	/* the interfaces associated with this configuration,
 	 * stored in no particular order */
 	struct usb_interface *interface[USB_MAXINTERFACES];
@@ -318,6 +320,9 @@ struct usb_tt;
 struct usb_device {
 	int		devnum;		/* Address on USB bus */
 	char		devpath [16];	/* Use in messages: /port/port/... */
+#ifdef USB_TO_NOTIFY_TIER
+	char		tier;		/* to recored the layer which the device is in*/
+#endif /* USB_TO_NOTIFY_TIER */
 	enum usb_device_state	state;	/* configured, not attached, etc */
 	enum usb_device_speed	speed;	/* high/full/low (or error) */
 
@@ -342,13 +347,16 @@ struct usb_device {
 	struct usb_host_endpoint *ep_out[16];
 
 	char **rawdescriptors;		/* Raw descriptors for each config */
+	u8 level;			/* Number of USB hub ancestors */
 
 	int have_langid;		/* whether string_langid is valid yet */
 	int string_langid;		/* language ID for strings */
 
-	char *product;
-	char *manufacturer;
-	char *serial;			/* static strings from the device */
+	/* static strings from the device */
+	char *product; /* iProduct string, if present */
+	char *manufacturer; /* iManufacturer string, if present */
+	char *serial; /* iSerialNumber string, if present */
+
 	struct list_head filelist;
 	struct dentry *usbfs_dentry;	/* usbfs dentry entry for the device */
 

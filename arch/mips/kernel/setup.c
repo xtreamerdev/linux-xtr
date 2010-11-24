@@ -527,6 +527,16 @@ void __init setup_arch(char **cmdline_p)
 	strlcpy(command_line, arcs_cmdline, sizeof(command_line));
 	strlcpy(saved_command_line, command_line, COMMAND_LINE_SIZE);
 
+	if(!strstr(saved_command_line, "ip=")) {
+		strlcat(saved_command_line, " ip=", COMMAND_LINE_SIZE);
+		strlcat(saved_command_line, prom_getenv("ipaddr"), COMMAND_LINE_SIZE);
+		strlcat(saved_command_line, "::", COMMAND_LINE_SIZE);
+		strlcat(saved_command_line, prom_getenv("gateway"), COMMAND_LINE_SIZE);
+		strlcat(saved_command_line, ":", COMMAND_LINE_SIZE);
+		strlcat(saved_command_line, prom_getenv("subnetmask"), COMMAND_LINE_SIZE);
+		strlcat(saved_command_line, ":::", COMMAND_LINE_SIZE);
+	}
+
 	*cmdline_p = command_line;
 
 	parse_cmdline_early();

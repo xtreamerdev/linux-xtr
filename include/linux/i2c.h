@@ -386,6 +386,7 @@ struct i2c_msg {
 	__u16 addr;	/* slave address			*/
  	__u16 flags;		
 #define I2C_M_TEN	0x10	/* we have a ten bit chip address	*/
+#define I2C_LOW_SPEED 0x20    /* I2C Low Speed - 33KHz for GemStar */
 #define I2C_M_RD	0x01
 #define I2C_M_NOSTART	0x4000
 #define I2C_M_REV_DIR_ADDR	0x2000

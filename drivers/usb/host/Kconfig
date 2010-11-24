@@ -6,7 +6,9 @@ comment "USB Host Controller Drivers"
 
 config USB_EHCI_HCD
 	tristate "EHCI HCD (USB 2.0) support"
-	depends on USB && PCI
+#cfyeh+ 2005/10/05
+#	depends on USB && PCI
+	depends on USB && (PCI || REALTEK_VENUS_USB)
 	---help---
 	  The Enhanced Host Controller Interface (EHCI) is standard for USB 2.0
 	  "high speed" (480 Mbit/sec, 60 Mbyte/sec) host controller hardware.
@@ -113,7 +115,7 @@ config USB_UHCI_HCD
 
 config USB_SL811_HCD
 	tristate "SL811HS HCD support"
-	depends on USB
+	depends on USB && !REALTEK_VENUS_USB
 	default N
 	help
 	  The SL811HS is a single-port USB controller that supports either

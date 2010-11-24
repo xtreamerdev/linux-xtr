@@ -23,6 +23,7 @@
 #include <linux/spinlock.h>
 #include <linux/interrupt.h>
 #include <linux/module.h>
+#include <linux/auth.h>
 
 #include <asm/bootinfo.h>
 #include <asm/compiler.h>
@@ -410,9 +411,37 @@ static long last_rtc_update;
  */
 void local_timer_interrupt(int irq, void *dev_id, struct pt_regs *regs)
 {
+#ifdef	CONFIG_REALTEK_DETECT_OCCUPY
+#ifdef	CONFIG_REALTEK_USE_SHADOW_REGISTERS
+	unsigned long ra_value;
+#endif
+#endif 
 	if (current->pid)
 		profile_tick(CPU_PROFILING, regs);
 	update_process_times(user_mode(regs));
+#ifdef	CONFIG_REALTEK_DETECT_OCCUPY
+	if (occupy_interval != 0) {
+		if (jiffies-occupy_info.time > occupy_interval) {
+			printk("===== Thread occupy CPU %d ticks =====\n", occupy_interval);
+			
+#ifdef	CONFIG_REALTEK_USE_SHADOW_REGISTERS
+			if ((occupy_info.task->mm) && (regs->cp0_status & 0x10)) {
+				__asm__ __volatile__ (".word   0x415f4000; or %0, $0, $8": "=r"(ra_value): : "$8");
+				printk("epc: %0*lx, ra: %0*lx \n", 
+					8, (unsigned long) regs->cp0_epc,
+					8, (unsigned long) ra_value);
+#else
+			if ((occupy_info.task->mm) && (regs->cp0_status & 0x10)) {
+				printk("epc: %0*lx, ra: %0*lx \n", 
+					8, (unsigned long) regs->cp0_epc,
+					8, (unsigned long) regs->regs[31]);
+#endif
+			} else {
+				printk("Kernel thread...\n");
+			}
+		}
+	}
+#endif
 }
 
 /*
@@ -511,10 +540,21 @@ irqreturn_t timer_interrupt(int irq, void *dev_id, struct pt_regs *regs)
 asmlinkage void ll_timer_interrupt(int irq, struct pt_regs *regs)
 {
 	irq_enter();
+
+#ifdef	CONFIG_REALTEK_SCHED_LOG
+        if (sched_log_flag & 0x1)
+                log_intr_enter(irq);
+#endif
+
 	kstat_this_cpu.irqs[irq]++;
 
 	/* we keep interrupt disabled all the time */
 	timer_interrupt(irq, NULL, regs);
+
+#ifdef	CONFIG_REALTEK_SCHED_LOG
+        if (sched_log_flag & 0x1)
+                log_intr_exit(irq);
+#endif
 
 	irq_exit();
 }

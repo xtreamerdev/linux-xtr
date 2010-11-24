@@ -282,6 +282,7 @@ void delete_partition(struct gendisk *disk, int part)
 	p->start_sect = 0;
 	p->nr_sects = 0;
 	p->reads = p->writes = p->read_sectors = p->write_sectors = 0;
+	devfs_remove("%s%d", disk->disk_name, part);
 	devfs_remove("%s/part%d", disk->devfs_name, part);
 	kobject_unregister(&p->kobj);
 }
@@ -289,7 +290,8 @@ void delete_partition(struct gendisk *disk, int part)
 void add_partition(struct gendisk *disk, int part, sector_t start, sector_t len)
 {
 	struct hd_struct *p;
-
+	char part_disc[64], symlink[16];
+	
 	p = kmalloc(sizeof(*p), GFP_KERNEL);
 	if (!p)
 		return;
@@ -311,6 +313,10 @@ void add_partition(struct gendisk *disk, int part, sector_t start, sector_t len)
 	p->kobj.ktype = &ktype_part;
 	kobject_register(&p->kobj);
 	disk->part[part-1] = p;
+
+	sprintf(symlink, "%s%d", disk->disk_name, part);
+	sprintf(part_disc, "%s/part%d", disk->devfs_name, part);
+	devfs_mk_symlink(symlink, part_disc);
 }
 
 static void disk_sysfs_symlinks(struct gendisk *disk)
@@ -367,6 +373,7 @@ int rescan_partitions(struct gendisk *disk, struct block_device *bdev)
 {
 	struct parsed_partitions *state;
 	int p, res;
+	int num = 0; /*  2007/05/23 cfyeh : partiton number */
 
 	if (bdev->bd_part_count)
 		return -EBUSY;
@@ -380,6 +387,23 @@ int rescan_partitions(struct gendisk *disk, struct block_device *bdev)
 		disk->fops->revalidate_disk(disk);
 	if (!get_capacity(disk) || !(state = check_partition(disk, bdev)))
 		return 0;
+
+/*  2007/05/24 cfyeh + : partiton number */
+	for (p = 1; p < state->limit; p++) {
+		sector_t size = state->parts[p].size;
+		if (!size)
+			continue;
+		num++;
+
+		// add to know which partition is a extended partition
+		// by cfyeh 2007/11/13 +
+		if(state->parts[p].is_part_extended == 1)
+			disk->part_extended = p;
+		// by cfyeh 2007/11/13 -
+	}
+	disk->part_num = num;
+/*  2007/05/24 cfyeh - : partiton number */
+
 	for (p = 1; p < state->limit; p++) {
 		sector_t size = state->parts[p].size;
 		sector_t from = state->parts[p].from;
@@ -391,6 +415,7 @@ int rescan_partitions(struct gendisk *disk, struct block_device *bdev)
 			md_autodetect_dev(bdev->bd_dev+p);
 #endif
 	}
+
 	kfree(state);
 	return 0;
 }
@@ -442,6 +467,5 @@ void del_gendisk(struct gendisk *disk)
 		sysfs_remove_link(&disk->driverfs_dev->kobj, "block");
 		put_device(disk->driverfs_dev);
 	}
-	kobject_hotplug(&disk->kobj, KOBJ_REMOVE);
 	kobject_del(&disk->kobj);
 }

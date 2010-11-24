@@ -10,6 +10,12 @@
 #include <linux/module.h>
 #include <linux/kallsyms.h>
 #include <linux/interrupt.h>
+#ifdef CONFIG_REALTEK_VENUS
+#ifndef CONFIG_REALTEK_COMPACT
+#include <asm/io.h>
+#include <venus.h>
+#endif
+#endif
 
 /*
  * If 99,900 of the previous 100,000 interrupts have not been handled
@@ -43,6 +49,16 @@ __report_bad_irq(unsigned int irq, irq_desc_t *desc, irqreturn_t action_ret)
 		printk("\n");
 		action = action->next;
 	}
+
+#ifdef CONFIG_REALTEK_VENUS
+#ifndef CONFIG_REALTEK_COMPACT
+//	unsigned int status, cause;
+//	__asm__ __volatile__ ("mfc0 %0, $12;": "=r"(status));
+//	__asm__ __volatile__ ("mfc0 %0, $13;": "=r"(cause));
+	printk("Registers: VENUS_MIS_UMSK_ISR: 0x%08X\tVENUS_MIS_ISR: 0x%08X\n", inl(VENUS_MIS_UMSK_ISR), inl(VENUS_MIS_ISR));
+	printk("UART registers: VENUS_MIS_U0IIR_FCR: 0x%08X\tVENUS_MIS_U1IIR_FCR: 0x%08X\n", inl(VENUS_MIS_U0IIR_FCR), inl(VENUS_MIS_U1IIR_FCR));
+#endif
+#endif
 }
 
 void report_bad_irq(unsigned int irq, irq_desc_t *desc, irqreturn_t action_ret)

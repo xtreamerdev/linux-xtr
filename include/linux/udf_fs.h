@@ -35,10 +35,12 @@
 #define _UDF_FS_H 1
 
 #define UDF_PREALLOCATE
-#define UDF_DEFAULT_PREALLOC_BLOCKS	8
+#define UDF_DEFAULT_PREALLOC_BLOCKS	32
 
 #define UDFFS_DATE			"2004/29/09"
 #define UDFFS_VERSION			"0.9.8.1"
+
+#define UDF_BACKUP			// If define this, some udf tables and all of the file meta data will be backup and we can later restore them when udf is crashing
 
 #undef UDFFS_DEBUG
 

@@ -35,6 +35,9 @@
 #include <asm/pgalloc.h>
 #include <asm/tlb.h>
 
+#define DMA_ZONE_SIZE_32 16 
+#define DVR_ZONE_SIZE_64 32 
+
 DEFINE_PER_CPU(struct mmu_gather, mmu_gathers);
 
 unsigned long highstart_pfn, highend_pfn;
@@ -139,7 +142,7 @@ extern void pagetable_init(void);
 
 void __init paging_init(void)
 {
-	unsigned long zones_size[MAX_NR_ZONES] = {0, 0, 0};
+	unsigned long zones_size[MAX_NR_ZONES] = {0, 0, 0, 0};
 	unsigned long max_dma, high, low;
 
 	pagetable_init();
@@ -152,6 +155,9 @@ void __init paging_init(void)
 	low = max_low_pfn;
 	high = highend_pfn;
 
+	printk("  show info: max_low_pfn:%d\n", max_low_pfn);
+	printk("  show info: min_low_pfn:%d\n", min_low_pfn);
+
 #ifdef CONFIG_ISA
 	if (low < max_dma)
 		zones_size[ZONE_DMA] = low;
@@ -159,8 +165,15 @@ void __init paging_init(void)
 		zones_size[ZONE_DMA] = max_dma;
 		zones_size[ZONE_NORMAL] = low - max_dma;
 	}
-#else
-	zones_size[ZONE_DMA] = low;
+#else 
+//	zones_size[ZONE_DMA] = low;
+	if (low > 32*256) {
+		zones_size[ZONE_DMA] = low-(DVR_ZONE_SIZE_64*256);
+		zones_size[ZONE_DVR] = DVR_ZONE_SIZE_64*256;
+	} else {
+		zones_size[ZONE_DMA] = DMA_ZONE_SIZE_32*256;
+		zones_size[ZONE_DVR] = low-(DMA_ZONE_SIZE_32*256);
+	}
 #endif
 #ifdef CONFIG_HIGHMEM
 	if (cpu_has_dc_aliases) {

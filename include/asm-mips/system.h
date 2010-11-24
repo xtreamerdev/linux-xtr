@@ -308,7 +308,10 @@ static inline unsigned long __cmpxchg_u32(volatile int * m, unsigned long old,
 		"	.set	mips3					\n"
 		"1:	ll	%0, %2			# __cmpxchg_u32	\n"
 		"	bne	%0, %z3, 2f				\n"
+// This solves the same problem with this "http://marc.theaimsgroup.com/?l=linux-mips&m=112025311126644&w=2"
+		"	.set	mips0					\n"
 		"	move	$1, %z4					\n"
+		"	.set	mips3					\n"
 		"	sc	$1, %1					\n"
 		"	beqzl	$1, 1b					\n"
 		ROT_IN_PIECES
@@ -327,7 +330,9 @@ static inline unsigned long __cmpxchg_u32(volatile int * m, unsigned long old,
 		"	.set	mips3					\n"
 		"1:	ll	%0, %2			# __cmpxchg_u32	\n"
 		"	bne	%0, %z3, 2f				\n"
+		"	.set	mips0					\n"
 		"	move	$1, %z4					\n"
+		"	.set	mips3					\n"
 		"	sc	$1, %1					\n"
 		"	beqz	$1, 1b					\n"
 #ifdef CONFIG_SMP

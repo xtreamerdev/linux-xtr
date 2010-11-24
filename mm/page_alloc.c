@@ -71,7 +71,7 @@ EXPORT_SYMBOL(nr_swap_pages);
 struct zone *zone_table[1 << (ZONES_SHIFT + NODES_SHIFT)];
 EXPORT_SYMBOL(zone_table);
 
-static char *zone_names[MAX_NR_ZONES] = { "DMA", "Normal", "HighMem" };
+static char *zone_names[MAX_NR_ZONES] = { "DMA", "Normal", "HighMem", "DVR" };
 int min_free_kbytes = 1024;
 
 unsigned long __initdata nr_kernel_pages;
@@ -313,21 +313,29 @@ static inline void __free_pages_bulk (struct page *page,
 
 static inline void free_pages_check(const char *function, struct page *page)
 {
-	if (	page_mapcount(page) ||
-		page->mapping != NULL ||
-		page_count(page) != 0 ||
-		(page->flags & (
-			1 << PG_lru	|
-			1 << PG_private |
-			1 << PG_locked	|
-			1 << PG_active	|
-			1 << PG_reclaim	|
-			1 << PG_slab	|
-			1 << PG_swapcache |
-			1 << PG_writeback )))
-		bad_page(function, page);
+	if (!PageFlush(page)) {
+		if (	page_mapcount(page) ||
+			page->mapping != NULL ||
+			page_count(page) != 0 ||
+			(page->flags & (
+				1 << PG_lru	|
+				1 << PG_private |
+				1 << PG_locked	|
+				1 << PG_active	|
+				1 << PG_reclaim	|
+				1 << PG_slab	|
+				1 << PG_swapcache |
+				1 << PG_again	|
+				1 << PG_writeback )))
+			bad_page(function, page);
+	} else {
+		ClearPageActive(page);
+		ClearPageFlush(page);
+	}
 	if (PageDirty(page))
 		ClearPageDirty(page);
+	if (PageDVR(page))
+		ClearPageDVR(page);
 }
 
 /*
@@ -449,12 +457,13 @@ static void prep_new_page(struct page *page, int order)
 			1 << PG_dirty	|
 			1 << PG_reclaim	|
 			1 << PG_swapcache |
+			1 << PG_again	|
 			1 << PG_writeback )))
 		bad_page(__FUNCTION__, page);
 
 	page->flags &= ~(1 << PG_uptodate | 1 << PG_error |
 			1 << PG_referenced | 1 << PG_arch_1 |
-			1 << PG_checked | 1 << PG_mappedtodisk);
+			1 << PG_checked | 1 << PG_mappedtodisk | 1 << PG_again);
 	page->private = 0;
 	set_page_refs(page, order);
 	kernel_map_pages(page, 1 << order, 1);
@@ -732,6 +741,7 @@ __alloc_pages(unsigned int __nocast gfp_mask, unsigned int order,
 		struct zonelist *zonelist)
 {
 	const int wait = gfp_mask & __GFP_WAIT;
+	unsigned long min;
 	struct zone **zones, *z;
 	struct page *page;
 	struct reclaim_state reclaim_state;
@@ -764,9 +774,15 @@ __alloc_pages(unsigned int __nocast gfp_mask, unsigned int order,
 	/* Go through the zonelist once, looking for a zone with enough free */
 	for (i = 0; (z = zones[i]) != NULL; i++) {
 
-		if (!zone_watermark_ok(z, order, z->pages_low,
-				       classzone_idx, 0, 0))
-			continue;
+		if ((gfp_mask & __GFP_EXHAUST) && (z->exhaustable)) {
+			// Don't care the watermarks...
+			min = 1<<order;
+			if (z->free_pages < min)
+				continue;
+		} else
+			if (!zone_watermark_ok(z, order, z->pages_low,
+					classzone_idx, 0, 0))
+				continue;
 
 		if (!cpuset_zone_allowed(z))
 			continue;
@@ -829,7 +845,7 @@ rebalance:
 	reclaim_state.reclaimed_slab = 0;
 	p->reclaim_state = &reclaim_state;
 
-	did_some_progress = try_to_free_pages(zones, gfp_mask, order);
+	did_some_progress = try_to_free_pages(zones, gfp_mask, order, NULL);
 
 	p->reclaim_state = NULL;
 	p->flags &= ~PF_MEMALLOC;
@@ -1038,7 +1054,8 @@ unsigned int nr_free_buffer_pages(void)
  */
 unsigned int nr_free_pagecache_pages(void)
 {
-	return nr_free_zone_pages(GFP_HIGHUSER & GFP_ZONEMASK);
+//	return nr_free_zone_pages(GFP_HIGHUSER & GFP_ZONEMASK);
+	return nr_free_zone_pages(GFP_DVRUSER & GFP_ZONEMASK);
 }
 
 #ifdef CONFIG_HIGHMEM
@@ -1332,6 +1349,10 @@ static int __init build_zonelists_node(pg_data_t *pgdat, struct zonelist *zoneli
 		struct zone *zone;
 	default:
 		BUG();
+        case ZONE_DVR:
+                zone = pgdat->node_zones + ZONE_DVR;
+                if (zone->present_pages)
+                        zonelist->zones[j++] = zone;
 	case ZONE_HIGHMEM:
 		zone = pgdat->node_zones + ZONE_HIGHMEM;
 		if (zone->present_pages) {
@@ -1475,10 +1496,23 @@ static void __init build_zonelists(pg_data_t *pgdat)
 
 		j = 0;
 		k = ZONE_NORMAL;
+/*
 		if (i & __GFP_HIGHMEM)
 			k = ZONE_HIGHMEM;
 		if (i & __GFP_DMA)
 			k = ZONE_DMA;
+*/
+                switch (i) {
+                        case __GFP_DVR:
+                                k = ZONE_DVR;
+                                break;
+                        case __GFP_HIGHMEM:
+                                k = ZONE_HIGHMEM;
+                                break;
+                        case __GFP_DMA:
+                                k = ZONE_DMA;
+                                break;
+                }
 
  		j = build_zonelists_node(pgdat, zonelist, j, k);
  		/*
@@ -1654,6 +1688,10 @@ static void __init free_area_init_core(struct pglist_data *pgdat,
 
 		zone->spanned_pages = size;
 		zone->present_pages = realsize;
+                if (j == ZONE_DVR)
+                        zone->exhaustable = 1;
+                else
+                        zone->exhaustable = 0;
 		zone->name = zone_names[j];
 		spin_lock_init(&zone->lock);
 		spin_lock_init(&zone->lru_lock);
@@ -2236,3 +2274,24 @@ void *__init alloc_large_system_hash(const char *tablename,
 
 	return table;
 }
+
+void drain_pcp_pages(unsigned int cpu)
+{
+        struct zone *zone;
+        int i;
+
+        for_each_zone(zone) {
+                struct per_cpu_pageset *pset;
+
+                pset = &zone->pageset[cpu];
+                for (i = 0; i < ARRAY_SIZE(pset->pcp); i++) {
+                        struct per_cpu_pages *pcp;
+
+                        pcp = &pset->pcp[i];
+                        pcp->count -= free_pages_bulk(zone, pcp->count,
+                                                &pcp->list, 0);
+                }
+        }
+}
+EXPORT_SYMBOL(drain_pcp_pages);
+

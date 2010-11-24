@@ -77,6 +77,10 @@
 #define PG_nosave_free		19	/* Free, should not be written */
 #define PG_uncached		20	/* Page has been mapped as uncached */
 
+#define PG_dvr			23	/* mark dvr page used in direct I/O */
+#define PG_again		24
+#define PG_flush		25
+
 /*
  * Global page accounting.  One instance per CPU.  Only unsigned longs are
  * allowed.
@@ -98,32 +102,39 @@ struct page_state {
 	unsigned long pgpgout;		/* Disk writes */
 	unsigned long pswpin;		/* swap reads */
 	unsigned long pswpout;		/* swap writes */
-	unsigned long pgalloc_high;	/* page allocations */
 
+	unsigned long pgalloc_high;	/* page allocations */
 	unsigned long pgalloc_normal;
 	unsigned long pgalloc_dma;
+	unsigned long pgalloc_dvr;
+
 	unsigned long pgfree;		/* page freeings */
 	unsigned long pgactivate;	/* pages moved inactive->active */
 	unsigned long pgdeactivate;	/* pages moved active->inactive */
-
 	unsigned long pgfault;		/* faults (major+minor) */
 	unsigned long pgmajfault;	/* faults (major only) */
+
 	unsigned long pgrefill_high;	/* inspected in refill_inactive_zone */
 	unsigned long pgrefill_normal;
 	unsigned long pgrefill_dma;
+	unsigned long pgrefill_dvr;
 
 	unsigned long pgsteal_high;	/* total highmem pages reclaimed */
 	unsigned long pgsteal_normal;
 	unsigned long pgsteal_dma;
+	unsigned long pgsteal_dvr;
+
 	unsigned long pgscan_kswapd_high;/* total highmem pages scanned */
 	unsigned long pgscan_kswapd_normal;
-
 	unsigned long pgscan_kswapd_dma;
+	unsigned long pgscan_kswapd_dvr;
+
 	unsigned long pgscan_direct_high;/* total highmem pages scanned */
 	unsigned long pgscan_direct_normal;
 	unsigned long pgscan_direct_dma;
-	unsigned long pginodesteal;	/* pages reclaimed via inode freeing */
+	unsigned long pgscan_direct_dvr;
 
+	unsigned long pginodesteal;	/* pages reclaimed via inode freeing */
 	unsigned long slabs_scanned;	/* slab objects scanned */
 	unsigned long kswapd_steal;	/* pages reclaimed by kswapd */
 	unsigned long kswapd_inodesteal;/* reclaimed via kswapd inode freeing */
@@ -157,6 +168,8 @@ extern void __mod_page_state(unsigned offset, unsigned long delta);
 			offset = offsetof(struct page_state, member##_high);	\
 		else if (is_normal(zone))					\
 			offset = offsetof(struct page_state, member##_normal);	\
+		else if (is_dvr(zone))						\
+			offset = offsetof(struct page_state, member##_dvr);	\
 		else								\
 			offset = offsetof(struct page_state, member##_dma);	\
 		__mod_page_state(offset, (delta));				\
@@ -305,6 +318,18 @@ extern void __mod_page_state(unsigned offset, unsigned long delta);
 #define PageUncached(page)	test_bit(PG_uncached, &(page)->flags)
 #define SetPageUncached(page)	set_bit(PG_uncached, &(page)->flags)
 #define ClearPageUncached(page)	clear_bit(PG_uncached, &(page)->flags)
+
+#define PageDVR(page)		test_bit(PG_dvr, &(page)->flags)
+#define SetPageDVR(page)	set_bit(PG_dvr, &(page)->flags)
+#define ClearPageDVR(page)	clear_bit(PG_dvr, &(page)->flags)
+
+#define PageAgain(page)		test_bit(PG_again, &(page)->flags)
+#define SetPageAgain(page)	set_bit(PG_again, &(page)->flags)
+#define ClearPageAgain(page)	clear_bit(PG_again, &(page)->flags)
+
+#define PageFlush(page)		test_bit(PG_flush, &(page)->flags)
+#define SetPageFlush(page)	set_bit(PG_flush, &(page)->flags)
+#define ClearPageFlush(page)	clear_bit(PG_flush, &(page)->flags)
 
 struct page;	/* forward declaration */
 

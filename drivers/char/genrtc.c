@@ -82,6 +82,13 @@ static unsigned char days_in_mo[] =
 
 static int irq_active;
 
+#ifdef CONFIG_REALTEK_VENUS
+#include <venus.h>
+#include <asm/io.h>
+static DEFINE_SPINLOCK(rtc_lock);
+extern void to_tm(unsigned long tim, struct rtc_time *tm);
+#endif
+
 #ifdef CONFIG_GEN_RTC_X
 static struct work_struct genrtc_task;
 static struct timer_list timer_task;
@@ -282,6 +289,84 @@ static int gen_rtc_ioctl(struct inode *inode, struct file *file,
 
 	switch (cmd) {
 
+#ifdef CONFIG_REALTEK_VENUS
+	case RTC_ALM_READ:	/* Read the present alarm time */
+	{
+		/*
+		 * This returns a struct rtc_time. Reading >= 0xc0
+		 * means "don't care" or "match all". Only the tm_hour,
+		 * tm_min, and tm_sec values are filled in.
+		 */
+		unsigned long alarm_time;
+		unsigned int day, hour, min;
+		
+		memset(&wtime, 0, sizeof(wtime));
+		spin_lock_irq(&rtc_lock);
+		if(inl(VENUS_MIS_RTCCR) && 0x10) {
+			min = inl(VENUS_MIS_ALMMIN);
+			hour = inl(VENUS_MIS_ALMHR);
+			day = inl(VENUS_MIS_ALMDATE1);
+			day += inl(VENUS_MIS_ALMDATE2)<<8;
+		} else {
+			min = 0;
+			hour = 0;
+			day = 0;
+		}
+		spin_unlock_irq(&rtc_lock);
+		alarm_time = (((day+10957)*24 + hour)*60 + min)*60;
+		to_tm(alarm_time, &wtime);
+		wtime.tm_year -= 1900;
+
+		return copy_to_user(argp, &wtime, sizeof(wtime)) ? -EFAULT : 0;
+	}
+	case RTC_ALM_SET:	/* Store a time into the alarm */
+	{
+		int year;
+		unsigned char leap_yr;
+		unsigned long second;
+		unsigned int day, hour, min, sec, hms;
+
+		if (copy_from_user(&wtime, argp, sizeof(wtime)))
+			return -EFAULT;
+
+		year = wtime.tm_year + 1900;
+		leap_yr = ((!(year % 4) && (year % 100)) ||
+			   !(year % 400));
+
+		if ((wtime.tm_mon < 0 || wtime.tm_mon > 11) || (wtime.tm_mday < 1))
+			return -EINVAL;
+
+		if (wtime.tm_mday < 0 || wtime.tm_mday >
+		    (days_in_mo[wtime.tm_mon] + ((wtime.tm_mon == 1) && leap_yr)))
+			return -EINVAL;
+
+		if (wtime.tm_hour < 0 || wtime.tm_hour >= 24 ||
+		    wtime.tm_min < 0 || wtime.tm_min >= 60 ||
+		    wtime.tm_sec < 0 || wtime.tm_sec >= 60)
+			return -EINVAL;
+
+		second = mktime(wtime.tm_year+1900, wtime.tm_mon+1, wtime.tm_mday, wtime.tm_hour, wtime.tm_min, wtime.tm_sec );
+		day = second / (24*60*60);
+		hms = second % (24*60*60);
+		hour = hms / 3600;
+		min = (hms % 3600) / 60;
+		sec = ((hms % 3600) % 60) * 2;	// One unit represents half second.
+		day -= 10957;
+		
+		if(day < 0 || day > 16383)
+			return -EINVAL;
+
+		spin_lock_irq(&rtc_lock);
+		outl(min, VENUS_MIS_ALMMIN);
+		outl(hour, VENUS_MIS_ALMHR);
+		outl(day&0x00ff, VENUS_MIS_ALMDATE1);
+		outl((day&0x3f00)>>8, VENUS_MIS_ALMDATE2);
+		outl(0x10, VENUS_MIS_RTCCR);
+		outl(0x3E00, VENUS_MIS_ISR);
+		spin_unlock_irq(&rtc_lock);
+		return 0;
+	}
+#endif
 	case RTC_PLL_GET:
 	    if (get_rtc_pll(&pll))
 	 	    return -EINVAL;

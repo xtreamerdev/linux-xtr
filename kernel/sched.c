@@ -47,6 +47,7 @@
 #include <linux/syscalls.h>
 #include <linux/times.h>
 #include <linux/acct.h>
+#include <linux/auth.h>
 #include <asm/tlb.h>
 
 #include <asm/unistd.h>
@@ -1372,6 +1373,16 @@ task_t * context_switch(runqueue_t *rq, task_t *prev, task_t *next)
 		rq->prev_mm = oldmm;
 	}
 
+#ifdef  CONFIG_REALTEK_SCHED_LOG
+        if (sched_log_flag & 0x1)
+		log_sched(next->pid);
+#endif
+#ifdef	CONFIG_REALTEK_DETECT_OCCUPY
+	if ((occupy_interval != 0) && (occupy_info.task != next)) {
+		occupy_info.task = next;
+		occupy_info.time = jiffies;
+	}
+#endif
 	/* Here we just switch the register state and the stack. */
 	switch_to(prev, next, prev);
 

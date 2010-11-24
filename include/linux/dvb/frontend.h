@@ -28,6 +28,19 @@
 
 #include <asm/types.h>
 
+#define RTD2831U
+#define Thomson_FE664X
+
+#ifndef USE_USER_MEMORY
+#define USE_USER_MEMORY
+#endif
+#define TS_PACKET_NOT_ALIGN
+
+#ifndef RTD2831U
+#define RTD2830_PADDING_PACKET_SIZE         188//192
+#else
+// #define RTD2830_TS_PACKET_SIZE              188
+#endif
 
 typedef enum fe_type {
 	FE_QPSK,
@@ -240,28 +253,108 @@ struct dvb_frontend_event {
 };
 
 
+//////////////////////////////////////////////////////////
+#ifdef USE_USER_MEMORY    
+    #define RTD2830_CMD_PRE_SETUP               0x00
+    #define RTD2830_CMD_POST_SETUP              0x01
+    #define RTD2830_CMD_TS_START                0x02
+    #define RTD2830_CMD_TS_STOP                 0x03
+    #define RTD2830_CMD_TS_IS_START             0x04
+    #define RTD2830_CMD_PID_FILTER              0x05
+    
+    #define RTD2830_CMD_CHANNEL_SCAN_MODE_EN    0x10    // 20060622 : kevin add for Dynamic URB Size Change
+    
+    // never use the below two as the command for FE_USER_CMD
+    #define RTD2830_CMD_URB_IN                  0xfe
+#else // USE_USER_MEMORY
+    #define RTD2830_CMD_GET_RING_SIZE           0x00
+    #define RTD2830_CMD_TS_START                0x01
+    #define RTD2830_CMD_TS_STOP                 0x02
+    #define RTD2830_CMD_TS_IS_START             0x03
+    #define RTD2830_CMD_PID_FILTER              0x04
+        
+    #define RTD2830_CMD_CHANNEL_SCAN_MODE_EN    0x10    // 20060622 : kevin add for Dynamic URB Size Change
+    
+    // never use the below two as the command for FE_USER_CMD
+    #define RTD2830_CMD_URB_IN                  0xfe
+    #define RTD2830_MMAP                        0xff
+#endif // USE_USER_MEMORY
 
-#define FE_GET_INFO		   _IOR('o', 61, struct dvb_frontend_info)
+//////////////////////////////////////////////////////////
 
-#define FE_DISEQC_RESET_OVERLOAD   _IO('o', 62)
-#define FE_DISEQC_SEND_MASTER_CMD  _IOW('o', 63, struct dvb_diseqc_master_cmd)
-#define FE_DISEQC_RECV_SLAVE_REPLY _IOR('o', 64, struct dvb_diseqc_slave_reply)
-#define FE_DISEQC_SEND_BURST       _IO('o', 65)  /* fe_sec_mini_cmd_t */
+struct rtd2830_ts_buffer_s{
+    int                         offset_user_kernel;
+    __u8*                       p_lower;
+    __u8*                       p_upper;
+    __u8*                       p_write;
+    __u8*                       pp_read[4];
+    __u8                        p_b_active[4];
+};
 
-#define FE_SET_TONE		   _IO('o', 66)  /* fe_sec_tone_mode_t */
-#define FE_SET_VOLTAGE		   _IO('o', 67)  /* fe_sec_voltage_t */
-#define FE_ENABLE_HIGH_LNB_VOLTAGE _IO('o', 68)  /* int */
+struct dvb_fe_user_cmd{
+    __u32           cmd;
+    int             n_arg_in;
+    __u32           arg_in[16];
+    int             n_arg_out;
+    __u32           arg_out[16];
+};
 
-#define FE_READ_STATUS		   _IOR('o', 69, fe_status_t)
-#define FE_READ_BER		   _IOR('o', 70, __u32)
-#define FE_READ_SIGNAL_STRENGTH    _IOR('o', 71, __u16)
-#define FE_READ_SNR		   _IOR('o', 72, __u16)
-#define FE_READ_UNCORRECTED_BLOCKS _IOR('o', 73, __u32)
+#define RTD2830_GET_READ_PTR_STATUS(p_ts_ring_info, n) \
+    ((p_ts_ring_info)->p_b_active[(n)])
+
+#define RTD2830_SET_READ_PTR_STATUS(p_ts_ring_info, n, on_off) \
+    (p_ts_ring_info)->p_b_active[(n)]= (on_off)
+
+#define RTD2830_GET_LOWER_PTR(p_ts_ring_info, pp_user_lower) \
+    *(pp_user_lower)= ((p_ts_ring_info)->p_lower+ (p_ts_ring_info)->offset_user_kernel)
+
+#define RTD2830_GET_UPPER_PTR(p_ts_ring_info, pp_user_upper) \
+    *(pp_user_upper)= ((p_ts_ring_info)->p_upper+ (p_ts_ring_info)->offset_user_kernel)
+
+#define RTD2830_GET_READ_PTR(p_ts_ring_info, pp_user_read_ptr, n) \
+    *(pp_user_read_ptr)= ((p_ts_ring_info)->pp_read[(n)]+ (p_ts_ring_info)->offset_user_kernel)
+
+#define RTD2830_GET_WRITE_PTR(p_ts_ring_info, pp_user_write_ptr) \
+    *(pp_user_write_ptr)= ((p_ts_ring_info)->p_write+ (p_ts_ring_info)->offset_user_kernel)
+
+#define RTD2830_SET_READ_PTR(p_ts_ring_info, p_user_read_ptr, n) \
+    (p_ts_ring_info)->pp_read[(n)]= ((p_user_read_ptr)- (p_ts_ring_info)->offset_user_kernel)
+
+#define RTD2830_TS_FLUSH(p_ts_ring_info, n) \
+    (p_ts_ring_info)->pp_read[(n)]= (p_ts_ring_info)->p_write    
+
+#define RTD2830_TS_FLUSH_ALL(p_ts_ring_info) \
+    (p_ts_ring_info)->pp_read[0]= \
+    (p_ts_ring_info)->pp_read[1]= \
+    (p_ts_ring_info)->pp_read[2]= \
+    (p_ts_ring_info)->pp_read[3]= (p_ts_ring_info)->p_write
+
+#define RTD2830_GET_RING_INFO(p_buffer, buffer_size) \
+    (struct rtd2830_ts_buffer_s*)((p_buffer)+ (buffer_size)- sizeof(struct rtd2830_ts_buffer_s))
+
+
+#define FE_GET_INFO		            _IOR('o', 61, struct dvb_frontend_info)
+
+#define FE_DISEQC_RESET_OVERLOAD    _IO('o', 62)
+#define FE_DISEQC_SEND_MASTER_CMD   _IOW('o', 63, struct dvb_diseqc_master_cmd)
+#define FE_DISEQC_RECV_SLAVE_REPLY  _IOR('o', 64, struct dvb_diseqc_slave_reply)
+#define FE_DISEQC_SEND_BURST        _IO('o', 65)  /* fe_sec_mini_cmd_t */
+
+#define FE_SET_TONE		            _IO('o', 66)  /* fe_sec_tone_mode_t */
+#define FE_SET_VOLTAGE		        _IO('o', 67)  /* fe_sec_voltage_t */
+#define FE_ENABLE_HIGH_LNB_VOLTAGE  _IO('o', 68)  /* int */
+
+#define FE_READ_STATUS		        _IOR('o', 69, fe_status_t)
+#define FE_READ_BER		            _IOR('o', 70, __u32)
+#define FE_READ_SIGNAL_STRENGTH     _IOR('o', 71, __u16)
+#define FE_READ_SNR		            _IOR('o', 72, __u16)
+#define FE_READ_UNCORRECTED_BLOCKS  _IOR('o', 73, __u32)
 
 #define FE_SET_FRONTEND		   _IOW('o', 76, struct dvb_frontend_parameters)
 #define FE_GET_FRONTEND		   _IOR('o', 77, struct dvb_frontend_parameters)
 #define FE_GET_EVENT		   _IOR('o', 78, struct dvb_frontend_event)
 
 #define FE_DISHNETWORK_SEND_LEGACY_CMD _IO('o', 80) /* unsigned int */
+#define FE_USER_CMD 	   	_IOWR('o', 81, struct dvb_fe_user_cmd)
 
 #endif /*_DVBFRONTEND_H_*/

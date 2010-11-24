@@ -28,3 +28,8 @@ obj-$(CONFIG_DVB_STV0297) += stv0297.o
 obj-$(CONFIG_DVB_NXT2002) += nxt2002.o
 obj-$(CONFIG_DVB_OR51211) += or51211.o
 obj-$(CONFIG_DVB_OR51132) += or51132.o
+obj-$(CONFIG_DVB_REALTEK_2830) += rtd2830.o
+rtd2830-objs += rtl2830.o rtl2830_api/foundation.o rtl2830_api/demod_rtl2830.o  
+   
+obj-$(CONFIG_ATSC_RTD2820_DDT768x) += atsc_rtd2820.o
+atsc_rtd2820-objs += rtd2820.o rtd2820_api/demod_rtd2820.o

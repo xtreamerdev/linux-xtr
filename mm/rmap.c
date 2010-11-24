@@ -53,6 +53,7 @@
 #include <linux/init.h>
 #include <linux/rmap.h>
 #include <linux/rcupdate.h>
+#include <linux/pageremap.h>
 
 #include <asm/tlbflush.h>
 
@@ -510,13 +511,14 @@ void page_remove_rmap(struct page *page)
  * Subfunctions of try_to_unmap: try_to_unmap_one called
  * repeatedly from either try_to_unmap_anon or try_to_unmap_file.
  */
-static int try_to_unmap_one(struct page *page, struct vm_area_struct *vma)
+static int try_to_unmap_one(struct page *page, struct vm_area_struct *vma, struct list_head *force)
 {
 	struct mm_struct *mm = vma->vm_mm;
 	unsigned long address;
 	pte_t *pte;
 	pte_t pteval;
 	int ret = SWAP_AGAIN;
+	struct page_va_list *vlist;
 
 	if (!get_mm_counter(mm, rss))
 		goto out;
@@ -534,9 +536,30 @@ static int try_to_unmap_one(struct page *page, struct vm_area_struct *vma)
 	 * skipped over this mm) then we should reactivate it.
 	 */
 	if ((vma->vm_flags & (VM_LOCKED|VM_RESERVED)) ||
-			ptep_clear_flush_young(vma, address, pte)) {
-		ret = SWAP_FAIL;
-		goto out_unmap;
+                        ((force == NULL) && ptep_clear_flush_young(vma, address, pte))) {
+                if (force == NULL || vma->vm_flags & VM_RESERVED) {
+                        ret = SWAP_FAIL;
+                        goto out_unmap;
+                }
+                vlist = kmalloc(sizeof(struct page_va_list), GFP_KERNEL);
+                atomic_inc(&mm->mm_count);
+//              vlist->mm = mmgrab(mm);
+                spin_lock(&mmlist_lock);
+                if (!atomic_read(&mm->mm_users)) {
+                        vlist->mm = NULL;
+                } else {
+                        atomic_inc(&mm->mm_users);
+                        vlist->mm = mm;
+                }
+                spin_unlock(&mmlist_lock);
+                if (vlist->mm == NULL) {
+//                      mmput(mm);
+                        kfree(vlist);
+                } else {
+                        vlist->addr = address;
+                        list_add(&vlist->list, force);
+                }
+                printk("try_to_unmap_one: need to unmap again...\n");
 	}
 
 	/*
@@ -699,7 +722,7 @@ out_unlock:
 	spin_unlock(&mm->page_table_lock);
 }
 
-static int try_to_unmap_anon(struct page *page)
+static int try_to_unmap_anon(struct page *page, struct list_head *force)
 {
 	struct anon_vma *anon_vma;
 	struct vm_area_struct *vma;
@@ -710,7 +733,7 @@ static int try_to_unmap_anon(struct page *page)
 		return ret;
 
 	list_for_each_entry(vma, &anon_vma->head, anon_vma_node) {
-		ret = try_to_unmap_one(page, vma);
+		ret = try_to_unmap_one(page, vma, force);
 		if (ret == SWAP_FAIL || !page_mapped(page))
 			break;
 	}
@@ -727,7 +750,7 @@ static int try_to_unmap_anon(struct page *page)
  *
  * This function is only called from try_to_unmap for object-based pages.
  */
-static int try_to_unmap_file(struct page *page)
+static int try_to_unmap_file(struct page *page, struct list_head *force)
 {
 	struct address_space *mapping = page->mapping;
 	pgoff_t pgoff = page->index << (PAGE_CACHE_SHIFT - PAGE_SHIFT);
@@ -741,7 +764,7 @@ static int try_to_unmap_file(struct page *page)
 
 	spin_lock(&mapping->i_mmap_lock);
 	vma_prio_tree_foreach(vma, &iter, &mapping->i_mmap, pgoff, pgoff) {
-		ret = try_to_unmap_one(page, vma);
+		ret = try_to_unmap_one(page, vma, force);
 		if (ret == SWAP_FAIL || !page_mapped(page))
 			goto out;
 	}
@@ -830,7 +853,7 @@ out:
  * SWAP_AGAIN	- we missed a mapping, try again later
  * SWAP_FAIL	- the page is unswappable
  */
-int try_to_unmap(struct page *page)
+int try_to_unmap(struct page *page, struct list_head *force)
 {
 	int ret;
 
@@ -838,9 +861,9 @@ int try_to_unmap(struct page *page)
 	BUG_ON(!PageLocked(page));
 
 	if (PageAnon(page))
-		ret = try_to_unmap_anon(page);
+		ret = try_to_unmap_anon(page, force);
 	else
-		ret = try_to_unmap_file(page);
+		ret = try_to_unmap_file(page, force);
 
 	if (!page_mapped(page))
 		ret = SWAP_SUCCESS;

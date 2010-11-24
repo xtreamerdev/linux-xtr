@@ -20,6 +20,12 @@
 #include <linux/smp_lock.h>
 #include <linux/spinlock.h>
 #include <linux/kallsyms.h>
+#include <linux/ptrace.h>
+#ifdef CONFIG_NET
+/* hcy added for test 2007/11/08 */
+#include <linux/ethtool.h>
+#include <linux/netdevice.h>
+#endif
 
 #include <asm/bootinfo.h>
 #include <asm/branch.h>
@@ -38,6 +44,40 @@
 #include <asm/mmu_context.h>
 #include <asm/watch.h>
 #include <asm/types.h>
+#include <asm/inst.h>
+
+#ifdef CONFIG_REALTEK_WATCHPOINT
+asmlinkage int sys_ptrace(long request, long pid, long addr, long data);
+
+//#define	DEBUG_MESSAGE
+#define BRK_WATCH 777
+unsigned long watch_addr = 0;
+unsigned long watch_conf = 0;
+unsigned long step_value = 0;
+#endif
+
+#if 0
+void show_user_trace()
+{
+	struct pt_regs *regs;
+	unsigned long tmp;
+
+	tmp = (unsigned long)current->thread_info;
+	tmp = tmp+0x2000-32-sizeof(struct pt_regs);
+	regs = (struct pt_regs *)tmp;
+	printk("current epc: %x, ra: %x \n", regs->cp0_epc, regs->regs[31]);
+
+	tmp = (unsigned long)current->parent->thread_info;
+	tmp = tmp+0x2000-32-sizeof(struct pt_regs);
+	regs = (struct pt_regs *)tmp;
+	printk("parent epc: %x, ra: %x \n", regs->cp0_epc, regs->regs[31]);
+
+	tmp = (unsigned long)current->parent->parent->thread_info;
+	tmp = tmp+0x2000-32-sizeof(struct pt_regs);
+	regs = (struct pt_regs *)tmp;
+	printk("pparent epc: %x, ra: %x \n", regs->cp0_epc, regs->regs[31]);
+}
+#endif
 
 extern asmlinkage void handle_tlbm(void);
 extern asmlinkage void handle_tlbl(void);
@@ -265,6 +305,13 @@ void show_registers(struct pt_regs *regs)
 	show_trace(current, (long *) regs->regs[29]);
 	show_code((unsigned int *) regs->cp0_epc);
 	printk("\n");
+#ifdef CONFIG_NET
+	/* hcy added for test ,2007/11/08 */
+	{
+		struct net_device *dev = __dev_get_by_name("eth0");
+		dev->ethtool_ops->show_regs(dev);
+	}
+#endif
 }
 
 static DEFINE_SPINLOCK(die_lock);
@@ -625,11 +672,30 @@ asmlinkage void do_bp(struct pt_regs *regs)
 {
 	unsigned int opcode, bcode;
 	siginfo_t info;
+#ifdef CONFIG_REALTEK_WATCHPOINT
+	unsigned long *pepc;
+	int ret;
+#endif
 
-	die_if_kernel("Break instruction in kernel code", regs);
+#ifdef CONFIG_REALTEK_WATCHPOINT
+	if (unlikely(user_mode(regs))) {
+		// in user mode...
+#endif
+		die_if_kernel("Break instruction in kernel code", regs);
+	
+		if (get_insn_opcode(regs, &opcode))
+			return;
+#ifdef CONFIG_REALTEK_WATCHPOINT
+	} else {
+		// in kernel mode...
+		pepc = (unsigned long *)regs->cp0_epc + ((regs->cp0_cause & CAUSEF_BD) != 0);
+		bcode = ((*pepc >> 6) & ((1 << 20) - 1));
+		if (bcode != BRK_WATCH)
+			die_if_kernel("Break instruction in kernel code", regs);
 
-	if (get_insn_opcode(regs, &opcode))
-		return;
+		opcode = *pepc;
+	}
+#endif
 
 	/*
 	 * There is the ancient bug in the MIPS assemblers that the break
@@ -659,6 +725,24 @@ asmlinkage void do_bp(struct pt_regs *regs)
 		info.si_addr = (void __user *) regs->cp0_epc;
 		force_sig_info(SIGFPE, &info, current);
 		break;
+#ifdef CONFIG_REALTEK_WATCHPOINT
+	case BRK_WATCH << 10:
+		pepc = (unsigned long *)regs->cp0_epc;
+		if (unlikely(user_mode(regs))) {
+			ret = access_process_vm(current, (unsigned long)pepc, &step_value, 4, 1);
+			if (ret != 4) 
+				panic("error in access_process_vm...\n");
+		} else {
+			*pepc = step_value;
+			flush_icache_range((unsigned long)pepc, (unsigned long)pepc+4);
+		}
+		step_value = 0;
+
+		__asm__ __volatile__ ("mtc0 %0, $19;": : "r"(watch_conf));
+		watch_conf = 0;
+
+		break;
+#endif
 	default:
 		force_sig(SIGTRAP, current);
 	}
@@ -769,15 +853,206 @@ asmlinkage void do_mdmx(struct pt_regs *regs)
 	force_sig(SIGILL, current);
 }
 
+#ifdef CONFIG_REALTEK_WATCHPOINT
+static unsigned long get_next_addr(struct pt_regs *regs, unsigned long *pepc)
+{
+	union mips_instruction insn;
+	unsigned long next = 0;
+	
+	insn.word = *pepc;
+	switch (insn.i_format.opcode) {
+	        case spec_op:
+	                switch (insn.r_format.func) {
+	                        case jr_op:
+	                        case jalr_op:
+#ifdef	DEBUG_MESSAGE
+	                                printk("jr, jalr...\n");
+#endif
+					next = regs->regs[insn.r_format.rs];
+	                                break;
+	                }
+	                break;
+
+		case bcond_op:
+			switch (insn.i_format.rt) {
+				case bltz_op:
+				case bltzl_op:
+				case bltzal_op:
+				case bltzall_op:
+#ifdef	DEBUG_MESSAGE
+					printk("bltz, bltzl, bltzal, bltzall...\n");
+#endif
+					if ((long)regs->regs[insn.i_format.rs] < 0)
+						next = regs->cp0_epc + 4 + (insn.i_format.simmediate << 2);
+					else
+						next += 8;
+					break;
+
+				case bgez_op:
+				case bgezl_op:
+				case bgezal_op:
+				case bgezall_op:
+#ifdef	DEBUG_MESSAGE
+					printk("bgez, bgezl, bgezal, bgezall...\n");
+#endif
+					if ((long)regs->regs[insn.i_format.rs] > 0)
+						next = regs->cp0_epc + 4 + (insn.i_format.simmediate << 2);
+					else
+						next += 8;
+					break;
+			}
+			break;
+
+	        case j_op:
+	        case jal_op:
+#ifdef	DEBUG_MESSAGE
+			printk("j, jal...\n");
+#endif
+			next = regs->cp0_epc + 4;
+			next >>= 28;
+			next <<= 28;
+			next |= (insn.j_format.target << 2);
+	                break;
+
+	        case beq_op:
+	        case beql_op:
+#ifdef	DEBUG_MESSAGE
+			printk("beq, beql...\n");
+#endif
+			if (regs->regs[insn.i_format.rs] == regs->regs[insn.i_format.rt])
+				next = regs->cp0_epc + 4 + (insn.i_format.simmediate << 2);
+			else
+				next += 8;
+	                break;
+
+	        case bne_op:
+	        case bnel_op:
+#ifdef	DEBUG_MESSAGE
+			printk("bne, bnel...\n");
+#endif
+			if (regs->regs[insn.i_format.rs] != regs->regs[insn.i_format.rt])
+				next = regs->cp0_epc + 4 + (insn.i_format.simmediate << 2);
+			else
+				next += 8;
+			break;
+
+		case blez_op:
+		case blezl_op:
+#ifdef	DEBUG_MESSAGE
+			printk("blez, blezl...\n");
+#endif
+			if ((long)regs->regs[insn.i_format.rs] <= 0)
+				next = regs->cp0_epc + 4 + (insn.i_format.simmediate << 2);
+			else
+				next += 8;
+			break;
+
+		case bgtz_op:
+		case bgtzl_op:
+#ifdef	DEBUG_MESSAGE
+			printk("bgtz, bgtzl...\n");
+#endif
+			if ((long)regs->regs[insn.i_format.rs] > 0)
+				next = regs->cp0_epc + 4 + (insn.i_format.simmediate << 2);
+			else
+				next += 8;
+			break;
+
+	        default:
+			printk("unexpected condition...by jacky...\n");
+	}
+
+	return next;
+}
+#endif
+
 asmlinkage void do_watch(struct pt_regs *regs)
 {
 	/*
 	 * We use the watch exception where available to detect stack
 	 * overflows.
 	 */
+#ifdef CONFIG_REALTEK_WATCHPOINT
+	unsigned long epc_value, epc_rs;
+	short epc_of;
+	unsigned long *pepc, *next;
+	unsigned long break_inst = (BRK_WATCH << 6) | 0xd;
+	int ret;
+
+	if (regs->cp0_epc == watch_addr) {
+		printk("Caught instruction fetch exception...\n");
+		goto out;
+	}
+	pepc = (unsigned long *)regs->cp0_epc;
+
+	if (delay_slot(regs)) {
+		epc_value = pepc[1];
+		epc_rs = epc_value & 0x03e00000;
+		epc_of = (short)(epc_value & 0x0000ffff);
+		epc_rs >>= 21;
+		if (((regs->regs[epc_rs]+epc_of) & 0xfffffffc) != watch_addr) {
+			__asm__ __volatile__ ("mfc0 %0, $19;": "=r"(watch_conf));
+			__asm__ __volatile__ ("mtc0 $0, $19;");
+			next = (unsigned long *)get_next_addr(regs, pepc);
+			if (next != 0) {
+				step_value = *next;
+#ifdef	DEBUG_MESSAGE
+				printk("next inst: %x \n", (int)next);
+				printk("step_value: %x \n", step_value);
+#endif
+				if (unlikely(user_mode(regs))) {
+					ret = access_process_vm(current, (unsigned long)next, &break_inst, 4, 1);
+					if (ret != 4) 
+						panic("error in access_process_vm...\n");
+				} else {
+					*next = break_inst;
+					flush_icache_range((unsigned long)next, (unsigned long)next+4);
+				}
+				return;
+			}
+		}
+	} else {
+		epc_value = *pepc; 
+		epc_rs = epc_value & 0x03e00000;
+		epc_of = (short)(epc_value & 0x0000ffff);
+		epc_rs >>= 21;
+		if (((regs->regs[epc_rs]+epc_of) & 0xfffffffc) != watch_addr) {
+			__asm__ __volatile__ ("mfc0 %0, $19;": "=r"(watch_conf));
+			__asm__ __volatile__ ("mtc0 $0, $19;");
+
+			next = pepc+1;
+			step_value = *next;
+#ifdef	DEBUG_MESSAGE
+			printk("next inst: %x \n", (int)next);
+			printk("step_value: %x \n", step_value);
+#endif
+			if (unlikely(user_mode(regs))) {
+				ret = access_process_vm(current, (unsigned long)next, &break_inst, 4, 1);
+				if (ret != 4) 
+					panic("error in access_process_vm...\n");
+			} else {
+				*next = break_inst;
+				flush_icache_range((unsigned long)next, (unsigned long)next+4);
+			}
+			return;
+		}
+	}
+	
+out:
+	printk("Caught WATCH excption in 0x%x ...\n", regs->cp0_epc);
+	if (unlikely(user_mode(regs))) {
+		show_regs(regs);
+		force_sig(SIGUSR2, current);
+	} else {
+		show_regs(regs);
+		dump_stack();
+		panic("WATCH exception...\n");
+	}
+#else
 	dump_tlb_all();
 	show_regs(regs);
 	panic("Caught WATCH exception - probably caused by stack overflow.");
+#endif
 }
 
 asmlinkage void do_mcheck(struct pt_regs *regs)
@@ -935,9 +1210,51 @@ void *set_except_vector(int n, void *addr)
 
 	exception_handlers[n] = handler;
 	if (n == 0 && cpu_has_divec) {
+#ifdef CONFIG_REALTEK_USE_SHADOW_REGISTERS
+                *(volatile u32 *)(CAC_BASE + 0x200) = 0x08000000 |
+                                                 (0x03ffffff & (handler >> 2));
+                *(volatile u32 *)(CAC_BASE + 0x204) = 0;
+                flush_icache_range(CAC_BASE + 0x200, CAC_BASE + 0x204);
+
+                *(volatile u32 *)(CAC_BASE + 0x220) = 0x08000000 |
+                                                 (0x03ffffff & (handler >> 2));
+                *(volatile u32 *)(CAC_BASE + 0x224) = 0;
+                flush_icache_range(CAC_BASE + 0x220, CAC_BASE + 0x224);
+
+                *(volatile u32 *)(CAC_BASE + 0x240) = 0x08000000 |
+                                                 (0x03ffffff & (handler >> 2));
+                *(volatile u32 *)(CAC_BASE + 0x244) = 0;
+                flush_icache_range(CAC_BASE + 0x240, CAC_BASE + 0x244);
+
+                *(volatile u32 *)(CAC_BASE + 0x260) = 0x08000000 |
+                                                 (0x03ffffff & (handler >> 2));
+                *(volatile u32 *)(CAC_BASE + 0x264) = 0;
+                flush_icache_range(CAC_BASE + 0x260, CAC_BASE + 0x264);
+
+                *(volatile u32 *)(CAC_BASE + 0x280) = 0x08000000 |
+                                                 (0x03ffffff & (handler >> 2));
+                *(volatile u32 *)(CAC_BASE + 0x284) = 0;
+                flush_icache_range(CAC_BASE + 0x280, CAC_BASE + 0x284);
+
+                *(volatile u32 *)(CAC_BASE + 0x2a0) = 0x08000000 |
+                                                 (0x03ffffff & (handler >> 2));
+                *(volatile u32 *)(CAC_BASE + 0x2a4) = 0;
+                flush_icache_range(CAC_BASE + 0x2a0, CAC_BASE + 0x2a4);
+
+                *(volatile u32 *)(CAC_BASE + 0x2c0) = 0x08000000 |
+                                                 (0x03ffffff & (handler >> 2));
+                *(volatile u32 *)(CAC_BASE + 0x2c4) = 0;
+                flush_icache_range(CAC_BASE + 0x2c0, CAC_BASE + 0x2c4);
+
+                *(volatile u32 *)(CAC_BASE + 0x2e0) = 0x08000000 |
+                                                 (0x03ffffff & (handler >> 2));
+                *(volatile u32 *)(CAC_BASE + 0x2e4) = 0;
+                flush_icache_range(CAC_BASE + 0x2e0, CAC_BASE + 0x2e4);
+#else
 		*(volatile u32 *)(CAC_BASE + 0x200) = 0x08000000 |
 		                                 (0x03ffffff & (handler >> 2));
 		flush_icache_range(CAC_BASE + 0x200, CAC_BASE + 0x204);
+#endif
 	}
 	return (void *)old_handler;
 }

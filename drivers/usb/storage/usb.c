@@ -59,6 +59,8 @@
 #include <scsi/scsi_cmnd.h>
 #include <scsi/scsi_device.h>
 
+#include <platform.h>	// for get board id
+
 #include "usb.h"
 #include "scsiglue.h"
 #include "transport.h"
@@ -90,7 +92,9 @@
 #ifdef CONFIG_USB_STORAGE_JUMPSHOT
 #include "jumpshot.h"
 #endif
-
+#ifdef CONFIG_USB_STORAGE_ONETOUCH
+#include "onetouch.h"
+#endif
 
 /* Some informational data */
 MODULE_AUTHOR("Matthew Dharm <mdharm-usb@one-eyed-alien.net>");
@@ -371,6 +375,29 @@ static int usb_stor_control_thread(void * __us)
 		/* we've got a command, let's do it! */
 		else {
 			US_DEBUG(usb_stor_show_command(us->srb));
+
+#ifdef CONFIG_REALTEK_VENUS_USB	//cfyeh+ 2005/11/07
+#if 0
+		        if(us->srb->cmnd[0] == READ_10) {
+				struct us_data *bk_us;
+				int i;
+				printk("start to test...\n");
+				us->srb->cmnd[4]=0x7;
+				us->srb->cmnd[5]=0x90;
+				bk_us = (struct us_data *)kmalloc(sizeof(struct us_data *),GFP_KERNEL);
+				memcpy(bk_us, us, sizeof(struct us_data *));
+				for(i=0;;i++) {
+					memcpy(us, bk_us, sizeof(struct us_data *));
+					us->srb->cmnd[4]=0x7+i%100;
+					us->srb->cmnd[5]=0x90+i%100;
+					us->proto_handler(us->srb, us);
+					printk("%dth do read....\n",i);
+					//mdelay(100);
+				};
+			}
+#endif
+#endif /* CONFIG_REALTEK_VENUS_USB */	//cfyeh+ 2005/11/07
+
 			us->proto_handler(us->srb, us);
 		}
 
@@ -390,10 +417,15 @@ SkipForAbort:
 		/* If an abort request was received we need to signal that
 		 * the abort has finished.  The proper test for this is
 		 * the TIMED_OUT flag, not srb->result == DID_ABORT, because
-		 * a timeout/abort request might be received after all the
-		 * USB processing was complete. */
-		if (test_bit(US_FLIDX_TIMED_OUT, &us->flags))
+		 * the timeout might have occurred after the command had
+		 * already completed with a different result code. */
+		if (test_bit(US_FLIDX_TIMED_OUT, &us->flags)) {
 			complete(&(us->notify));
+
+			/* Allow USB transfers to resume */
+			clear_bit(US_FLIDX_ABORTING, &us->flags);
+			clear_bit(US_FLIDX_TIMED_OUT, &us->flags);
+		}
 
 		/* finished working on this command */
 		us->srb = NULL;
@@ -458,6 +490,12 @@ static int associate_dev(struct us_data *us, struct usb_interface *intf)
 			GFP_KERNEL, &us->iobuf_dma);
 	if (!us->iobuf) {
 		US_DEBUGP("I/O buffer allocation failed\n");
+		return -ENOMEM;
+	}
+
+	us->sensebuf = kmalloc(US_SENSE_SIZE, GFP_KERNEL);
+	if (!us->sensebuf) {
+		US_DEBUGP("Sense buffer allocation failed\n");
 		return -ENOMEM;
 	}
 	return 0;
@@ -740,25 +778,13 @@ static int usb_stor_acquire_resources(struct us_data *us)
 		return -ENOMEM;
 	}
 
-	/* Lock the device while we carry out the next two operations */
-	down(&us->dev_semaphore);
-
-	/* For bulk-only devices, determine the max LUN value */
-	if (us->protocol == US_PR_BULK) {
-		p = usb_stor_Bulk_max_lun(us);
-		if (p < 0) {
-			up(&us->dev_semaphore);
-			return p;
-		}
-		us->max_lun = p;
-	}
-
 	/* Just before we start our control thread, initialize
 	 * the device if it needs initialization */
-	if (us->unusual_dev->initFunction)
-		us->unusual_dev->initFunction(us);
-
-	up(&us->dev_semaphore);
+	if (us->unusual_dev->initFunction) {
+		p = us->unusual_dev->initFunction(us);
+		if (p)
+			return p;
+	}
 
 	/* Start up our control thread */
 	p = kernel_thread(usb_stor_control_thread, us, CLONE_VM);
@@ -786,6 +812,7 @@ static void usb_stor_release_resources(struct us_data *us)
 	 * any more commands.
 	 */
 	US_DEBUGP("-- sending exit command to thread\n");
+	set_bit(US_FLIDX_DISCONNECTING, &us->flags);
 	up(&us->sema);
 
 	/* Call the destructor routine, if it exists */
@@ -804,6 +831,8 @@ static void dissociate_dev(struct us_data *us)
 {
 	US_DEBUGP("-- %s\n", __FUNCTION__);
 
+	kfree(us->sensebuf);
+
 	/* Free the device-related DMA-mapped buffers */
 	if (us->cr)
 		usb_buffer_free(us->pusb_dev, sizeof(*us->cr), us->cr,
@@ -816,10 +845,57 @@ static void dissociate_dev(struct us_data *us)
 	usb_set_intfdata(us->pusb_intf, NULL);
 }
 
+/* First stage of disconnect processing: stop all commands and remove
+ * the host */
+static void quiesce_and_remove_host(struct us_data *us)
+{
+	/* Prevent new USB transfers, stop the current command, and
+	 * interrupt a SCSI-scan or device-reset delay */
+	set_bit(US_FLIDX_DISCONNECTING, &us->flags);
+	usb_stor_stop_transport(us);
+	wake_up(&us->delay_wait);
+
+	/* It doesn't matter if the SCSI-scanning thread is still running.
+	 * The thread will exit when it sees the DISCONNECTING flag. */
+
+	/* Wait for the current command to finish, then remove the host */
+	down(&us->dev_semaphore);
+	up(&us->dev_semaphore);
+
+	/* queuecommand won't accept any new commands and the control
+	 * thread won't execute a previously-queued command. If there
+	 * is such a command pending, complete it with an error. */
+	if (us->srb) {
+		us->srb->result = DID_NO_CONNECT << 16;
+		scsi_lock(us_to_host(us));
+		us->srb->scsi_done(us->srb);
+		us->srb = NULL;
+		scsi_unlock(us_to_host(us));
+	}
+
+	/* Now we own no commands so it's safe to remove the SCSI host */
+	scsi_remove_host(us_to_host(us));
+}
+
+/* Second stage of disconnect processing: deallocate all resources */
+static void release_everything(struct us_data *us)
+{
+	usb_stor_release_resources(us);
+	dissociate_dev(us);
+
+	/* Drop our reference to the host; the SCSI core will free it
+	 * (and "us" along with it) when the refcount becomes 0. */
+	scsi_host_put(us_to_host(us));
+}
+
 /* Thread to carry out delayed SCSI-device scanning */
 static int usb_stor_scan_thread(void * __us)
 {
 	struct us_data *us = (struct us_data *)__us;
+
+#ifdef USB_STORAGE_SPEEDUP_PORT_ONE
+	int save_delay_use = delay_use;
+#endif /* USB_STORAGE_SPEEDUP_PORT_ONE */
 
 	/*
 	 * This thread doesn't need any user-level access,
@@ -839,6 +915,17 @@ static int usb_stor_scan_thread(void * __us)
 	printk(KERN_DEBUG
 		"usb-storage: device found at %d\n", us->pusb_dev->devnum);
 
+#ifdef USB_STORAGE_SPEEDUP_PORT_ONE
+	if(!strcmp (us->pusb_dev->devpath, USB_STORAGE_SPEEDUP_DEVPATH))
+	{
+		// FIXME: modify for C0D_pvr_board, 
+		// but it should list all need speedup board_id
+		// to speedup port 1 ready time
+		if(platform_info.board_id != C0D_pvr_board)
+			delay_use = USB_STORAGE_SPEEDUP_TIME;
+	}
+#endif /* USB_STORAGE_SPEEDUP_PORT_ONE */
+
 	/* Wait for the timeout to expire or for a disconnect */
 	if (delay_use > 0) {
 		printk(KERN_DEBUG "usb-storage: waiting for device "
@@ -853,8 +940,23 @@ retry:
 		}
 	}
 
+#ifdef USB_STORAGE_SPEEDUP_PORT_ONE
+	if(!strcmp (us->pusb_dev->devpath, USB_STORAGE_SPEEDUP_DEVPATH))
+	{
+		delay_use = save_delay_use;
+	}
+#endif /* USB_STORAGE_SPEEDUP_PORT_ONE */
+
 	/* If the device is still connected, perform the scanning */
 	if (!test_bit(US_FLIDX_DISCONNECTING, &us->flags)) {
+
+		/* For bulk-only devices, determine the max LUN value */
+		if (us->protocol == US_PR_BULK &&
+				!(us->flags & US_FL_SINGLE_LUN)) {
+			down(&us->dev_semaphore);
+			us->max_lun = usb_stor_Bulk_max_lun(us);
+			up(&us->dev_semaphore);
+		}
 		scsi_scan_host(us_to_host(us));
 		printk(KERN_DEBUG "usb-storage: device scan complete\n");
 
@@ -958,7 +1060,7 @@ static int storage_probe(struct usb_interface *intf,
 	if (result < 0) {
 		printk(KERN_WARNING USB_STORAGE 
 		       "Unable to start the device-scanning thread\n");
-		scsi_remove_host(host);
+		quiesce_and_remove_host(us);
 		goto BadDevice;
 	}
 	atomic_inc(&total_threads);
@@ -971,10 +1073,7 @@ static int storage_probe(struct usb_interface *intf,
 	/* We come here if there are any problems */
 BadDevice:
 	US_DEBUGP("storage_probe() failed\n");
-	set_bit(US_FLIDX_DISCONNECTING, &us->flags);
-	usb_stor_release_resources(us);
-	dissociate_dev(us);
-	scsi_host_put(host);
+	release_everything(us);
 	return result;
 }
 
@@ -985,27 +1084,8 @@ static void storage_disconnect(struct usb_interface *intf)
 
 	US_DEBUGP("storage_disconnect() called\n");
 
-	/* Prevent new USB transfers, stop the current command, and
-	 * interrupt a SCSI-scan or device-reset delay */
-	set_bit(US_FLIDX_DISCONNECTING, &us->flags);
-	usb_stor_stop_transport(us);
-	wake_up(&us->delay_wait);
-
-	/* It doesn't matter if the SCSI-scanning thread is still running.
-	 * The thread will exit when it sees the DISCONNECTING flag. */
-
-	/* Wait for the current command to finish, then remove the host */
-	down(&us->dev_semaphore);
-	up(&us->dev_semaphore);
-	scsi_remove_host(us_to_host(us));
-
-	/* Wait for everything to become idle and release all our resources */
-	usb_stor_release_resources(us);
-	dissociate_dev(us);
-
-	/* Drop our reference to the host; the SCSI core will free it
-	 * (and "us" along with it) when the refcount becomes 0. */
-	scsi_host_put(us_to_host(us));
+	quiesce_and_remove_host(us);
+	release_everything(us);
 }
 
 /***********************************************************************

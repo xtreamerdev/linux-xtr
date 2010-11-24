@@ -172,6 +172,13 @@ config MII
 	  or internal device.  It is safe to say Y or M here even if your
 	  ethernet card lack MII.
 
+config 8139CP_VENUS
+	tristate "RealTek RTL-8139 C+ Ethernet Adapter support for Venus board"
+	depends on NET_ETHERNET && REALTEK_VENUS
+	default y
+	help
+	  If you want to enable ethernet on Venus board, say Y.
+
 source "drivers/net/arm/Kconfig"
 
 config MACE
@@ -2193,6 +2200,8 @@ if !UML
 source "drivers/net/tokenring/Kconfig"
 
 source "drivers/net/wireless/Kconfig"
+
+source "drivers/net/uwb/Kconfig"
 
 source "drivers/net/pcmcia/Kconfig"
 endif

@@ -81,7 +81,7 @@ int fat_chain_add(struct inode *inode, int new_dclus, int nr_cluster)
 {
 	struct super_block *sb = inode->i_sb;
 	struct msdos_sb_info *sbi = MSDOS_SB(sb);
-	int ret, new_fclus, last;
+	int ret, new_fclus, old_fclus, last;
 
 	/*
 	 * We must locate the last cluster of the file to add this new
@@ -97,6 +97,65 @@ int fat_chain_add(struct inode *inode, int new_dclus, int nr_cluster)
 		new_fclus = fclus + 1;
 		last = dclus;
 	}
+
+	old_fclus = (inode->i_blocks >> (sbi->cluster_bits - 9));
+	if (new_fclus != old_fclus) {
+		if (new_fclus > old_fclus) {
+			struct fat_entry fatent;
+			int fclus, dclus;
+	
+			fat_get_cluster(inode, old_fclus-1, &fclus, &dclus);
+			new_fclus = fclus + 1;
+			last = dclus;
+
+			// jacky: in order to get the "dclus"
+			fatent_init(&fatent);
+			dclus = fat_ent_read(inode, &fatent, last);
+			if (dclus >= 0)
+				fatent_brelse(&fatent);
+
+			fat_free_clusters(inode, dclus);
+			fat_cache_inval_inode(inode);		// jacky: this can be optimized...
+#ifdef	CONFIG_REALTEK_FAT_AUTO_ENLARGE
+		} else {
+			struct fat_entry fatent;
+			int fclus, dclus, cnt, tmp, err, cluster;
+			const int num = MAX_BUF_PER_PAGE / 2;
+
+			cnt = old_fclus-new_fclus;
+			do {
+				tmp = cnt >= num ? num : cnt;
+//				printk("alloc %d clusters, ", tmp);
+				err = fat_alloc_clusters(inode, &cluster, tmp);
+				if (err) {
+					printk("FAT: Can't allocate new clusters in <fat_chain_add>...\n");
+					goto cont;
+				}
+//				printk("cluster value: %d...\n", cluster);
+
+				fatent_init(&fatent);
+				dclus = fat_ent_read(inode, &fatent, last);
+//				printk("aaaaaaaaaaaaa last:%d, value:%x \n", last, dclus);
+				if (dclus >= 0) {
+					int wait = inode_needs_sync(inode);
+					fat_ent_write(inode, &fatent, cluster, wait);
+					fatent_brelse(&fatent);
+				}
+
+				fat_get_cluster(inode, FAT_ENT_EOF, &fclus, &dclus);
+				new_fclus = fclus + 1;
+				last = dclus;
+
+				cnt -= tmp;
+			} while (cnt);
+
+			fat_cache_inval_inode(inode);
+
+//			printk("bbbbbbbbbbbbb fclus: %d, dclus: %d...\n", fclus, dclus);
+#endif
+		}
+	}
+cont:
 
 	/* add new one to the last of the cluster chain */
 	if (last) {
@@ -127,9 +186,23 @@ int fat_chain_add(struct inode *inode, int new_dclus, int nr_cluster)
 			mark_inode_dirty(inode);
 	}
 	if (new_fclus != (inode->i_blocks >> (sbi->cluster_bits - 9))) {
-		fat_fs_panic(sb, "clusters badly computed (%d != %lu)",
-			new_fclus, inode->i_blocks >> (sbi->cluster_bits - 9));
+		struct fat_entry fatent;
+
+//		fat_fs_panic(sb, "clusters badly computed (%d != %lu)",
+//			new_fclus, inode->i_blocks >> (sbi->cluster_bits - 9));
+		printk("FAT: Filesystem panic (dev %s) in <fat_chain_add>...\n", sb->s_id);
+		fatent_init(&fatent);
+		ret = fat_ent_read(inode, &fatent, last);
+		if (ret >= 0) {
+			int wait = inode_needs_sync(inode);
+			fat_ent_write(inode, &fatent, FAT_ENT_EOF, wait);
+			fatent_brelse(&fatent);
+		} else {
+			fat_fs_panic(sb, "clusters badly computed (%d != %lu)",
+				new_fclus, inode->i_blocks >> (sbi->cluster_bits - 9));
+		}
 		fat_cache_inval_inode(inode);
+		return -EIO;
 	}
 	inode->i_blocks += nr_cluster << (sbi->cluster_bits - 9);
 

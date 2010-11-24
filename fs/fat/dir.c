@@ -220,11 +220,33 @@ int fat_search_long(struct inode *inode, const unsigned char *name,
 	unsigned short opt_shortname = sbi->options.shortname;
 	loff_t cpos = 0;
 	int chl, i, j, last_u, err;
+	static loff_t ppos = 0;
+	int isCached = 0;
 
+	if (ppos != 0) {
+		cpos = ppos;
+		isCached = 2;
+	}
+//	printk("searching %s, cache value: %lld...\n", name, ppos);
 	err = -ENOENT;
 	while(1) {
-		if (fat_get_entry(inode, &cpos, &bh, &de) == -1)
-			goto EODir;
+		if (isCached > 0) {
+			if (--isCached == 0) {
+				if (bh) {
+					brelse(bh);
+					bh = NULL;
+				}
+				cpos = 0;
+			}
+		}
+		if (fat_get_entry(inode, &cpos, &bh, &de) == -1) {
+//			printk("1 Error in fat_get_entry...%lld %lld %d\n", cpos, ppos, isCached);
+			ppos = 0;
+			if (isCached > 0)
+				continue;
+			else
+				goto EODir;
+		}
 parse_record:
 		nr_slots = 0;
 		if (de->name[0] == DELETED_FLAG)
@@ -246,6 +268,7 @@ parse_record:
 					__get_free_page(GFP_KERNEL);
 				if (!unicode) {
 					brelse(bh);
+					ppos = 0;
 					return -ENOMEM;
 				}
 			}
@@ -274,8 +297,14 @@ parse_long:
 				if (ds->id & 0x40) {
 					unicode[offset + 13] = 0;
 				}
-				if (fat_get_entry(inode, &cpos, &bh, &de) < 0)
-					goto EODir;
+				if (fat_get_entry(inode, &cpos, &bh, &de) < 0) {
+//					printk("2 Error in fat_get_entry...%lld %lld %d\n", cpos, ppos, isCached);
+					ppos = 0;
+					if (isCached > 0)
+						continue;
+					else
+						goto EODir;
+				}
 				if (slot == 0)
 					break;
 				ds = (struct msdos_dir_slot *) de;
@@ -364,6 +393,8 @@ Found:
 	sinfo->bh = bh;
 	sinfo->i_pos = fat_make_i_pos(sb, sinfo->bh, sinfo->de);
 	err = 0;
+//	if (isCached > 0) printk("Hit...\n");
+	ppos = cpos;
 EODir:
 	if (unicode)
 		free_page((unsigned long)unicode);

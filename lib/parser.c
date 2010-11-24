@@ -212,9 +212,81 @@ char *match_strdup(substring_t *s)
 	return p;
 }
 
+/*
+	parse_token can parse a string and extract the value of designated token.
+		parsed_string: The string to be parsed.
+		token: the name of the token
+		return value: If return value is NULL, it means that the token is not found.
+			If return value is "non zero", it means that the token is found, and return value will be a string that contains the value of that token.
+			If the token doesn't have a value, return value will be a string that contains empty string ("\0").
+			If return value is "non zero", "BE SURE" TO free it after you donot need it.
+
+		Exp:
+			char *value=parse_token("A1 A2=222 A3=\"333 333\"", "A0");
+				=> value=NULL
+			char *value=parse_token("A1 A2=222 A3=\"333 333\"", "A1");
+				=> value points to a string of "\0"
+			char *value=parse_token("A1 A2=222 A3=\"333 333\"", "A2");
+				=> value points to a string of "222"
+			char *value=parse_token("A1 A2=222 A3=\"333 333\"", "A3");
+				=> value points to a string of "333 333"
+*/
+char *parse_token(const char *parsed_string, const char *token)
+{
+	const char *ptr = parsed_string;
+	const char *start, *end, *value_start, *value_end;
+	char *ret_str;
+	
+	while(1) {
+		value_start = value_end = 0;
+		for(;*ptr == ' ' || *ptr == '\t'; ptr++)	;
+		if(*ptr == '\0')	break;
+		start = ptr;
+		for(;*ptr != ' ' && *ptr != '\t' && *ptr != '=' && *ptr != '\0'; ptr++)	;
+		end = ptr;
+		if(*ptr == '=') {
+			ptr++;
+			if(*ptr == '"') {
+				ptr++;
+				value_start = ptr;
+				for(; *ptr != '"' && *ptr != '\0'; ptr++)	;
+				if(*ptr != '"' || (*(ptr+1) != '\0' && *(ptr+1) != ' ' && *(ptr+1) != '\t')) {
+					printk("system_parameters error! Check your parameters.");
+					break;
+				}
+			} else {
+				value_start = ptr;
+				for(;*ptr != ' ' && *ptr != '\t' && *ptr != '\0' && *ptr != '"'; ptr++)	;
+				if(*ptr == '"') {
+					printk("system_parameters error! Check your parameters.");
+					break;
+				}
+			}
+			value_end = ptr;
+		}
+
+		if(!strncmp(token, start, end-start)) {
+			if(value_start) {
+				ret_str = kmalloc(value_end-value_start+1, GFP_KERNEL);
+				strncpy(ret_str, value_start, value_end-value_start);
+				ret_str[value_end-value_start] = '\0';
+				return ret_str;
+			} else {
+				ret_str = kmalloc(1, GFP_KERNEL);
+				strcpy(ret_str, "");
+				return ret_str;
+			}
+		}
+	}
+
+	return (char*)NULL;
+}
+
+
 EXPORT_SYMBOL(match_token);
 EXPORT_SYMBOL(match_int);
 EXPORT_SYMBOL(match_octal);
 EXPORT_SYMBOL(match_hex);
 EXPORT_SYMBOL(match_strcpy);
 EXPORT_SYMBOL(match_strdup);
+EXPORT_SYMBOL(parse_token);

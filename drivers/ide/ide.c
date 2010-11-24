@@ -160,9 +160,15 @@
 #include <asm/uaccess.h>
 #include <asm/io.h>
 
+int ide_debug = 1;
+
+#include "debug.h"
+
 
 /* default maximum number of failures */
 #define IDE_DEFAULT_MAX_FAILURES 	1
+
+extern int JM_SATA;
 
 static const u8 ide_hwif_to_major[] = { IDE0_MAJOR, IDE1_MAJOR,
 					IDE2_MAJOR, IDE3_MAJOR,
@@ -203,6 +209,7 @@ static void init_hwif_data(ide_hwif_t *hwif, unsigned int index)
 {
 	unsigned int unit;
 
+	ideinfo("init_hwif_data\n");
 	/* bulk initialize hwif & drive info with zeros */
 	memset(hwif, 0, sizeof(ide_hwif_t));
 
@@ -253,6 +260,7 @@ static void init_hwif_default(ide_hwif_t *hwif, unsigned int index)
 {
 	hw_regs_t hw;
 
+	ideinfo("init_hwif_default\n");
 	memset(&hw, 0, sizeof(hw_regs_t));
 
 	ide_init_hwif_ports(&hw, ide_default_io_base(index), 0, &hwif->irq);
@@ -293,6 +301,7 @@ static void __init init_ide_data (void)
 	unsigned int index;
 	static unsigned long magic_cookie = MAGIC_COOKIE;
 
+	ideinfo("init_ide_data\n");
 	if (magic_cookie != MAGIC_COOKIE)
 		return;		/* already initialized */
 	magic_cookie = 0;
@@ -338,6 +347,7 @@ static int ide_system_bus_speed(void)
 #define pci_default 0
 #endif /* CONFIG_PCI */
 
+	ideinfo("ide_system_bus_speed\n");
 	if (!system_bus_speed) {
 		if (idebus_parameter) {
 			/* user supplied value */
@@ -386,6 +396,7 @@ int ide_hwif_request_regions(ide_hwif_t *hwif)
 	unsigned long addr;
 	unsigned int i;
 
+	ideinfo("ide_hwif_request_regions\n");
 	if (hwif->mmio == 2)
 		return 0;
 	BUG_ON(hwif->mmio == 1);
@@ -435,6 +446,7 @@ void ide_hwif_release_regions(ide_hwif_t *hwif)
 {
 	u32 i = 0;
 
+	ideinfo("ide_hwif_release_regions\n");
 	if (hwif->mmio == 2)
 		return;
 	if (hwif->io_ports[IDE_CONTROL_OFFSET])
@@ -459,6 +471,7 @@ void ide_hwif_release_regions(ide_hwif_t *hwif)
 
 static void ide_hwif_restore(ide_hwif_t *hwif, ide_hwif_t *tmp_hwif)
 {
+	ideinfo("ide_hwif_restore\n");
 	hwif->hwgroup			= tmp_hwif->hwgroup;
 
 	hwif->gendev.parent		= tmp_hwif->gendev.parent;
@@ -582,6 +595,7 @@ void ide_unregister(unsigned int index)
 	ide_hwgroup_t *hwgroup;
 	int irq_count = 0, unit;
 
+	ideinfo("ide_unregister\n");
 	BUG_ON(index >= MAX_HWIFS);
 
 	BUG_ON(in_interrupt());
@@ -727,6 +741,7 @@ void ide_setup_ports (	hw_regs_t *hw,
 {
 	int i;
 
+	ideinfo("ide_setup_ports\n");
 	for (i = 0; i < IDE_NR_PORTS; i++) {
 		if (offsets[i] == -1) {
 			switch(i) {
@@ -771,6 +786,7 @@ int ide_register_hw_with_fixup(hw_regs_t *hw, ide_hwif_t **hwifp, void(*fixup)(i
 	int index, retry = 1;
 	ide_hwif_t *hwif;
 
+	ideinfo("ide_register_hw_with_fixup\n");
 	do {
 		for (index = 0; index < MAX_HWIFS; ++index) {
 			hwif = &ide_hwifs[index];
@@ -1221,7 +1237,10 @@ static int generic_ide_suspend(struct device *dev, pm_message_t state)
 	struct request rq;
 	struct request_pm_state rqpm;
 	ide_task_t args;
+	int status;
 
+ 	ideinfo("generic_ide_suspend\n");
+ 	
 	memset(&rq, 0, sizeof(rq));
 	memset(&rqpm, 0, sizeof(rqpm));
 	memset(&args, 0, sizeof(args));
@@ -1231,7 +1250,8 @@ static int generic_ide_suspend(struct device *dev, pm_message_t state)
 	rqpm.pm_step = ide_pm_state_start_suspend;
 	rqpm.pm_state = state;
 
-	return ide_do_drive_cmd(drive, &rq, ide_wait);
+	status = ide_do_drive_cmd(drive, &rq, ide_wait);
+	return(status);
 }
 
 static int generic_ide_resume(struct device *dev)
@@ -1240,8 +1260,39 @@ static int generic_ide_resume(struct device *dev)
 	struct request rq;
 	struct request_pm_state rqpm;
 	ide_task_t args;
+	unsigned long value, timeout = jiffies + WAIT_WORSTCASE;
+	
+	drive->failures = 0;    // reset to zero
+	
+	value = readl((void __iomem *) 0xb8000004);
+	
+	if ((strcmp(drive->name, "hda")==0)||(strcmp(drive->name, "hdb")==0)){
+		writel(value|0x20020, (void __iomem *) 0xb8000004);
+	} else {
+		writel(value|0x30000, (void __iomem *) 0xb8000004);    // for hdc & hdd
+	}
+	
+ 	printk("generic_ide_resume\n");
+	msleep(2);		// spec.: read status after 2 ms
+	if (JM_SATA){
+		printk(KERN_WARNING "%s: generic_ide_resume for JM-SATA long delay\n", drive->name);
+		ssleep(3);
+	} else {
+ 		if (!strcmp(drive->id->model, "DVDRW BDR L28")){ // hack for BTC loader
+			printk(KERN_WARNING "%s: generic_ide_resume for BTC-L28 long delay\n", drive->name);
+			ssleep(3);			// Modified by Frank due to long delay
+		}else{
+			while (!OK_STAT(HWIF(drive)->INB(IDE_STATUS_REG), READY_STAT, BUSY_STAT)){
+				if (time_after(jiffies, timeout)){
+					printk("%s: fail to resume\n", drive->name);
+					break;
+				}
+				msleep(200);
+			}
+		}
+	}
 
-	memset(&rq, 0, sizeof(rq));
+ 	memset(&rq, 0, sizeof(rq));
 	memset(&rqpm, 0, sizeof(rqpm));
 	memset(&args, 0, sizeof(args));
 	rq.flags = REQ_PM_RESUME;
@@ -1261,6 +1312,8 @@ int generic_ide_ioctl(ide_drive_t *drive, struct file *file, struct block_device
 	int err = 0;
 	void __user *p = (void __user *)arg;
 
+ 	ideinfo("generic_ide_ioctl\n");
+ 	
 	down(&ide_setting_sem);
 	if ((setting = ide_find_setting_by_ioctl(drive, cmd)) != NULL) {
 		if (cmd == setting->read_ioctl) {
@@ -1520,6 +1573,7 @@ static int __init ide_setup(char *s)
 	const char max_drive = 'a' + ((MAX_HWIFS * MAX_DRIVES) - 1);
 	const char max_hwif  = '0' + (MAX_HWIFS - 1);
 
+	ideinfo("ide_setup = %s\n", s);
 	
 	if (strncmp(s,"hd",2) == 0 && s[2] == '=')	/* hd= is for hd.c   */
 		return 0;				/* driver and not us */
@@ -1797,6 +1851,7 @@ extern void h8300_ide_init(void);
  */
 static void __init probe_for_hwifs (void)
 {
+ 	ideinfo("probe_for_hwifs\n");
 #ifdef CONFIG_BLK_DEV_IDEPCI
 	ide_scan_pcibus(ide_scan_direction);
 #endif /* CONFIG_BLK_DEV_IDEPCI */
@@ -1858,9 +1913,10 @@ static void __init probe_for_hwifs (void)
 #ifdef CONFIG_BLK_DEV_IDEPNP
 	pnpide_init();
 #endif
-#ifdef CONFIG_H8300
+//#ifdef CONFIG_H8300
+	ideinfo("probe for venus hw\n");
 	h8300_ide_init();
-#endif
+//#endif
 }
 
 void ide_register_subdriver(ide_drive_t *drive, ide_driver_t *driver)
@@ -1925,6 +1981,11 @@ EXPORT_SYMBOL_GPL(ide_bus_type);
  */
 static int __init ide_init(void)
 {
+	//@ do reset for 2.5" Hitachi 80G HDD fail-probing
+	//@ writel((u32)1, (void __iomem *)0xb801215c);		//@ 20070110
+	//@ writel((u32)0, (void __iomem *)0xb801215c);
+	//@ writel((u32)1, (void __iomem *)0xb801215c);
+
 	printk(KERN_INFO "Uniform Multi-Platform E-IDE driver " REVISION "\n");
 	devfs_mk_dir("ide");
 	system_bus_speed = ide_system_bus_speed();
@@ -1988,8 +2049,16 @@ static void __init parse_options (char *line)
 	}
 }
 
+// Added by Frank(96/09/17) for Neptune
+extern void h8300_ide_prepare(void);
+extern void h8300_ide_exit(void);
+
 int init_module (void)
 {
+	ideinfo("init_module\n");
+
+	h8300_ide_prepare();
+	
 	parse_options(options);
 	return ide_init();
 }
@@ -1998,6 +2067,8 @@ void cleanup_module (void)
 {
 	int index;
 
+	ideinfo("cleanup_module\n");
+	
 	for (index = 0; index < MAX_HWIFS; ++index)
 		ide_unregister(index);
 
@@ -2007,6 +2078,8 @@ void cleanup_module (void)
 	devfs_remove("ide");
 
 	bus_unregister(&ide_bus_type);
+
+	h8300_ide_exit();
 }
 
 #else /* !MODULE */

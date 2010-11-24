@@ -433,6 +433,11 @@ int msdos_partition(struct parsed_partitions *state, struct block_device *bdev)
 		if (!size)
 			continue;
 		if (is_extended_partition(p)) {
+			// add to know which partition is a extended partition
+			// by cfyeh 2007/11/13 +
+			state->parts[slot].is_part_extended = 1;
+			// by cfyeh 2007/11/13 -
+
 			/* prevent someone doing mkfs or mkswap on an
 			   extended partition, but leave room for LILO */
 			put_partition(state, slot, start, size == 1 ? 1 : 2);

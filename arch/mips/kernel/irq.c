@@ -49,7 +49,17 @@ asmlinkage unsigned int do_IRQ(unsigned int irq, struct pt_regs *regs)
 {
 	irq_enter();
 
+#ifdef  CONFIG_REALTEK_SCHED_LOG
+        if (sched_log_flag & 0x1)
+                log_intr_enter(irq);
+#endif
+
 	__do_IRQ(irq, regs);
+
+#ifdef	CONFIG_REALTEK_SCHED_LOG
+	if (sched_log_flag & 0x1)
+		log_intr_exit(irq);
+#endif
 
 	irq_exit();
 

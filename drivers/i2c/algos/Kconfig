@@ -66,5 +66,11 @@ config I2C_ALGO_SGI
 	  Supports the SGI interfaces like the ones found on SGI Indy VINO
 	  or SGI O2 MACE.
 
+config I2C_ALGO_VENUS
+	tristate "I2C Realtek Venus interface"
+	depends on I2C && REALTEK_VENUS
+	help
+	  Supports the Realtek Venus I2C
+
 endmenu
 

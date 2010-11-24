@@ -87,56 +87,69 @@ u8 ide_dma_speed(ide_drive_t *drive, u8 mode)
 
 	if (drive->media != ide_disk && hwif->atapi_dma == 0)
 		return 0;
-
+	// modified by Frank 94/12/29
 	switch(mode) {
 		case 0x04:
-			if ((id->dma_ultra & 0x0040) &&
-			    (id->dma_ultra & hwif->ultra_mask))
+			/*if ((id->dma_ultra & 0x0040) &&
+			    (id->dma_ultra & hwif->ultra_mask))*/
+			   if ((id->dma_ultra & 0x0040 & hwif->ultra_mask)) 
 				{ speed = XFER_UDMA_6; break; }
 		case 0x03:
-			if ((id->dma_ultra & 0x0020) &&
-			    (id->dma_ultra & hwif->ultra_mask))
+			/*if ((id->dma_ultra & 0x0020) &&
+			    (id->dma_ultra & hwif->ultra_mask))*/
+			   if ((id->dma_ultra & 0x0020 & hwif->ultra_mask)) 
 				{ speed = XFER_UDMA_5; break; }
 		case 0x02:
-			if ((id->dma_ultra & 0x0010) &&
-			    (id->dma_ultra & hwif->ultra_mask))
+			/*if ((id->dma_ultra & 0x0010) &&
+			    (id->dma_ultra & hwif->ultra_mask))*/
+			   if ((id->dma_ultra & 0x0010 & hwif->ultra_mask)) 
 				{ speed = XFER_UDMA_4; break; }
-			if ((id->dma_ultra & 0x0008) &&
-			    (id->dma_ultra & hwif->ultra_mask))
+			/*if ((id->dma_ultra & 0x0008) &&
+			    (id->dma_ultra & hwif->ultra_mask))*/
+			   if ((id->dma_ultra & 0x0008 & hwif->ultra_mask)) 
 				{ speed = XFER_UDMA_3; break; }
 		case 0x01:
-			if ((id->dma_ultra & 0x0004) &&
-			    (id->dma_ultra & hwif->ultra_mask))
+			/*if ((id->dma_ultra & 0x0004) &&
+			    (id->dma_ultra & hwif->ultra_mask))*/
+			   if ((id->dma_ultra & 0x0004 & hwif->ultra_mask)) 
 				{ speed = XFER_UDMA_2; break; }
-			if ((id->dma_ultra & 0x0002) &&
-			    (id->dma_ultra & hwif->ultra_mask))
+			/*if ((id->dma_ultra & 0x0002) &&
+			    (id->dma_ultra & hwif->ultra_mask))*/
+			   if ((id->dma_ultra & 0x0002 & hwif->ultra_mask))
 				{ speed = XFER_UDMA_1; break; }
-			if ((id->dma_ultra & 0x0001) &&
-			    (id->dma_ultra & hwif->ultra_mask))
+			/*if ((id->dma_ultra & 0x0001) &&
+			    (id->dma_ultra & hwif->ultra_mask))*/
+			   if ((id->dma_ultra & 0x0001 & hwif->ultra_mask))
 				{ speed = XFER_UDMA_0; break; }
 		case 0x00:
-			if ((id->dma_mword & 0x0004) &&
-			    (id->dma_mword & hwif->mwdma_mask))
+			/*if ((id->dma_mword & 0x0004) &&
+			    (id->dma_mword & hwif->mwdma_mask))*/
+			   if ((id->dma_mword & 0x0004 & hwif->mwdma_mask))
 				{ speed = XFER_MW_DMA_2; break; }
-			if ((id->dma_mword & 0x0002) &&
-			    (id->dma_mword & hwif->mwdma_mask))
+			/*if ((id->dma_mword & 0x0002) &&
+			    (id->dma_mword & hwif->mwdma_mask))*/
+			   if ((id->dma_mword & 0x0002 & hwif->mwdma_mask)) 
 				{ speed = XFER_MW_DMA_1; break; }
-			if ((id->dma_mword & 0x0001) &&
-			    (id->dma_mword & hwif->mwdma_mask))
+			/*if ((id->dma_mword & 0x0001) &&
+			    (id->dma_mword & hwif->mwdma_mask))*/
+			   if ((id->dma_mword & 0x0001 & hwif->mwdma_mask))
 				{ speed = XFER_MW_DMA_0; break; }
-			if ((id->dma_1word & 0x0004) &&
-			    (id->dma_1word & hwif->swdma_mask))
+			/*if ((id->dma_1word & 0x0004) &&
+			    (id->dma_1word & hwif->swdma_mask))*/
+			   if ((id->dma_1word & 0x0004 & hwif->swdma_mask))
 				{ speed = XFER_SW_DMA_2; break; }
-			if ((id->dma_1word & 0x0002) &&
-			    (id->dma_1word & hwif->swdma_mask))
+			/*if ((id->dma_1word & 0x0002) &&
+			    (id->dma_1word & hwif->swdma_mask))*/
+			   if ((id->dma_1word & 0x0002 & hwif->swdma_mask))
 				{ speed = XFER_SW_DMA_1; break; }
-			if ((id->dma_1word & 0x0001) &&
-			    (id->dma_1word & hwif->swdma_mask))
+			/*if ((id->dma_1word & 0x0001) &&
+			    (id->dma_1word & hwif->swdma_mask))*/
+			   if ((id->dma_1word & 0x0001 & hwif->swdma_mask))
 				{ speed = XFER_SW_DMA_0; break; }
 	}
 
-//	printk("%s: %s: mode 0x%02x, speed 0x%02x\n",
-//		__FUNCTION__, drive->name, mode, speed);
+	printk("%s: %s: mode 0x%02x, speed 0x%02x\n",
+		__FUNCTION__, drive->name, mode, speed);
 
 	return speed;
 }
@@ -435,7 +448,8 @@ void ide_toggle_bounce(ide_drive_t *drive, int on)
 int ide_set_xfer_rate(ide_drive_t *drive, u8 rate)
 {
 #ifndef CONFIG_BLK_DEV_IDEDMA
-	rate = min(rate, (u8) XFER_PIO_4);
+	// marked by Frank Ting 95/2/17
+	// rate = min(rate, (u8) XFER_PIO_4);
 #endif
 	if(HWIF(drive)->speedproc)
 		return HWIF(drive)->speedproc(drive, rate);

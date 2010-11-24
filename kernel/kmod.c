@@ -69,7 +69,9 @@ int request_module(const char *fmt, ...)
 	char module_name[MODULE_NAME_LEN];
 	unsigned int max_modprobes;
 	int ret;
-	char *argv[] = { modprobe_path, "-q", "--", module_name, NULL };
+	// no use "-q" parameter because busybox has a bug and cannot handle this.
+//	char *argv[] = { modprobe_path, "-q", "--", module_name, NULL };
+	char *argv[] = { modprobe_path, "--", module_name, NULL };
 	static char *envp[] = { "HOME=/",
 				"TERM=linux",
 				"PATH=/sbin:/usr/sbin:/bin:/usr/bin",

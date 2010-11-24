@@ -62,7 +62,9 @@ config USB_DYNAMIC_MINORS
 
 config USB_SUSPEND
 	bool "USB suspend/resume (EXPERIMENTAL)"
-	depends on USB && PM && EXPERIMENTAL
+#cfyeh+ 2005/10/05
+#	depends on USB && PM && EXPERIMENTAL
+	depends on USB && EXPERIMENTAL
 	help
 	  If you say Y here, you can use driver calls or the sysfs
 	  "power/state" file to suspend or resume individual USB

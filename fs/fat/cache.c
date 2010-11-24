@@ -241,6 +241,7 @@ int fat_get_cluster(struct inode *inode, int cluster, int *fclus, int *dclus)
 	}
 
 	fatent_init(&fatent);
+//	printk("dclus: ");
 	while (*fclus < cluster) {
 		/* prevent the infinite loop of cluster chain */
 		if (*fclus > limit) {
@@ -266,12 +267,14 @@ int fat_get_cluster(struct inode *inode, int cluster, int *fclus, int *dclus)
 		}
 		(*fclus)++;
 		*dclus = nr;
+//		printk("%d ", *dclus);
 		if (!cache_contiguous(&cid, *dclus))
 			cache_init(&cid, *fclus, *dclus);
 	}
 	nr = 0;
 	fat_cache_add(inode, &cid);
 out:
+//	printk("\n");
 	fatent_brelse(&fatent);
 	return nr;
 }
@@ -288,8 +291,9 @@ static int fat_bmap_cluster(struct inode *inode, int cluster)
 	if (ret < 0)
 		return ret;
 	else if (ret == FAT_ENT_EOF) {
-		fat_fs_panic(sb, "%s: request beyond EOF (i_pos %lld)",
-			     __FUNCTION__, MSDOS_I(inode)->i_pos);
+//		fat_fs_panic(sb, "%s: request beyond EOF (i_pos %lld)",
+//			     __FUNCTION__, MSDOS_I(inode)->i_pos);
+		printk("FAT: Filesystem panic (dev %s) in <fat_bmap_cluster>...\n", sb->s_id);
 		return -EIO;
 	}
 	return dclus;

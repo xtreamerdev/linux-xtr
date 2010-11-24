@@ -1255,8 +1255,14 @@ static void __init build_r4000_tlb_refill_handler(void)
 	}
 #endif
 
+#ifdef CONFIG_REALTEK_VENUS
+//Audio & video CPUs use 0x80000080 - 0x800000b0 to store interrupt values
+	memcpy((void *)CAC_BASE, final_handler, 0x80);
+	flush_icache_range(CAC_BASE, CAC_BASE + 0x80);
+#else
 	memcpy((void *)CAC_BASE, final_handler, 0x100);
 	flush_icache_range(CAC_BASE, CAC_BASE + 0x100);
+#endif
 }
 
 /*

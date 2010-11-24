@@ -177,9 +177,24 @@ static void mousedev_abs_event(struct input_dev *dev, struct mousedev *mousedev,
 static void mousedev_rel_event(struct mousedev *mousedev, unsigned int code, int value)
 {
 	switch (code) {
-		case REL_X:	mousedev->packet.dx += value; break;
-		case REL_Y:	mousedev->packet.dy -= value; break;
-		case REL_WHEEL:	mousedev->packet.dz -= value; break;
+		case REL_X:
+			mousedev->packet.dx += value;
+#ifdef CONFIG_REALTEK_VENUS_USB	//cfyeh+ 2005/11/07
+			printk("%s:REL_X %d\n",__FUNCTION__, mousedev->packet.dx);
+#endif /* CONFIG_REALTEK_VENUS_USB */	//cfyeh- 2005/11/07
+			break;
+		case REL_Y:
+			mousedev->packet.dy += value;
+#ifdef CONFIG_REALTEK_VENUS_USB	//cfyeh+ 2005/11/07
+			printk("%s:REL_Y %d\n",__FUNCTION__, mousedev->packet.dy);
+#endif /* CONFIG_REALTEK_VENUS_USB */	//cfyeh- 2005/11/07
+			break;
+		case REL_WHEEL:
+			mousedev->packet.dz += value;
+#ifdef CONFIG_REALTEK_VENUS_USB	//cfyeh+ 2005/11/07
+			printk("%s:REL_Z %d\n",__FUNCTION__, mousedev->packet.dz);
+#endif /* CONFIG_REALTEK_VENUS_USB */	//cfyeh- 2005/11/07
+			break;
 	}
 }
 
@@ -191,18 +206,43 @@ static void mousedev_key_event(struct mousedev *mousedev, unsigned int code, int
 		case BTN_TOUCH:
 		case BTN_0:
 		case BTN_FORWARD:
-		case BTN_LEFT:		index = 0; break;
+		case BTN_LEFT:
+			index = 0;
+#ifdef CONFIG_REALTEK_VENUS_USB	//cfyeh+ 2005/11/07
+			printk("%s:BTN_LEFT\n",__FUNCTION__);//cfyeh
+#endif /* CONFIG_REALTEK_VENUS_USB */   //cfyeh- 2005/11/07
+		       	break;
 		case BTN_STYLUS:
 		case BTN_1:
-		case BTN_RIGHT:		index = 1; break;
+		case BTN_RIGHT:
+			index = 1; 
+#ifdef CONFIG_REALTEK_VENUS_USB	//cfyeh+ 2005/11/07
+			printk("%s:BTN_RIGHT\n",__FUNCTION__);//cfyeh
+#endif /* CONFIG_REALTEK_VENUS_USB */   //cfyeh- 2005/11/07
+			break;
 		case BTN_2:
 		case BTN_STYLUS2:
-		case BTN_MIDDLE:	index = 2; break;
+		case BTN_MIDDLE:	
+			index = 2; 
+#ifdef CONFIG_REALTEK_VENUS_USB	//cfyeh+ 2005/11/07
+			printk("%s:BTN_MIDDLE\n",__FUNCTION__);//cfyeh
+#endif /* CONFIG_REALTEK_VENUS_USB */   //cfyeh- 2005/11/07
+			break;
 		case BTN_3:
 		case BTN_BACK:
-		case BTN_SIDE:		index = 3; break;
+		case BTN_SIDE:		
+			index = 3; 
+#ifdef CONFIG_REALTEK_VENUS_USB	//cfyeh+ 2005/11/07
+			printk("%s:BTN_SIDE\n",__FUNCTION__);//cfyeh
+#endif /* CONFIG_REALTEK_VENUS_USB */   //cfyeh- 2005/11/07
+			break;
 		case BTN_4:
-		case BTN_EXTRA:		index = 4; break;
+		case BTN_EXTRA:		
+			index = 4; 
+#ifdef CONFIG_REALTEK_VENUS_USB	//cfyeh+ 2005/11/07
+			printk("%s:BTN_EXTRA\n",__FUNCTION__);//cfyeh
+#endif /* CONFIG_REALTEK_VENUS_USB */   //cfyeh- 2005/11/07
+			break;
 		default: 		return;
 	}
 

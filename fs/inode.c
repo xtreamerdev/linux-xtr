@@ -145,7 +145,7 @@ static struct inode *alloc_inode(struct super_block *sb)
 		mapping->a_ops = &empty_aops;
  		mapping->host = inode;
 		mapping->flags = 0;
-		mapping_set_gfp_mask(mapping, GFP_HIGHUSER);
+		mapping_set_gfp_mask(mapping, GFP_DVRUSER);
 		mapping->assoc_mapping = NULL;
 		mapping->backing_dev_info = &default_backing_dev_info;
 
@@ -778,6 +778,23 @@ static inline struct inode *ifind(struct super_block *sb,
 	return NULL;
 }
 
+static inline struct inode *ifind_nowait(struct super_block *sb,
+		struct hlist_head *head, int (*test)(struct inode *, void *),
+		void *data)
+{
+	struct inode *inode;
+
+	spin_lock(&inode_lock);
+	inode = find_inode(sb, head, test, data);
+	if (inode) {
+		__iget(inode);
+		spin_unlock(&inode_lock);
+		return inode;
+	}
+	spin_unlock(&inode_lock);
+	return NULL;
+}
+
 /**
  * ifind_fast - internal function, you want ilookup() or iget().
  * @sb:		super block of file system to search
@@ -839,6 +856,15 @@ struct inode *ilookup5(struct super_block *sb, unsigned long hashval,
 
 EXPORT_SYMBOL(ilookup5);
 
+struct inode *ilookup5_nowait(struct super_block *sb, unsigned long hashval,
+		int (*test)(struct inode *, void *), void *data)
+{
+	struct hlist_head *head = inode_hashtable + hash(sb, hashval);
+
+	return ifind_nowait(sb, head, test, data);
+}
+
+EXPORT_SYMBOL(ilookup5_nowait);
 /**
  * ilookup - search for an inode in the inode cache
  * @sb:		super block of file system to search

@@ -43,6 +43,8 @@ extern char rs_getDebugChar(void);
 extern int saa9730_kgdb_hook(int);
 extern int saa9730_putDebugChar(char);
 extern char saa9730_getDebugChar(void);
+
+extern int kgdb_enabled;
 #endif
 
 int prom_argc;

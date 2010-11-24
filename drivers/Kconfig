@@ -24,6 +24,13 @@ source "drivers/message/fusion/Kconfig"
 
 source "drivers/ieee1394/Kconfig"
 
+config IEEE1394_VENUS
+	tristate "IEEE1394 driver for Venus board"
+	depends on REALTEK_VENUS
+	default y
+	help
+	  If you want to enable 1394 on Venus board, say Y.
+
 source "drivers/message/i2o/Kconfig"
 
 source "drivers/macintosh/Kconfig"

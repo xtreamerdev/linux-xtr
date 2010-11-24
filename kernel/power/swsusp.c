@@ -240,7 +240,7 @@ static int write_page(unsigned long addr, swp_entry_t * loc)
 	swp_entry_t entry;
 	int error = 0;
 
-	entry = get_swap_page();
+	entry = get_swap_page(0);
 	if (swp_offset(entry) && 
 	    swapfile_used[swp_type(entry)] == SWAPFILE_SUSPEND) {
 		error = rw_swap_page_sync(WRITE, entry,

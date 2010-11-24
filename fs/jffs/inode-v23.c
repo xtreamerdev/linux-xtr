@@ -1057,7 +1057,8 @@ jffs_remove(struct inode *dir, struct dentry *dentry, int type)
 	inode->i_ctime = dir->i_ctime;
 	mark_inode_dirty(inode);
 
-	d_delete(dentry);	/* This also frees the inode */
+// commented by jacky
+//	d_delete(dentry);	/* This also frees the inode */
 
 	result = 0;
 jffs_remove_end:

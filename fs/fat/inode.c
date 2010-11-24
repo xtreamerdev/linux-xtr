@@ -33,18 +33,20 @@ static int fat_default_codepage = CONFIG_FAT_DEFAULT_CODEPAGE;
 static char fat_default_iocharset[] = CONFIG_FAT_DEFAULT_IOCHARSET;
 
 
-static int fat_add_cluster(struct inode *inode)
+static int fat_add_clusters(struct inode *inode, int num)
 {
-	int err, cluster;
+	int err, cluster[num];
 
-	err = fat_alloc_clusters(inode, &cluster, 1);
+	err = fat_alloc_clusters(inode, &cluster[0], num);
 	if (err)
 		return err;
 	/* FIXME: this cluster should be added after data of this
 	 * cluster is writed */
-	err = fat_chain_add(inode, cluster, 1);
+
+	err = fat_chain_add(inode, cluster[0], num);
 	if (err)
-		fat_free_clusters(inode, cluster);
+		fat_free_clusters(inode, cluster[0]);
+
 	return err;
 }
 
@@ -64,13 +66,63 @@ static int fat_get_block(struct inode *inode, sector_t iblock,
 	}
 	if (!create)
 		return 0;
+//	printk("iblock: %d, mmu_private: %lld \n", (int)iblock, MSDOS_I(inode)->mmu_private);
 	if (iblock != MSDOS_I(inode)->mmu_private >> sb->s_blocksize_bits) {
+/*
 		fat_fs_panic(sb, "corrupted file size (i_pos %lld, %lld)",
 			     MSDOS_I(inode)->i_pos, MSDOS_I(inode)->mmu_private);
 		return -EIO;
+*/
+		const int num = MAX_BUF_PER_PAGE / 2;
+		struct block_device *bdev;
+
+		sector_t tblock = MSDOS_I(inode)->mmu_private >> sb->s_blocksize_bits;
+		while (tblock < iblock) {
+			if (!((unsigned long)tblock & (MSDOS_SB(sb)->sec_per_clus - 1))) {
+				if ((iblock - tblock) >= MSDOS_SB(sb)->sec_per_clus * num) {
+					err = fat_add_clusters(inode, num);
+					if (err)
+						return err;
+					tblock += MSDOS_SB(sb)->sec_per_clus * num;
+					MSDOS_I(inode)->mmu_private += sb->s_blocksize * MSDOS_SB(sb)->sec_per_clus * num;
+					continue;
+				} else if ((iblock - tblock) >= MSDOS_SB(sb)->sec_per_clus) {
+					err = fat_add_clusters(inode, 1);
+					if (err)
+						return err;
+					tblock += MSDOS_SB(sb)->sec_per_clus;
+					MSDOS_I(inode)->mmu_private += sb->s_blocksize * MSDOS_SB(sb)->sec_per_clus;
+					continue;
+				} else {
+					err = fat_add_clusters(inode, 1);
+					if (err)
+						return err;
+				}
+			}
+			tblock++;
+			MSDOS_I(inode)->mmu_private += sb->s_blocksize;
+		}
+/* conservative method...
+		sector_t tblock = MSDOS_I(inode)->mmu_private >> sb->s_blocksize_bits;
+		while (tblock < iblock) {
+			if (!((unsigned long)tblock & (MSDOS_SB(sb)->sec_per_clus - 1))) {
+				err = fat_add_clusters(inode, 1);
+				if (err)
+					return err;
+			}
+			tblock++;
+			MSDOS_I(inode)->mmu_private += sb->s_blocksize;
+		}
+*/
+		// flush the buffer page cache...
+		bdev = inode->i_sb->s_bdev;
+		down(&bdev->bd_sem);
+		sync_blockdev(bdev);
+		invalidate_bdev(bdev, 0);
+		up(&bdev->bd_sem);
 	}
 	if (!((unsigned long)iblock & (MSDOS_SB(sb)->sec_per_clus - 1))) {
-		err = fat_add_cluster(inode);
+		err = fat_add_clusters(inode, 1);
 		if (err)
 			return err;
 	}
@@ -83,6 +135,17 @@ static int fat_get_block(struct inode *inode, sector_t iblock,
 	set_buffer_new(bh_result);
 	map_bh(bh_result, sb, phys);
 	return 0;
+}
+
+static int fat_get_blocks(struct inode *inode, sector_t iblock, unsigned long max_blocks, 
+			  struct buffer_head *bh_result, int create)
+{
+	int ret;
+
+	ret = fat_get_block(inode, iblock, bh_result, create);
+	if (ret == 0)
+		bh_result->b_size = (1 << inode->i_blkbits);
+	return ret;
 }
 
 static int fat_writepage(struct page *page, struct writeback_control *wbc)
@@ -98,13 +161,23 @@ static int fat_readpage(struct file *file, struct page *page)
 static int fat_prepare_write(struct file *file, struct page *page,
 			     unsigned from, unsigned to)
 {
-	return cont_prepare_write(page, from, to, fat_get_block,
-				  &MSDOS_I(page->mapping->host)->mmu_private);
+//	return cont_prepare_write(page, from, to, fat_get_block,
+//				  &MSDOS_I(page->mapping->host)->mmu_private);
+	return block_prepare_write(page, from, to, fat_get_block);
 }
 
 static sector_t _fat_bmap(struct address_space *mapping, sector_t block)
 {
 	return generic_block_bmap(mapping, block, fat_get_block);
+}
+
+static ssize_t fat_direct_IO(int rw, struct kiocb *iocb,
+			     const struct iovec *iov, loff_t offset, unsigned long nr_segs)
+{
+	struct file *file = iocb->ki_filp;
+	struct inode *inode = file->f_mapping->host;
+
+	return blockdev_direct_IO(rw, iocb, inode, inode->i_sb->s_bdev, iov, offset, nr_segs, fat_get_blocks, NULL);
 }
 
 static struct address_space_operations fat_aops = {
@@ -113,7 +186,8 @@ static struct address_space_operations fat_aops = {
 	.sync_page	= block_sync_page,
 	.prepare_write	= fat_prepare_write,
 	.commit_write	= generic_commit_write,
-	.bmap		= _fat_bmap
+	.bmap		= _fat_bmap,
+	.direct_IO	= fat_direct_IO,
 };
 
 /*
@@ -453,6 +527,7 @@ static int fat_statfs(struct super_block *sb, struct kstatfs *buf)
 	buf->f_bfree = sbi->free_clusters;
 	buf->f_bavail = sbi->free_clusters;
 	buf->f_namelen = sbi->options.isvfat ? 260 : 12;
+	buf->f_fsid.val[0] = sbi->fat_bits;
 
 	return 0;
 }
@@ -1192,13 +1267,13 @@ int fat_fill_super(struct super_block *sb, void *data, int silent,
 
 		fsinfo = (struct fat_boot_fsinfo *)fsinfo_bh->b_data;
 		if (!IS_FSINFO(fsinfo)) {
-			printk(KERN_WARNING
-			       "FAT: Did not find valid FSINFO signature.\n"
-			       "     Found signature1 0x%08x signature2 0x%08x"
-			       " (sector = %lu)\n",
-			       le32_to_cpu(fsinfo->signature1),
-			       le32_to_cpu(fsinfo->signature2),
-			       sbi->fsinfo_sector);
+//			printk(KERN_WARNING
+//			       "FAT: Did not find valid FSINFO signature.\n"
+//			       "     Found signature1 0x%08x signature2 0x%08x"
+//			       " (sector = %lu)\n",
+//			       le32_to_cpu(fsinfo->signature1),
+//			       le32_to_cpu(fsinfo->signature2),
+//			       sbi->fsinfo_sector);
 		} else {
 			sbi->free_clusters = le32_to_cpu(fsinfo->free_clusters);
 			sbi->prev_free = le32_to_cpu(fsinfo->next_cluster);

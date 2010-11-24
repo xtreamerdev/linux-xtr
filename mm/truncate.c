@@ -136,6 +136,8 @@ void truncate_inode_pages(struct address_space *mapping, loff_t lstart)
 			next++;
 			if (TestSetPageLocked(page))
 				continue;
+			/* no PageAgain(page) check; page->mapping check
+			 * is done in truncate_complete_page */
 			if (PageWriteback(page)) {
 				unlock_page(page);
 				continue;
@@ -170,6 +172,34 @@ void truncate_inode_pages(struct address_space *mapping, loff_t lstart)
 			struct page *page = pvec.pages[i];
 
 			lock_page(page);
+			if (page->mapping != mapping) {
+				struct page *newpage;
+				unsigned long index = page->index;
+				
+				if (!PageAgain(page)) {
+					if (page->index > next)
+						next = page->index;
+					next++;
+
+					unlock_page(page);
+					continue;
+				}
+				BUG_ON(page->mapping != NULL);
+				BUG_ON(!PageAgain(page));
+				
+				unlock_page(page);
+				newpage = find_lock_page(mapping, index);
+				if (newpage == NULL) {
+					if (page->index > next)
+						next = page->index;
+					next++;
+
+					continue;
+				}
+				put_page(page);
+				pvec.pages[i] = newpage;
+				page = newpage;
+			}
 			wait_on_page_writeback(page);
 			if (page->index > next)
 				next = page->index;
@@ -182,6 +212,54 @@ void truncate_inode_pages(struct address_space *mapping, loff_t lstart)
 }
 
 EXPORT_SYMBOL(truncate_inode_pages);
+
+unsigned long __invalidate_mapping_pages(struct address_space *mapping,
+				pgoff_t start, pgoff_t end, bool be_atomic)
+{
+	struct pagevec pvec;
+	pgoff_t next = start;
+	unsigned long ret = 0;
+	int i;
+
+	pagevec_init(&pvec, 0);
+	while (next <= end &&
+			pagevec_lookup(&pvec, mapping, next, PAGEVEC_SIZE)) {
+		for (i = 0; i < pagevec_count(&pvec); i++) {
+			struct page *page = pvec.pages[i];
+			pgoff_t index;
+			int lock_failed;
+
+			lock_failed = TestSetPageLocked(page);
+
+			/*
+			 * We really shouldn't be looking at the ->index of an
+			 * unlocked page.  But we're not allowed to lock these
+			 * pages.  So we rely upon nobody altering the ->index
+			 * of this (pinned-by-us) page.
+			 */
+			index = page->index;
+			if (index > next)
+				next = index;
+			next++;
+			if (lock_failed)
+				continue;
+
+			if (PageDirty(page) || PageWriteback(page))
+				goto unlock;
+			if (page_mapped(page))
+				goto unlock;
+			ret += invalidate_complete_page(mapping, page);
+unlock:
+			unlock_page(page);
+			if (next > end)
+				break;
+		}
+		pagevec_release(&pvec);
+		if (likely(!be_atomic))
+			cond_resched();
+	}
+	return ret;
+}
 
 /**
  * invalidate_mapping_pages - Invalidate all the unlocked pages of one inode
@@ -199,38 +277,7 @@ EXPORT_SYMBOL(truncate_inode_pages);
 unsigned long invalidate_mapping_pages(struct address_space *mapping,
 				pgoff_t start, pgoff_t end)
 {
-	struct pagevec pvec;
-	pgoff_t next = start;
-	unsigned long ret = 0;
-	int i;
-
-	pagevec_init(&pvec, 0);
-	while (next <= end &&
-			pagevec_lookup(&pvec, mapping, next, PAGEVEC_SIZE)) {
-		for (i = 0; i < pagevec_count(&pvec); i++) {
-			struct page *page = pvec.pages[i];
-
-			if (TestSetPageLocked(page)) {
-				next++;
-				continue;
-			}
-			if (page->index > next)
-				next = page->index;
-			next++;
-			if (PageDirty(page) || PageWriteback(page))
-				goto unlock;
-			if (page_mapped(page))
-				goto unlock;
-			ret += invalidate_complete_page(mapping, page);
-unlock:
-			unlock_page(page);
-			if (next > end)
-				break;
-		}
-		pagevec_release(&pvec);
-		cond_resched();
-	}
-	return ret;
+     	return __invalidate_mapping_pages(mapping, start, end, false);
 }
 
 unsigned long invalidate_inode_pages(struct address_space *mapping)
@@ -273,9 +320,25 @@ int invalidate_inode_pages2_range(struct address_space *mapping,
 
 			lock_page(page);
 			if (page->mapping != mapping) {
+				struct page *newpage;
+				unsigned long index = page->index;
+
+				if (!PageAgain(page)) {
+					unlock_page(page);
+					continue;
+				}
+				BUG_ON(page->mapping != NULL);
+				BUG_ON(!PageAgain(page));
+
 				unlock_page(page);
-				continue;
-			}
+				newpage = find_lock_page(mapping, index);
+				if (newpage == NULL) {
+					continue;
+				}
+				put_page(page);
+				pvec.pages[i] = newpage;
+				page = newpage;
+ 			}
 			page_index = page->index;
 			next = page_index + 1;
 			if (next == 0)

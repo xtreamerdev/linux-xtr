@@ -10,8 +10,10 @@
  * usb specific stuff.
  */
 #include "dvb-dibusb.h"
+#include "gl861-fe-i2c.h"
 
 #include <linux/version.h>
+#include <linux/delay.h>
 #include <linux/pci.h>
 
 int dibusb_readwrite_usb(struct usb_dibusb *dib, u8 *wbuf, u16 wlen, u8 *rbuf,
@@ -101,16 +103,32 @@ static int dibusb_ioctl_cmd(struct usb_dibusb *dib, u8 cmd, u8 *param, int plen)
 int dibusb_hw_wakeup(struct dvb_frontend *fe)
 {
 	struct usb_dibusb *dib = (struct usb_dibusb *) fe->dvb->priv;
-	u8 b[1] = { DIBUSB_IOCTL_POWER_WAKEUP };
+	//u8 b[1] = { DIBUSB_IOCTL_POWER_WAKEUP };
 	deb_info("dibusb-device is getting up.\n");
 
-	switch (dib->dibdev->dev_cl->id) {
+#if 1
+	switch ((int)dib->dibdev->dev_cl->id) {
 		case DTT200U:
 			break;
+		// Richard: @FIXME: should we need to power on there???
+		// skip it at this first stage
+		case CLASS_RTD2830:
+		case CLASS_RTL2831U:
+		case CLASS_RTL2830_GL861:		   	 
+		    break;					
 		default:
-			dibusb_ioctl_cmd(dib,DIBUSB_IOCTL_CMD_POWER_MODE, b,1);
+		//	dibusb_ioctl_cmd(dib,DIBUSB_IOCTL_CMD_POWER_MODE, b,1);
 			break;
 	}
+#else
+    switch ((int)dib->dibdev->dev_cl->id) {					
+    // kevin modified : if yout hw have to do any thing to wake up
+    //                  please add it here        
+	default:		
+		break;
+	}
+
+#endif
 
 	if (dib->fe_init)
 		return dib->fe_init(fe);
@@ -129,6 +147,12 @@ int dibusb_hw_sleep(struct dvb_frontend *fe)
 		case NOVAT_USB2:
 		case DTT200U:
 			break;
+		// Richard: @FIXME: should we need to power off there???
+		// skip it at this first stage
+		case CLASS_RTD2830:
+		case CLASS_RTL2831U:            
+		case CLASS_RTL2830_GL861:        
+			break;
 		default:
 			dibusb_ioctl_cmd(dib,DIBUSB_IOCTL_CMD_POWER_MODE, b,1);
 			break;
@@ -145,7 +169,7 @@ int dibusb_set_streaming_mode(struct usb_dibusb *dib,u8 mode)
 	return dibusb_readwrite_usb(dib,b,2,NULL,0);
 }
 
-static int dibusb_urb_kill(struct usb_dibusb *dib)
+int dibusb_urb_kill(struct usb_dibusb *dib)
 {
 	int i;
 deb_info("trying to kill urbs\n");
@@ -167,7 +191,8 @@ static int dibusb_urb_submit(struct usb_dibusb *dib)
 	int i,ret;
 	if (dib->init_state & DIBUSB_STATE_URB_INIT) {
 		for (i = 0; i < dib->dibdev->dev_cl->urb_count; i++) {
-			deb_info("submitting URB no. %d\n",i);
+			//deb_info("submitting URB no. %d\n",i);
+			printk("submitting URB no. %d, buffer = %p\n",i,dib->urb_list[i]->transfer_buffer);	
 			if ((ret = usb_submit_urb(dib->urb_list[i],GFP_ATOMIC))) {
 				err("could not submit buffer urb no. %d - get them all back\n",i);
 				dibusb_urb_kill(dib);
@@ -185,20 +210,6 @@ int dibusb_streaming(struct usb_dibusb *dib,int onoff)
 		dibusb_urb_submit(dib);
 	else
 		dibusb_urb_kill(dib);
-
-	switch (dib->dibdev->dev_cl->id) {
-		case DIBUSB2_0:
-		case DIBUSB2_0B:
-		case NOVAT_USB2:
-		case UMT2_0:
-			if (onoff)
-				return dibusb_ioctl_cmd(dib,DIBUSB_IOCTL_CMD_ENABLE_STREAM,NULL,0);
-			else
-				return dibusb_ioctl_cmd(dib,DIBUSB_IOCTL_CMD_DISABLE_STREAM,NULL,0);
-			break;
-		default:
-			break;
-	}
 	return 0;
 }
 
@@ -210,10 +221,11 @@ int dibusb_urb_init(struct usb_dibusb *dib)
 	 * when reloading the driver w/o replugging the device
 	 * a timeout occures, this helps
 	 */
+	 /*
 	usb_clear_halt(dib->udev,usb_sndbulkpipe(dib->udev,dib->dibdev->dev_cl->pipe_cmd));
 	usb_clear_halt(dib->udev,usb_rcvbulkpipe(dib->udev,dib->dibdev->dev_cl->pipe_cmd));
 	usb_clear_halt(dib->udev,usb_rcvbulkpipe(dib->udev,dib->dibdev->dev_cl->pipe_data));
-
+	*/
 	/* allocate the array for the data transfer URBs */
 	dib->urb_list = kmalloc(dib->dibdev->dev_cl->urb_count*sizeof(struct urb *),GFP_KERNEL);
 	if (dib->urb_list == NULL)

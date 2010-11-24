@@ -97,9 +97,11 @@ static inline int emulate_load_store_insn(struct pt_regs *regs,
 	void __user *addr, unsigned int __user *pc,
 	unsigned long **regptr, unsigned long *newvalue)
 {
+	const int field = 2 * sizeof(unsigned long);
 	union mips_instruction insn;
 	unsigned long value;
 	unsigned int res;
+	int write = regs->cp0_cause & 4;
 
 	regs->regs[0] = 0;
 	*regptr=NULL;
@@ -472,12 +474,31 @@ fault:
 	if (fixup_exception(regs))
 		return 1;
 
+	printk("==========================================================\n");
+	printk("do_page_fault() #1: sending SIGSEGV to %s for "
+		"invalid %s\n%0*lx (epc == %0*lx, ra == %0*lx)\n",
+		current->comm,
+		write ? "write access to" : "read access from",
+		field, regs->cp0_badvaddr,
+		field, (unsigned long) regs->cp0_epc,
+		field, (unsigned long) regs->regs[31]);
+	printk("==========================================================\n");
+
 	die_if_kernel ("Unhandled kernel unaligned access", regs);
 	send_sig(SIGSEGV, current, 1);
 
 	return 0;
 
 sigbus:
+	printk("==========================================================\n");
+        printk("#2: sending SIGBUS to %s for %s bus error\naddress == %0*lx (epc == %0*lx, ra == %0*lx)\n",
+               current->comm,
+               write ? "Write" : "Read or Instruction",
+               field, regs->cp0_badvaddr,
+               field, regs->cp0_epc,
+	       field, regs->regs[31]);
+	printk("==========================================================\n");
+
 	die_if_kernel("Unhandled kernel unaligned access", regs);
 	send_sig(SIGBUS, current, 1);
 
@@ -492,10 +513,12 @@ sigill:
 
 asmlinkage void do_ade(struct pt_regs *regs)
 {
+	const int field = 2 * sizeof(unsigned long);
 	unsigned long *regptr, newval;
 	extern int do_dsemulret(struct pt_regs *);
 	unsigned int __user *pc;
 	mm_segment_t seg;
+	int write = regs->cp0_cause & 4;
 
 	/*
 	 * Address errors may be deliberately induced by the FPU emulator to
@@ -541,7 +564,16 @@ asmlinkage void do_ade(struct pt_regs *regs)
 	return;
 
 sigbus:
-	die_if_kernel("Kernel unaligned instruction access", regs);
+	printk("==========================================================\n");
+        printk("#1: sending SIGBUS to %s for %s bus error\naddress == %0*lx (epc == %0*lx, ra == %0*lx)\n",
+               current->comm,
+               write ? "Write" : "Read or Instruction",
+               field, regs->cp0_badvaddr,
+               field, regs->cp0_epc,
+	       field, regs->regs[31]);
+	printk("==========================================================\n");
+
+	die_if_kernel("Unhandled kernel unaligned access or invalid instruction", regs);
 	force_sig(SIGBUS, current);
 
 	/*

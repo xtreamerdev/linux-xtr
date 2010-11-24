@@ -27,6 +27,7 @@ struct pt_regs;
 extern asmlinkage unsigned int do_IRQ(unsigned int irq, struct pt_regs *regs);
 
 #ifdef CONFIG_PREEMPT
+#ifndef CONFIG_REALTEK_SCHED_LOG
 
 /*
  * do_IRQ handles all normal device IRQ's (the special
@@ -43,6 +44,7 @@ do {									\
 	irq_exit();							\
 } while (0)
 
+#endif
 #endif
 
 extern void arch_init_irq(void);

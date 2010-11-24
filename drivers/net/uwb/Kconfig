@@ -1,0 +1,23 @@
+#
+# UWB wireless LAN device configuration
+#
+
+menu "UWB wireless LAN"
+	depends on NETDEVICES
+
+config NET_UWB
+	bool "UWB wireless LAN drivers"
+	---help---
+	  UWB wireless LAN drivers
+
+comment "Realtek UWB wireless LAN drivers"
+	depends on NET_UWB
+
+config REALTEK_USB_RTU7300
+	tristate "Realtek RTU7300 UWB usb driver"
+	depends on NET_UWB && USB
+	---help---
+	  Say Y if you want to use it.
+
+endmenu
+

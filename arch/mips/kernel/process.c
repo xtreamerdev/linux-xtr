@@ -117,6 +117,9 @@ void start_thread(struct pt_regs * regs, unsigned long pc, unsigned long sp)
 	status |= (current->thread.mflags & MF_32BIT_REGS) ? 0 : ST0_FR;
 #endif
 	status |= KU_USER;
+#ifdef CONFIG_REALTEK_OPEN_CU0
+	status |= ST0_CU0;
+#endif
 	regs->cp0_status = status;
 	clear_used_math();
 	lose_fpu();
@@ -170,7 +173,11 @@ int copy_thread(int nr, unsigned long clone_flags, unsigned long usp,
 	childregs->regs[2] = 0;	/* Child gets zero as return value */
 	regs->regs[2] = p->pid;
 
+#ifdef CONFIG_REALTEK_OPEN_CU0
+	if (!(childregs->cp0_status & ST0_UM)) {
+#else
 	if (childregs->cp0_status & ST0_CU0) {
+#endif
 		childregs->regs[28] = (unsigned long) ti;
 		childregs->regs[29] = childksp;
 		ti->addr_limit = KERNEL_DS;

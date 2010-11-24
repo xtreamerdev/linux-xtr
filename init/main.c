@@ -47,6 +47,11 @@
 #include <linux/rmap.h>
 #include <linux/mempolicy.h>
 #include <linux/key.h>
+#ifdef CONFIG_REALTEK_SB2_DBG
+#include <linux/interrupt.h>
+
+#include <platform.h>
+#endif
 
 #include <asm/io.h>
 #include <asm/bugs.h>
@@ -107,6 +112,12 @@ extern void tc_init(void);
 enum system_states system_state;
 EXPORT_SYMBOL(system_state);
 
+#ifdef CONFIG_REALTEK_SB2_DBG
+#define SB2_DBG_ID 0x2266
+
+extern platform_info_t platform_info;
+#endif
+
 /*
  * Boot command-line arguments
  */
@@ -125,6 +136,35 @@ static char *execute_command;
 
 /* Setup configured maximum number of CPUs to activate */
 static unsigned int max_cpus = NR_CPUS;
+
+#ifdef CONFIG_REALTEK_SB2_DBG
+irqreturn_t sb2_dbg_isr(int irq, void *dev_id, struct pt_regs *regs)
+{
+	int itr;
+	printk("sb2 dbg number %d...\n", irq);
+
+	itr = readl((void *)0xb801a4e0);
+	if (itr & 0x410) {
+		printk("System got interrupt from SB2...\n");
+		printk("SB2_DBG_INT: %x \n", readl((void *)0xb801a4e0));
+		printk("SB2_DBG_ADDR: %x \n", readl((void *)0xb801a4c0));
+		BUG();
+	} else {
+	        return IRQ_NONE;
+	}
+
+	return IRQ_HANDLED;
+}
+
+void sb2_dbg_init(void)
+{
+	if (platform_info.cpu_id != realtek_neptune_cpu) {
+		printk("This is not Neptune platform. The SB2 Debug facility is disabled. \n");
+		return;
+	}
+	request_irq(5, sb2_dbg_isr, SA_SHIRQ | SA_INTERRUPT, "SB2_DBG", (void *)SB2_DBG_ID);
+}
+#endif
 
 /*
  * Setup routine for controlling SMP activation
@@ -469,6 +509,9 @@ asmlinkage void __init start_kernel(void)
 	softirq_init();
 	time_init();
 
+#ifdef CONFIG_REALTEK_SB2_DBG
+	sb2_dbg_init();
+#endif
 	/*
 	 * HACK ALERT! This is early. We're enabling the console before
 	 * we've done PCI setups etc, and console_init() must be aware of

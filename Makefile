@@ -522,7 +522,7 @@ CFLAGS		+= -fomit-frame-pointer
 endif
 
 ifdef CONFIG_DEBUG_INFO
-CFLAGS		+= -g
+CFLAGS		+= -g -fno-schedule-insns -fno-schedule-insns2
 endif
 
 include $(srctree)/arch/$(ARCH)/Makefile
@@ -725,6 +725,8 @@ endif # ifdef CONFIG_KALLSYMS
 # vmlinux image - including updated kernel symbols
 vmlinux: $(vmlinux-lds) $(vmlinux-init) $(vmlinux-main) $(kallsyms.o) FORCE
 	$(call if_changed_rule,vmlinux__)
+	mipsel-linux-objcopy -O binary -R .comment -R .note vmlinux vmlinux.bin
+	mipsel-linux-objdump --file-headers vmlinux
 
 # The actual objects are generated when descending, 
 # make sure no implicit rule kicks in
@@ -1147,7 +1149,7 @@ endif # KBUILD_EXTMOD
 #(which is the most common case IMHO) to avoid unneeded clutter in the big tags file.
 #Adding $(srctree) adds about 20M on i386 to the size of the output file!
 
-ifeq ($(KBUILD_OUTPUT),)
+ifeq ($(src),$(obj))
 __srctree =
 else
 __srctree = $(srctree)/

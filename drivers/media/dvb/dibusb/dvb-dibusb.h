@@ -23,6 +23,8 @@
 
 #include "dib3000.h"
 #include "mt352.h"
+#include "rtl2830_priv.h"
+#include "rtl2830.h"
 
 /* debug */
 #ifdef CONFIG_DVB_DIBCOM_DEBUG
@@ -75,13 +77,26 @@ typedef enum {
 	DIBUSB2_0B,
 	NOVAT_USB2,
 	DTT200U,
+	CLASS_RTD2830,
+	CLASS_RTL2831U,
+	CLASS_RTL2830_GL861,
+	CLASS_RTL2820_GL861,
 } dibusb_class_t;
 
 typedef enum {
 	DIBUSB_TUNER_CABLE_THOMSON = 0,
 	DIBUSB_TUNER_COFDM_PANASONIC_ENV57H1XD5,
 	DIBUSB_TUNER_CABLE_LG_TDTP_E102P,
-	DIBUSB_TUNER_COFDM_PANASONIC_ENV77H11D5,
+	DIBUSB_TUNER_COFDM_PANASONIC_ENV77H11D5,		    
+	DIBUSB_TUNER_COFDM_QT1010,
+	DIBUSB_TUNER_COFDM_THOMSON_FE664,	
+    DIBUSB_TUNER_COFDM_MICROTUNE_MT2060,
+    DIBUSB_TUNER_COFDM_PHILIPS_TD1316,
+    DIBUSB_TUNER_COFDM_LG_TDTMG252D,
+    DIBUSB_TUNER_COFDM_THOMSON_DDT7680X,
+    DIBUSB_TUNER_COFDM_THOMSON_DPT78010,
+    //----------------------------------------------
+    DIBUSB_TUNER_MAX_COUNT      // End of List
 } dibusb_tuner_t;
 
 typedef enum {
@@ -89,6 +104,10 @@ typedef enum {
 	DIBUSB_DIB3000MC,
 	DIBUSB_MT352,
 	DTT200U_FE,
+	DEMOD_RTD2830,
+	DEMOD_RTD2830B,
+	DEMOD_RTL2831U,
+	DEMOD_RTL2820,
 } dibusb_demodulator_t;
 
 typedef enum {
@@ -99,8 +118,8 @@ typedef enum {
 
 struct dibusb_tuner {
 	dibusb_tuner_t id;
-
-	u8 pll_addr;       /* tuner i2c address */
+	u8 pll_addr;            /* tuner i2c address */
+	u8 ext_pll_addr;        /* tuner i2c address */
 };
 extern struct dibusb_tuner dibusb_tuner[];
 
@@ -228,6 +247,10 @@ int dibusb_readwrite_usb(struct usb_dibusb *dib, u8 *wbuf, u16 wlen, u8 *rbuf,
 	u16 rlen);
 int dibusb_write_usb(struct usb_dibusb *dib, u8 *buf, u16 len);
 
+
+int rtd2830_streaming(void *dib,int onoff);
+
+
 int dibusb_hw_wakeup(struct dvb_frontend *);
 int dibusb_hw_sleep(struct dvb_frontend *);
 int dibusb_set_streaming_mode(struct usb_dibusb *,u8);
@@ -235,6 +258,15 @@ int dibusb_streaming(struct usb_dibusb *,int);
 
 int dibusb_urb_init(struct usb_dibusb *);
 int dibusb_urb_exit(struct usb_dibusb *);
+
+int rtd2830_dibusb_urb_init(void*                   dib1,
+                        u8*                     p_buffer,
+                        int                     len_buffer,
+                        int                     urb_size);
+
+int rtd2830_dibusb_urb_exit(void* dib1);
+int rtd2830_dibusb_urb_reset(void* dib1);
+int dibusb_urb_kill(struct usb_dibusb *dib);
 
 /* dvb-fe-dtt200u.c */
 struct dvb_frontend* dtt200u_fe_attach(struct usb_dibusb *,struct dib_fe_xfer_ops *);
@@ -262,12 +294,14 @@ struct dvb_frontend* dtt200u_fe_attach(struct usb_dibusb *,struct dib_fe_xfer_op
  * bulk read:  byte_buffer (length_word bytes)
  */
 #define DIBUSB_REQ_I2C_READ			0x02
+#define DIBUSB_REQ_I2C_READ_DIRECT	0x82    // <addr><cont><data....>
 
 /*
  * i2c write
  * bulk write: 0x03 (7bit i2c_addr << 1) register_bytes value_bytes
  */
 #define DIBUSB_REQ_I2C_WRITE			0x03
+#define DIBUSB_REQ_I2C_WRITE_DIRECT		0x8A    // <addr><cont><data....>
 
 /*
  * polling the value of the remote control
@@ -323,5 +357,8 @@ struct dvb_frontend* dtt200u_fe_attach(struct usb_dibusb *,struct dib_fe_xfer_op
 /* modify streaming of the FX2 */
 #define DIBUSB_IOCTL_CMD_ENABLE_STREAM	0x01
 #define DIBUSB_IOCTL_CMD_DISABLE_STREAM	0x02
+
+#define SKEL_VENDOR_IN  (USB_DIR_IN|USB_TYPE_VENDOR)
+#define SKEL_VENDOR_OUT (USB_DIR_OUT|USB_TYPE_VENDOR)
 
 #endif

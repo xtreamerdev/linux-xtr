@@ -26,6 +26,12 @@
 #include "xattr.h"
 #include "acl.h"
 
+#ifdef EXT3_ABCOPY
+extern ssize_t ext3_file_sendfile(struct file *in_file, loff_t *ppos,
+                         size_t count, read_actor_t actor, void *target);
+extern ssize_t ext3_rtl_sendpage(struct file *file, struct page *page,
+                             int offset, size_t size, loff_t *ppos, int more);
+#endif
 /*
  * Called when an inode is released. Note that this is different
  * from ext3_file_open: open gets called at every open, but release
@@ -114,7 +120,12 @@ struct file_operations ext3_file_operations = {
 	.open		= generic_file_open,
 	.release	= ext3_release_file,
 	.fsync		= ext3_sync_file,
+#ifdef EXT3_ABCOPY
+	.sendfile	= ext3_file_sendfile,
+	.sendpage	= ext3_rtl_sendpage,
+#else
 	.sendfile	= generic_file_sendfile,
+#endif
 };
 
 struct inode_operations ext3_file_inode_operations = {

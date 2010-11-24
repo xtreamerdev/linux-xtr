@@ -1,0 +1,5 @@
+
+#####################
+# This is a list for rescue. resuce needs /dev/console to boot up.
+
+nod /dev/console 644 0 0 c 5 1

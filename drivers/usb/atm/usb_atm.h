@@ -29,13 +29,8 @@
 #include <asm/semaphore.h>
 
 /*
-#define DEBUG
 #define VERBOSE_DEBUG
 */
-
-#if !defined (DEBUG) && defined (CONFIG_USB_DEBUG)
-#	define DEBUG
-#endif
 
 #include <linux/usb.h>
 

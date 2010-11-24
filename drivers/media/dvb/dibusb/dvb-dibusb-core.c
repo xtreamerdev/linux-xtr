@@ -66,6 +66,9 @@ MODULE_PARM_DESC(rc_key_repeat_count, "how many key repeats will be dropped befo
 #define USB_VID_IMC_NETWORKS				0x13d3
 #define USB_VID_TWINHAN						0x1822
 #define USB_VID_ULTIMA_ELECTRONIC			0x05d8
+#define USB_VID_REALTEK                     0x0BDA
+#define USB_VID_RTK_RTD2830                 0x15F4
+#define USB_VID_GENESYS                     0x05E3
 
 /* Product IDs */
 #define USB_PID_ADSTECH_USB2_COLD			0xa333
@@ -103,6 +106,10 @@ MODULE_PARM_DESC(rc_key_repeat_count, "how many key repeats will be dropped befo
 #define USB_PID_YAKUMO_DTT200U_WARM			0x0301
 #define USB_PID_WINTV_NOVA_T_USB2_COLD		0x9300
 #define USB_PID_WINTV_NOVA_T_USB2_WARM		0x9301
+#define USB_PID_RTD2830_COLD                0x2830
+#define USB_PID_RTD2830_WARM                0x0025
+#define USB_PID_RTD2831U_WARM               0x2831 
+#define USB_PID_GENESYS_GL861               0x0504
 
 /* USB Driver stuff
  * table of devices that this driver is working with
@@ -153,17 +160,11 @@ static struct usb_device_id dib_table [] = {
 /* 31 */	{ USB_DEVICE(USB_VID_HAUPPAUGE,		USB_PID_WINTV_NOVA_T_USB2_WARM) },
 /* 32 */	{ USB_DEVICE(USB_VID_ADSTECH,		USB_PID_ADSTECH_USB2_COLD) },
 /* 33 */	{ USB_DEVICE(USB_VID_ADSTECH,		USB_PID_ADSTECH_USB2_WARM) },
-/* 
- * activate the following define when you have one of the devices and want to 
- * build it from build-2.6 in dvb-kernel
- */
-// #define CONFIG_DVB_DIBUSB_MISDESIGNED_DEVICES
-#ifdef CONFIG_DVB_DIBUSB_MISDESIGNED_DEVICES
-/* 34 */	{ USB_DEVICE(USB_VID_ANCHOR,		USB_PID_ULTIMA_TVBOX_ANCHOR_COLD) },
-/* 35 */	{ USB_DEVICE(USB_VID_CYPRESS,		USB_PID_ULTIMA_TVBOX_USB2_FX_COLD) },
-/* 36 */	{ USB_DEVICE(USB_VID_ANCHOR,		USB_PID_ULTIMA_TVBOX_USB2_FX_WARM) },
-/* 37 */	{ USB_DEVICE(USB_VID_ANCHOR,		USB_PID_DIBCOM_ANCHOR_2135_COLD) },
-#endif
+
+/* 34 */	{ USB_DEVICE(USB_VID_REALTEK,		USB_PID_RTD2830_COLD) },
+/* 35 */	{ USB_DEVICE(USB_VID_RTK_RTD2830,	USB_PID_RTD2830_WARM) },
+/* 36 */	{ USB_DEVICE(USB_VID_REALTEK,	    USB_PID_RTD2831U_WARM) },
+/* 37 */	{ USB_DEVICE(USB_VID_GENESYS,	    USB_PID_GENESYS_GL861) },
 			{ }		/* Terminating entry */
 };
 
@@ -175,19 +176,53 @@ static struct dibusb_usb_controller dibusb_usb_ctrl[] = {
 	{ .name = "Cypress FX2",    .cpu_cs_register = 0xe600 },
 };
 
-struct dibusb_tuner dibusb_tuner[] = {
-	{ DIBUSB_TUNER_CABLE_THOMSON, 
-	  0x61 
+struct dibusb_tuner dibusb_tuner[] = 
+{
+	{ 
+	    .id = DIBUSB_TUNER_CABLE_THOMSON, 
+	    .pll_addr = 0x61 
 	},
-	{ DIBUSB_TUNER_COFDM_PANASONIC_ENV57H1XD5,
-	  0x60 
+	{ 
+	    .id = DIBUSB_TUNER_COFDM_PANASONIC_ENV57H1XD5,
+	    .pll_addr = 0x60 
 	},
-	{ DIBUSB_TUNER_CABLE_LG_TDTP_E102P,
-	  0x61
+	{ 
+	    .id = DIBUSB_TUNER_CABLE_LG_TDTP_E102P,
+	    .pll_addr = 0x61
 	},
-	{ DIBUSB_TUNER_COFDM_PANASONIC_ENV77H11D5,
-	  0x60
+	{ 
+	    .id = DIBUSB_TUNER_COFDM_PANASONIC_ENV77H11D5,
+	    .pll_addr = 0x60
 	},
+	{ 
+	    .id = DIBUSB_TUNER_COFDM_QT1010,
+	    .pll_addr = 0x62
+	},	
+	{ 
+	    .id = DIBUSB_TUNER_COFDM_THOMSON_FE664,
+	    .pll_addr = 0x61
+	},
+	{ 	    
+	    .id = DIBUSB_TUNER_COFDM_MICROTUNE_MT2060,
+	    .pll_addr = 0x60
+	},
+	{ 
+	    .id = DIBUSB_TUNER_COFDM_PHILIPS_TD1316,
+	    .pll_addr = 0x63
+	},		
+	{
+	    .id = DIBUSB_TUNER_COFDM_LG_TDTMG252D,
+	    .pll_addr = 0x60	    
+    },
+    {
+	    .id = DIBUSB_TUNER_COFDM_THOMSON_DDT7680X,
+	    .pll_addr = 0x60	    
+    },
+    {
+	    .id = DIBUSB_TUNER_COFDM_THOMSON_DPT78010,
+	    .pll_addr = 0x60,	    
+	    .ext_pll_addr = 0x42
+    },    
 };
 
 static struct dibusb_demod dibusb_demod[] = {
@@ -206,14 +241,32 @@ static struct dibusb_demod dibusb_demod[] = {
 	{ DTT200U_FE,
 	  8,
 	  { 0xff,0 }, /* there is no i2c bus in this device */
-	}
+	},
+	{ DEMOD_RTD2830,
+	  254,
+	  { 0x10,0 },
+	},
+    { DEMOD_RTD2830B,
+	  254,
+	  { 0x10,0 },
+	},
+	{ DEMOD_RTL2831U,
+	  254,
+	  { 0x10,0 },
+	},
+	{ DEMOD_RTL2820,
+	  32,
+	  { 0x12,0 },
+	},
 };
 
+
 static struct dibusb_device_class dibusb_device_classes[] = {
-	{ .id = DIBUSB1_1, .usb_ctrl = &dibusb_usb_ctrl[0],
+	{ .id       = DIBUSB1_1, 
+	  .usb_ctrl = &dibusb_usb_ctrl[0],
 	  .firmware = "dvb-dibusb-5.0.0.11.fw",
 	  .pipe_cmd = 0x01, .pipe_data = 0x02, 
-	  .urb_count = 7, .urb_buffer_size = 4096,
+	  .urb_count= 7, .urb_buffer_size = 4096,
 	  DIBUSB_RC_NEC_PROTOCOL,
 	  &dibusb_demod[DIBUSB_DIB3000MB],
 	  &dibusb_tuner[DIBUSB_TUNER_CABLE_THOMSON],
@@ -258,15 +311,68 @@ static struct dibusb_device_class dibusb_device_classes[] = {
 	  &dibusb_demod[DIBUSB_DIB3000MC],
 	  &dibusb_tuner[DIBUSB_TUNER_COFDM_PANASONIC_ENV57H1XD5],
 	},
-	{ DTT200U,&dibusb_usb_ctrl[2],
-	  "dvb-dtt200u-1.fw",
-	  0x01, 0x02,
-	  7, 4096,
-	  DIBUSB_RC_NO,
-	  &dibusb_demod[DTT200U_FE],
-	  NULL, /* no explicit tuner/pll-programming necessary (it has the ENV57H1XD5) */
+	{ 
+	    DTT200U,
+	    &dibusb_usb_ctrl[2],
+	    "dvb-dtt200u-1.fw",
+	    0x01, 
+	    0x02,
+	    7, 
+	    4096,
+	    DIBUSB_RC_NO,
+	    &dibusb_demod[DTT200U_FE],
+	    NULL, /* no explicit tuner/pll-programming necessary (it has the ENV57H1XD5) */
+	},
+	{ 
+	    CLASS_RTD2830, 
+	    &dibusb_usb_ctrl[2],
+	    "dvb-dibusb-rtd2830.fw",
+	    0x01, 0x02,  	  
+        7, 
+        4096,       // for rtl2831u urb size must be times of 188 / 4K / 16K / 32K
+	    DIBUSB_RC_NO,
+	    &dibusb_demod[DEMOD_RTD2830],
+        &dibusb_tuner[DIBUSB_TUNER_COFDM_PHILIPS_TD1316],		          	  
+	},	
+	{ 
+	    CLASS_RTL2831U, 
+	    NULL, 
+	    "",
+	    0x0, 
+	    0x01,
+        7, 
+        32768,       // for rtl2831u urb size must be times of 4K / 16K / 32K
+	    DIBUSB_RC_NO,
+	    &dibusb_demod[DEMOD_RTL2831U],
+        &dibusb_tuner[DIBUSB_TUNER_COFDM_MICROTUNE_MT2060],
+	},
+	{ 
+	    CLASS_RTL2830_GL861, 
+	    NULL, 
+	    "",
+	    0x0, 
+	    0x01,        // data pipe
+        12, 
+        4096,       // for rtl2831u urb size must be times of 4K / 16K / 32K
+	    DIBUSB_RC_NO,
+	    &dibusb_demod[DEMOD_RTD2830],
+        &dibusb_tuner[DIBUSB_TUNER_COFDM_PHILIPS_TD1316],
+	},
+	{ 
+	    CLASS_RTL2820_GL861, 
+	    NULL, 
+	    "",
+	    0x0, 
+	    0x01,        // data pipe
+        12, 
+        4096,       // for rtl2831u urb size must be times of 4K / 16K / 32K
+	    DIBUSB_RC_NO,
+	    &dibusb_demod[DEMOD_RTL2820],
+        &dibusb_tuner[DIBUSB_TUNER_COFDM_THOMSON_DPT78010],
 	},
 };
+
+
 
 static struct dibusb_usb_device dibusb_devices[] = {
 	{	"TwinhanDTV USB1.1 / Magic Box / HAMA USB1.1 DVB-T device",
@@ -344,23 +450,30 @@ static struct dibusb_usb_device dibusb_devices[] = {
 		{ &dib_table[32], NULL },
 		{ &dib_table[33], NULL }, /* device ID with default DIBUSB2_0-firmware */
 	},
-#ifdef CONFIG_DVB_DIBUSB_MISDESIGNED_DEVICES
-	{	"Artec T1 USB1.1 TVBOX with AN2235 (misdesigned)",
-		&dibusb_device_classes[DIBUSB1_1_AN2235],
+	{	
+	    "Realtek RTD2830 DVB-T USB2.0",
+		&dibusb_device_classes[CLASS_RTD2830],
 		{ &dib_table[34], NULL },
-		{ NULL },
-	},
-	{	"Artec T1 USB2.0 TVBOX with FX2 IDs (misdesigned, please report the warm ID)",
-		&dibusb_device_classes[DTT200U],
 		{ &dib_table[35], NULL },
-		{ &dib_table[36], NULL }, /* undefined, it could be that the device will get another USB ID in warm state */
-	},
-	{	"DiBcom USB1.1 DVB-T reference design (MOD3000) with AN2135 default IDs",
-		&dibusb_device_classes[DIBUSB1_1],
-		{ &dib_table[37], NULL },
+	},	
+    {	
+        "Realtek RTL2831U DVB-T USB2.0",
+		&dibusb_device_classes[CLASS_RTL2831U],
 		{ NULL },
-	},
-#endif
+		{ &dib_table[36], NULL },
+	},	
+    {	
+        "GENESYS GL861/RTL2830 DVB-T USB2.0",
+		&dibusb_device_classes[CLASS_RTL2830_GL861],
+		{ NULL },
+		{ NULL/*&dib_table[37]*/, NULL },
+	},	
+    {	
+        "GENESYS GL861/RTL2820 ATSC USB2.0",
+		&dibusb_device_classes[CLASS_RTL2820_GL861],
+		{ NULL },
+		{ &dib_table[37], NULL },
+	},	
 };
 
 static int dibusb_exit(struct usb_dibusb *dib)
@@ -370,7 +483,12 @@ static int dibusb_exit(struct usb_dibusb *dib)
 	dibusb_fe_exit(dib);
 	dibusb_i2c_exit(dib);
 	dibusb_dvb_exit(dib);
+
+#if 1
+        printk("===================== skip dibusb_urb_exit ====================\n");
+#else
 	dibusb_urb_exit(dib);
+#endif
 	deb_info("init_state should be zero now: %x\n",dib->init_state);
 	dib->init_state = DIBUSB_STATE_INIT;
 	kfree(dib);
@@ -385,12 +503,22 @@ static int dibusb_init(struct usb_dibusb *dib)
 
 	dib->init_state = DIBUSB_STATE_INIT;
 	
+// #ifdef CONFIG_DVB_REALTEK_2830
+#if 1
+        printk("===================== skip dibusb_urb_init ====================\n");
+	if ((ret = dibusb_dvb_init(dib)) || 
+		(ret = dibusb_i2c_init(dib))) {
+		dibusb_exit(dib);
+		return ret;
+	}
+#else
 	if ((ret = dibusb_urb_init(dib)) ||
 		(ret = dibusb_dvb_init(dib)) || 
 		(ret = dibusb_i2c_init(dib))) {
 		dibusb_exit(dib);
 		return ret;
 	}
+#endif
 
 	if ((ret = dibusb_fe_init(dib)))
 		err("could not initialize a frontend.");
@@ -445,11 +573,12 @@ static struct dibusb_usb_device * dibusb_find_device (struct usb_device *udev,in
 		for (j = 0; j < DIBUSB_ID_MAX_NUM && dibusb_devices[i].warm_ids[j] != NULL; j++) {
 			deb_info("check for warm %x %x\n",dibusb_devices[i].warm_ids[j]->idVendor, dibusb_devices[i].warm_ids[j]->idProduct);
 			if (dibusb_devices[i].warm_ids[j]->idVendor == le16_to_cpu(udev->descriptor.idVendor) &&
-				dibusb_devices[i].warm_ids[j]->idProduct == le16_to_cpu(udev->descriptor.idProduct)) {
+				dibusb_devices[i].warm_ids[j]->idProduct == le16_to_cpu(udev->descriptor.idProduct)){				    
+                
 				*cold = 0;
 				dev = &dibusb_devices[i];
 				break;
-			}
+			}			
 		}
 	}
 
@@ -477,11 +606,55 @@ static int dibusb_probe(struct usb_interface *intf,
 		return -ENODEV;
 	}
 	
+	printk("VID = %08x\n", le16_to_cpu(udev->descriptor.idVendor));
+    printk("PID = %08x\n", le16_to_cpu(udev->descriptor.idProduct));
+    
 	if (cold == 1) {
 		info("found a '%s' in cold state, will try to load a firmware",dibdev->name);
 		ret = dibusb_loadfirmware(udev,dibdev);
-	} else {
+	} 
+	else {
+		
+        int i;		    
+        struct usb_host_interface *iface_desc;
+        struct usb_endpoint_descriptor *endpoint;
+        /*-----------------------------------------    
+         *  set up the endpoint information 
+         *  use only the first bulk-in and bulk-out endpoints */
+
+#if 1       
+        printk("=============================================\n");
+        printk("= dev->bNumConfigurations=%d\n",udev->descriptor.bNumConfigurations);       
+        
+        iface_desc = intf->cur_altsetting;
+        printk("= dev->bInterfaceNumber=%d\n",iface_desc->desc.bInterfaceNumber);         
+        for (i = 0; i < iface_desc->desc.bNumEndpoints; ++i) {
+            endpoint = &iface_desc->endpoint[i].desc;                
+            printk("= dev->endpointAddr=%x\n", endpoint->bEndpointAddress);                            
+            printk("= dev->maxpacketsize=%d\n",endpoint->wMaxPacketSize);
+            printk("= dev->attribute=%d\n",endpoint->bmAttributes);
+        }   
+        printk("=============================================\n");
+#endif        
+        
+		if (dibdev->dev_cl->id == CLASS_RTL2830_GL861 || dibdev->dev_cl->id == CLASS_RTL2820_GL861)
+		{
+		    if (intf->altsetting->desc.bInterfaceNumber == 0x00)
+		    {
+		        printk("GL861 Detected : Set Interface 0 alternate setting to 0\n");
+		        
+		        if (usb_set_interface(udev, 0, 0)<0)
+		        {
+    		        printk("set Interface failed\n");    
+	    	        return -ENODEV;
+                }
+            }
+            else
+                return -ENODEV;        
+        }
+			
 		info("found a '%s' in warm state.",dibdev->name);
+						
 		dib = kmalloc(sizeof(struct usb_dibusb),GFP_KERNEL);
 		if (dib == NULL) {
 			err("no memory");

@@ -287,6 +287,21 @@ config MIPS_SEAD
 	  This enables support for the MIPS Technologies SEAD evaluation
 	  board.
 
+config REALTEK_VENUS
+	bool "Support for REALTEK Venus board"
+#	select BOOT_ELF32
+	select IRQ_CPU				# define this will include irq_cpu.o, and this is for the interrupt.
+	select REALTEK_VENUS_SERIAL_PORT
+	select DMA_NONCOHERENT
+	select GENERIC_ISA_DMA
+	select HW_HAS_PCI
+	select REALTEK_BOARDS_GEN
+	select SYS_SUPPORTS_32BIT_KERNEL
+#	select SYS_SUPPORTS_64BIT_KERNEL
+	select SYS_SUPPORTS_LITTLE_ENDIAN
+	help
+	  This enables support for the REALTEK Technologies Venus board.
+
 config MOMENCO_JAGUAR_ATX
 	bool "Support for Momentum Jaguar board"
 	select BOOT_ELF32
@@ -659,6 +674,7 @@ source "arch/mips/sgi-ip27/Kconfig"
 source "arch/mips/sibyte/Kconfig"
 source "arch/mips/tx4927/Kconfig"
 source "arch/mips/vr41xx/Kconfig"
+source "arch/mips/realtek-boards/Kconfig"
 
 endmenu
 
@@ -781,6 +797,18 @@ config MIPS_GT64120
 config MIPS_TX3927
 	bool
 	select HAS_TXX9_SERIAL
+
+#
+# The following setting is for Realtek boards
+#
+config REALTEK_BOARDS_GEN
+	bool
+
+config REALTEK_VENUS_SERIAL_PORT
+	bool
+#
+#
+#
 
 config PCI_MARVELL
 	bool
@@ -912,6 +940,17 @@ config CPU_MIPS32_R1
 	select CPU_HAS_PREFETCH
 	help
 	  Choose this option to build a kernel for release 1 or later of the
+	  MIPS32 architecture.  Most modern embedded systems with a 32-bit
+	  MIPS processor are based on a MIPS32 processor.  If you know the
+	  specific type of processor in your system, choose those that one
+	  otherwise CPU_MIPS32_R1 is a safe bet for any MIPS32 system.
+
+config CPU_MIPS32_R2
+	bool "MIPS32 Release 2"
+	select CPU_HAS_PREFETCH
+	select CPU_SUPPORTS_32BIT_KERNEL
+	help
+	  Choose this option to build a kernel for release 2 or later of the
 	  MIPS32 architecture.  Most modern embedded systems with a 32-bit
 	  MIPS processor are based on a MIPS32 processor.  If you know the
 	  specific type of processor in your system, choose those that one
@@ -1300,6 +1339,14 @@ config RWSEM_GENERIC_SPINLOCK
 	bool
 	default y
 
+config PM
+	bool "Power Management support (EXPERIMENTAL)"
+	depends on EXPERIMENTAL && ( SOC_AU1X00 || REALTEK_VENUS )
+
+config PM_SLEEP_POLLING
+	bool "	Use polling to avoid Venus's bug of edge-trigger-intr in power saving"
+	depends PM
+
 menu "Bus options (PCI, PCMCIA, EISA, ISA, TC)"
 
 config HW_HAS_EISA
@@ -1457,10 +1504,6 @@ config SECCOMP
 	  defined by each seccomp mode.
 
 	  If unsure, say Y. Only embedded should say N here.
-
-config PM
-	bool "Power Management support (EXPERIMENTAL)"
-	depends on EXPERIMENTAL && SOC_AU1X00
 
 endmenu
 

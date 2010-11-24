@@ -48,6 +48,33 @@ const char *scsi_device_state_name(enum scsi_device_state state)
 	return name;
 }
 
+static struct {
+	enum scsi_host_state value;
+	char *name;
+} shost_states[] = {
+	{ SHOST_CREATED, "created" },
+	{ SHOST_RUNNING, "running" },
+	{ SHOST_CANCEL, "cancel" },
+	{ SHOST_DEL, "deleted" },
+	{ SHOST_RECOVERY, "recovery" },
+	{ SHOST_CANCEL_RECOVERY, "cancel/recovery" },
+	{ SHOST_DEL_RECOVERY, "deleted/recovery", },
+};
+const char *scsi_host_state_name(enum scsi_host_state state)
+{
+	int i;
+	char *name = NULL;
+
+	for (i = 0; i < sizeof(shost_states)/sizeof(shost_states[0]); i++) {
+		if (shost_states[i].value == state) {
+			name = shost_states[i].name;
+			break;
+			
+		}
+	}
+	return name;
+}
+
 static int check_set(unsigned int *val, char *src)
 {
 	char *last;
@@ -124,6 +151,43 @@ static ssize_t store_scan(struct class_device *class_dev, const char *buf,
 };
 static CLASS_DEVICE_ATTR(scan, S_IWUSR, NULL, store_scan);
 
+static ssize_t
+store_shost_state(struct class_device *class_dev, const char *buf, size_t count)
+{
+	int i;
+	struct Scsi_Host *shost = class_to_shost(class_dev);
+	enum scsi_host_state state = 0;
+
+	for (i = 0; i < sizeof(shost_states)/sizeof(shost_states[0]); i++) {
+		const int len = strlen(shost_states[i].name);
+		if (strncmp(shost_states[i].name, buf, len) == 0 &&
+		    buf[len] == '\n') {
+		    	state = shost_states[i].value;
+		    	break;
+		}
+	}
+	if (!state)
+		return -EINVAL;
+
+	if (scsi_host_set_state(shost, state))
+		return -EINVAL;
+	return count;
+}
+
+static ssize_t
+show_shost_state(struct class_device *class_dev, char *buf)
+{
+	struct Scsi_Host *shost = class_to_shost(class_dev);
+	const char *name = scsi_host_state_name(shost->shost_state);
+
+	if (!name)
+		return -EINVAL;
+
+	return snprintf(buf, 20, "%s\n", name);
+}
+
+static CLASS_DEVICE_ATTR(state, S_IRUGO | S_IWUSR, show_shost_state, store_shost_state);
+
 shost_rd_attr(unique_id, "%u\n");
 shost_rd_attr(host_busy, "%hu\n");
 shost_rd_attr(cmd_per_lun, "%hd\n");
@@ -139,6 +203,7 @@ static struct class_device_attribute *scsi_sysfs_shost_attrs[] = {
 	&class_device_attr_unchecked_isa_dma,
 	&class_device_attr_proc_name,
 	&class_device_attr_scan,
+	&class_device_attr_state,
 	NULL
 };
 
@@ -230,7 +295,7 @@ void scsi_sysfs_unregister(void)
  */
 #define sdev_show_function(field, format_string)				\
 static ssize_t								\
-sdev_show_##field (struct device *dev, char *buf)				\
+sdev_show_##field (struct device *dev, struct device_attribute *attr, char *buf)				\
 {									\
 	struct scsi_device *sdev;					\
 	sdev = to_scsi_device(dev);					\
@@ -254,7 +319,7 @@ static DEVICE_ATTR(field, S_IRUGO, sdev_show_##field, NULL);
 	sdev_show_function(field, format_string)				\
 									\
 static ssize_t								\
-sdev_store_##field (struct device *dev, const char *buf, size_t count)	\
+sdev_store_##field (struct device *dev, struct device_attribute *attr, const char *buf, size_t count)	\
 {									\
 	struct scsi_device *sdev;					\
 	sdev = to_scsi_device(dev);					\
@@ -274,7 +339,7 @@ static DEVICE_ATTR(field, S_IRUGO | S_IWUSR, sdev_show_##field, sdev_store_##fie
 	sdev_show_function(field, "%d\n")					\
 									\
 static ssize_t								\
-sdev_store_##field (struct device *dev, const char *buf, size_t count)	\
+sdev_store_##field (struct device *dev, struct device_attribute *attr, const char *buf, size_t count)	\
 {									\
 	int ret;							\
 	struct scsi_device *sdev;					\
@@ -317,7 +382,7 @@ sdev_rd_attr (model, "%.16s\n");
 sdev_rd_attr (rev, "%.4s\n");
 
 static ssize_t
-sdev_show_timeout (struct device *dev, char *buf)
+sdev_show_timeout (struct device *dev, struct device_attribute *attr, char *buf)
 {
 	struct scsi_device *sdev;
 	sdev = to_scsi_device(dev);
@@ -325,7 +390,7 @@ sdev_show_timeout (struct device *dev, char *buf)
 }
 
 static ssize_t
-sdev_store_timeout (struct device *dev, const char *buf, size_t count)
+sdev_store_timeout (struct device *dev, struct device_attribute *attr, const char *buf, size_t count)
 {
 	struct scsi_device *sdev;
 	int timeout;
@@ -337,14 +402,133 @@ sdev_store_timeout (struct device *dev, const char *buf, size_t count)
 static DEVICE_ATTR(timeout, S_IRUGO | S_IWUSR, sdev_show_timeout, sdev_store_timeout);
 
 static ssize_t
-store_rescan_field (struct device *dev, const char *buf, size_t count) 
+store_rescan_field (struct device *dev, struct device_attribute *attr, const char *buf, size_t count) 
 {
 	scsi_rescan_device(dev);
 	return count;
 }
 static DEVICE_ATTR(rescan, S_IWUSR, NULL, store_rescan_field);
 
-static ssize_t sdev_store_delete(struct device *dev, const char *buf,
+// add by cfyeh : 2007/2/16
+// for scsi check_change
+static DECLARE_MUTEX(scsi_detect_port_mutex);
+
+static ssize_t
+store_force_check_change_field (struct device *dev, struct device_attribute *attr, const char *buf, size_t count) 
+{
+	struct scsi_device *sdev = container_of(dev, struct scsi_device, sdev_gendev);
+
+	if (sdev->sdev_state != SDEV_RUNNING)
+		return count;
+
+	down(&scsi_detect_port_mutex);
+	scsi_force_check_device_change(dev);
+	up(&scsi_detect_port_mutex);
+	
+	return count;
+}
+
+static ssize_t
+show_force_check_change_field(struct device *dev, struct device_attribute *attr, char *buf)
+{
+	ssize_t ret = 0;
+	struct scsi_device *sdev = container_of(dev, struct scsi_device, sdev_gendev);
+
+	if (sdev->sdev_state != SDEV_RUNNING)
+	{
+		ret = snprintf(buf, 20, "%d\n", 0);
+		return ret;
+	}
+
+	if (!dev->driver)
+	{
+		ret = snprintf(buf, 20, "%d\n", 0);
+		return ret;
+	}
+
+	down(&scsi_detect_port_mutex);
+	ret = snprintf(buf, 20, "%d\n", sd_media_present(dev));
+	up(&scsi_detect_port_mutex);
+
+	return ret;
+}
+
+static DEVICE_ATTR(check_change_force, S_IRUGO | S_IWUSR,
+		show_force_check_change_field , store_force_check_change_field);
+
+
+static ssize_t
+store_check_change_field (struct device *dev, struct device_attribute *attr, const char *buf, size_t count) 
+{
+	//struct timeval time1, time2;
+	//int usec,sec;
+	struct scsi_device *sdev = container_of(dev, struct scsi_device, sdev_gendev);
+
+	if (sdev->sdev_state != SDEV_RUNNING)
+		return count;
+
+	//do_gettimeofday(&time1);
+
+	// add by cfyeh : 2007/2/16
+	// for scsi check_change
+	down(&scsi_detect_port_mutex);
+	//printk("@@[cfyeh] pid = %d\n", current->pid);
+	
+	scsi_check_device_change(dev);
+
+	//do_gettimeofday(&time2);
+	
+	//sec = time2.tv_sec - time1.tv_sec;
+	//usec = time2.tv_usec - time1.tv_usec;
+	//if(usec < 0)
+	//{
+	//	sec--;
+	//	usec+=1000000;
+	//}
+	//printk("###total : %d sec %d usec\n", sec, usec);
+	
+	// add by cfyeh : 2007/2/16
+	// for scsi check_change
+	up(&scsi_detect_port_mutex);
+	
+	return count;
+}
+
+static ssize_t
+show_check_change_field(struct device *dev, struct device_attribute *attr, char *buf)
+{
+	ssize_t ret = 0;
+	struct scsi_device *sdev = container_of(dev, struct scsi_device, sdev_gendev);
+
+	if (sdev->sdev_state != SDEV_RUNNING)
+	{
+		ret = snprintf(buf, 20, "%d\n", 0);
+		return ret;
+	}
+
+	if (!dev->driver)
+	{
+		ret = snprintf(buf, 20, "%d\n", 0);
+		return ret;
+	}
+	
+	// add by cfyeh : 2007/2/16
+	// for scsi check_change
+	down(&scsi_detect_port_mutex);
+
+	ret = snprintf(buf, 20, "%d\n", sd_media_present(dev));
+
+	// add by cfyeh : 2007/2/16
+	// for scsi check_change
+	up(&scsi_detect_port_mutex);
+
+	return ret;
+}
+
+static DEVICE_ATTR(check_change, S_IRUGO | S_IWUSR,
+		show_check_change_field , store_check_change_field);
+
+static ssize_t sdev_store_delete(struct device *dev, struct device_attribute *attr, const char *buf,
 				 size_t count)
 {
 	scsi_remove_device(to_scsi_device(dev));
@@ -353,7 +537,7 @@ static ssize_t sdev_store_delete(struct device *dev, const char *buf,
 static DEVICE_ATTR(delete, S_IWUSR, NULL, sdev_store_delete);
 
 static ssize_t
-store_state_field(struct device *dev, const char *buf, size_t count)
+store_state_field(struct device *dev, struct device_attribute *attr, const char *buf, size_t count)
 {
 	int i;
 	struct scsi_device *sdev = to_scsi_device(dev);
@@ -376,7 +560,7 @@ store_state_field(struct device *dev, const char *buf, size_t count)
 }
 
 static ssize_t
-show_state_field(struct device *dev, char *buf)
+show_state_field(struct device *dev, struct device_attribute *attr, char *buf)
 {
 	struct scsi_device *sdev = to_scsi_device(dev);
 	const char *name = scsi_device_state_name(sdev->sdev_state);
@@ -390,7 +574,7 @@ show_state_field(struct device *dev, char *buf)
 static DEVICE_ATTR(state, S_IRUGO | S_IWUSR, show_state_field, store_state_field);
 
 static ssize_t
-show_queue_type_field(struct device *dev, char *buf)
+show_queue_type_field(struct device *dev, struct device_attribute *attr, char *buf)
 {
 	struct scsi_device *sdev = to_scsi_device(dev);
 	const char *name = "none";
@@ -406,7 +590,7 @@ show_queue_type_field(struct device *dev, char *buf)
 static DEVICE_ATTR(queue_type, S_IRUGO, show_queue_type_field, NULL);
 
 static ssize_t
-show_iostat_counterbits(struct device *dev, char *buf)
+show_iostat_counterbits(struct device *dev, struct device_attribute *attr, char *buf)
 {
 	return snprintf(buf, 20, "%d\n", (int)sizeof(atomic_t) * 8);
 }
@@ -415,7 +599,7 @@ static DEVICE_ATTR(iocounterbits, S_IRUGO, show_iostat_counterbits, NULL);
 
 #define show_sdev_iostat(field)						\
 static ssize_t								\
-show_iostat_##field(struct device *dev, char *buf)			\
+show_iostat_##field(struct device *dev, struct device_attribute *attr, char *buf)			\
 {									\
 	struct scsi_device *sdev = to_scsi_device(dev);			\
 	unsigned long long count = atomic_read(&sdev->field);		\
@@ -439,6 +623,8 @@ static struct device_attribute *scsi_sysfs_sdev_attrs[] = {
 	&dev_attr_model,
 	&dev_attr_rev,
 	&dev_attr_rescan,
+	&dev_attr_check_change_force,
+	&dev_attr_check_change,
 	&dev_attr_delete,
 	&dev_attr_state,
 	&dev_attr_timeout,
@@ -449,7 +635,7 @@ static struct device_attribute *scsi_sysfs_sdev_attrs[] = {
 	NULL
 };
 
-static ssize_t sdev_store_queue_depth_rw(struct device *dev, const char *buf,
+static ssize_t sdev_store_queue_depth_rw(struct device *dev, struct device_attribute *attr, const char *buf,
 					 size_t count)
 {
 	int depth, retval;
@@ -475,7 +661,7 @@ static struct device_attribute sdev_attr_queue_depth_rw =
 	__ATTR(queue_depth, S_IRUGO | S_IWUSR, sdev_show_queue_depth,
 	       sdev_store_queue_depth_rw);
 
-static ssize_t sdev_store_queue_type_rw(struct device *dev, const char *buf,
+static ssize_t sdev_store_queue_type_rw(struct device *dev, struct device_attribute *attr, const char *buf,
 					size_t count)
 {
 	struct scsi_device *sdev = to_scsi_device(dev);
@@ -591,7 +777,7 @@ int scsi_sysfs_add_sdev(struct scsi_device *sdev)
 			error = attr_add(&sdev->sdev_gendev,
 					sdev->host->hostt->sdev_attrs[i]);
 			if (error) {
-				scsi_remove_device(sdev);
+				__scsi_remove_device(sdev);
 				goto out;
 			}
 		}
@@ -605,7 +791,7 @@ int scsi_sysfs_add_sdev(struct scsi_device *sdev)
 							scsi_sysfs_sdev_attrs[i]);
 			error = device_create_file(&sdev->sdev_gendev, attr);
 			if (error) {
-				scsi_remove_device(sdev);
+				__scsi_remove_device(sdev);
 				goto out;
 			}
 		}
@@ -625,6 +811,23 @@ int scsi_sysfs_add_sdev(struct scsi_device *sdev)
 	return error;
 }
 
+void __scsi_remove_device(struct scsi_device *sdev)
+{
+	struct device *dev = &sdev->sdev_gendev;
+
+	if (scsi_device_set_state(sdev, SDEV_CANCEL) != 0)
+		return
+
+	class_device_unregister(&sdev->sdev_classdev);
+	transport_remove_device(dev);
+	device_del(dev);
+	scsi_device_set_state(sdev, SDEV_DEL);
+	if (sdev->host->hostt->slave_destroy)
+		sdev->host->hostt->slave_destroy(sdev);
+	transport_destroy_device(dev);
+	put_device(dev);
+}
+
 /**
  * scsi_remove_device - unregister a device from the scsi bus
  * @sdev:	scsi_device to unregister
@@ -632,18 +835,21 @@ int scsi_sysfs_add_sdev(struct scsi_device *sdev)
 void scsi_remove_device(struct scsi_device *sdev)
 {
 	struct Scsi_Host *shost = sdev->host;
-
+	
 	down(&shost->scan_mutex);
-	if (scsi_device_set_state(sdev, SDEV_CANCEL) != 0)
+	
+	// hack by cfeyh
+	// for bugnote 4170
+	// 2006/08/25 - 2007/03/14
+	if (sdev->sdev_state == SDEV_CREATED)
+	{
+		printk(KERN_EMERG "@@@@@ [cfyeh] hack for scsi %s(%d)\n", __func__, __LINE__);
 		goto out;
+	}
+	// hack by cfeyh -
 
-	class_device_unregister(&sdev->sdev_classdev);
-	device_del(&sdev->sdev_gendev);
-	scsi_device_set_state(sdev, SDEV_DEL);
-	if (sdev->host->hostt->slave_destroy)
-		sdev->host->hostt->slave_destroy(sdev);
-	transport_unregister_device(&sdev->sdev_gendev);
-	put_device(&sdev->sdev_gendev);
+	__scsi_remove_device(sdev);
+
 out:
 	up(&shost->scan_mutex);
 }
@@ -653,20 +859,30 @@ void __scsi_remove_target(struct scsi_target *starget)
 {
 	struct Scsi_Host *shost = dev_to_shost(starget->dev.parent);
 	unsigned long flags;
-	struct scsi_device *sdev, *tmp;
+	struct scsi_device *sdev;
 
 	spin_lock_irqsave(shost->host_lock, flags);
 	starget->reap_ref++;
-	list_for_each_entry_safe(sdev, tmp, &shost->__devices, siblings) {
+restart:
+	list_for_each_entry(sdev, &shost->__devices, siblings) {
 		if (sdev->channel != starget->channel ||
-		    sdev->id != starget->id)
+		    sdev->id != starget->id ||
+		    sdev->sdev_state == SDEV_DEL)
 			continue;
 		spin_unlock_irqrestore(shost->host_lock, flags);
 		scsi_remove_device(sdev);
 		spin_lock_irqsave(shost->host_lock, flags);
+		goto restart;
 	}
 	spin_unlock_irqrestore(shost->host_lock, flags);
 	scsi_target_reap(starget);
+}
+
+static int __remove_child (struct device * dev, void * data)
+{
+	if (scsi_is_target_device(dev))
+		__scsi_remove_target(to_scsi_target(dev));
+	return 0;
 }
 
 /**
@@ -679,7 +895,7 @@ void __scsi_remove_target(struct scsi_target *starget)
  */
 void scsi_remove_target(struct device *dev)
 {
-	struct device *rdev, *idev, *next;
+	struct device *rdev;
 
 	if (scsi_is_target_device(dev)) {
 		__scsi_remove_target(to_scsi_target(dev));
@@ -687,10 +903,7 @@ void scsi_remove_target(struct device *dev)
 	}
 
 	rdev = get_device(dev);
-	list_for_each_entry_safe(idev, next, &dev->children, node) {
-		if (scsi_is_target_device(idev))
-			__scsi_remove_target(to_scsi_target(idev));
-	}
+	device_for_each_child(dev, NULL, __remove_child);
 	put_device(rdev);
 }
 EXPORT_SYMBOL(scsi_remove_target);

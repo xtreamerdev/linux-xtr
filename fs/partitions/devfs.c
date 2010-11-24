@@ -80,6 +80,7 @@ static struct unique_numspace cdrom_numspace;
 void devfs_add_partitioned(struct gendisk *disk)
 {
 	char dirname[64], symlink[16];
+	char disc[64];
 
 	devfs_mk_dir(disk->devfs_name);
 	devfs_mk_bdev(MKDEV(disk->major, disk->first_minor),
@@ -90,7 +91,10 @@ void devfs_add_partitioned(struct gendisk *disk)
 
 	sprintf(symlink, "discs/disc%d", disk->number);
 	sprintf(dirname, "../%s", disk->devfs_name);
+	sprintf(disc, "%s/disc", disk->devfs_name);
+	
 	devfs_mk_symlink(symlink, dirname);
+	devfs_mk_symlink(disk->disk_name, disc);
 
 }
 
@@ -117,6 +121,7 @@ void devfs_remove_disk(struct gendisk *disk)
 {
 	if (disk->minors != 1) {
 		devfs_remove("discs/disc%d", disk->number);
+		devfs_remove("%s", disk->disk_name);
 		dealloc_unique_number(&disc_numspace, disk->number);
 		devfs_remove("%s/disc", disk->devfs_name);
 	}

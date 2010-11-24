@@ -1292,6 +1292,7 @@ static int __init loop_init(void)
 		sprintf(disk->devfs_name, "loop/%d", i);
 		disk->private_data = lo;
 		disk->queue = lo->lo_queue;
+		disk->part_num = -1; /*  2007/05/23 cfyeh : partiton number */
 	}
 
 	/* We cannot fail after we call this, so another loop!*/

@@ -16,8 +16,9 @@
 #include <linux/init.h>
 #include <linux/pm.h>
 
-
 #include "power.h"
+
+void free_all_memory(void);
 
 DECLARE_MUTEX(pm_sem);
 
@@ -35,7 +36,6 @@ void pm_set_ops(struct pm_ops * ops)
 	pm_ops = ops;
 	up(&pm_sem);
 }
-
 
 /**
  *	suspend_prepare - Do prep work before entering low-power state.
@@ -64,6 +64,7 @@ static int suspend_prepare(suspend_state_t state)
 		if ((error = pm_ops->prepare(state)))
 			goto Thaw;
 	}
+	free_all_memory();
 
 	if ((error = device_suspend(PMSG_SUSPEND))) {
 		printk(KERN_ERR "Some devices failed to suspend\n");

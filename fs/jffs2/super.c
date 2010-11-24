@@ -309,9 +309,10 @@ static int __init init_jffs2_fs(void)
 	int ret;
 
 	printk(KERN_INFO "JFFS2 version 2.2."
-#ifdef CONFIG_JFFS2_FS_NAND
-	       " (NAND)"
-#endif
+// marco printk cannot have #ifdef inside
+//#ifdef CONFIG_JFFS2_FS_NAND
+//	       " (NAND)"
+//#endif
 	       " (C) 2001-2003 Red Hat, Inc.\n");
 
 	jffs2_inode_cachep = kmem_cache_create("jffs2_i",

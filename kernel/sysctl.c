@@ -65,6 +65,7 @@ extern int min_free_kbytes;
 extern int printk_ratelimit_jiffies;
 extern int printk_ratelimit_burst;
 extern int pid_max_min, pid_max_max;
+extern int sysctl_drop_caches;
 
 #if defined(CONFIG_X86_LOCAL_APIC) && defined(CONFIG_X86)
 int unknown_nmi_panic;
@@ -763,6 +764,15 @@ static ctl_table vm_table[] = {
 		.proc_handler	= &lowmem_reserve_ratio_sysctl_handler,
 		.strategy	= &sysctl_intvec,
 	},
+        {
+                .ctl_name       = VM_DROP_PAGECACHE,
+                .procname       = "drop_caches",
+                .data           = &sysctl_drop_caches,
+                .maxlen         = sizeof(int),
+                .mode           = 0644,
+                .proc_handler   = drop_caches_sysctl_handler,
+                .strategy       = &sysctl_intvec,
+        },
 	{
 		.ctl_name	= VM_MIN_FREE_KBYTES,
 		.procname	= "min_free_kbytes",

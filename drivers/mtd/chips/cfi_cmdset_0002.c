@@ -354,7 +354,12 @@ static struct mtd_info *cfi_amdstd_setup(struct mtd_info *mtd)
 		}
 		offset += (ersize * ernum);
 	}
+#ifdef CONFIG_REALTEK_VENUS
+	// We can only use a smaller portion of the whole Flash
+	if (offset < devsize) {
+#else
 	if (offset != devsize) {
+#endif
 		/* Argh */
 		printk(KERN_WARNING "Sum of regions (%lx) != total size of set of interleaved chips (%lx)\n", offset, devsize);
 		goto setup_err;

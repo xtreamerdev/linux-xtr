@@ -414,6 +414,14 @@ config SCSI_SATA
 
 	  If unsure, say N.
 
+config SCSI_SATA_MARS
+	tristate "MARS SATA support"
+	depends on SCSI_SATA
+	help
+	  This option enables support for Mars SATA
+
+	  If unsure, say N.
+
 config SCSI_SATA_AHCI
 	tristate "AHCI SATA support"
 	depends on SCSI_SATA && PCI

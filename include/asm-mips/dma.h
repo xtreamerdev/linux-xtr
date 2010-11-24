@@ -88,7 +88,7 @@
 #include <asm/sgi/mc.h>
 #define MAX_DMA_ADDRESS		(PAGE_OFFSET + SGIMC_SEG0_BADDR + 0x01000000)
 #else
-#define MAX_DMA_ADDRESS		(PAGE_OFFSET + 0x01000000)
+#define MAX_DMA_ADDRESS		(PAGE_OFFSET + 0x00800000)
 #endif
 
 /* 8237 DMA controllers */

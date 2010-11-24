@@ -95,6 +95,13 @@ if BLK_DEV_IDE
 
 comment "Please see Documentation/ide.txt for help/info on IDE drives"
 
+config BLK_DEV_IDE_SATA_BRIDGE
+	bool "Support for SATA Bridge"
+	default n
+	---help---
+	  Set Yes in order to connect with JMicro SATA bridge
+	  If unsure, ask Frank Ting(ext.3911)
+
 config BLK_DEV_IDE_SATA
 	bool "Support for SATA (deprecated; conflicts with libata SATA driver)"
 	default n

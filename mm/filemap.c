@@ -36,6 +36,8 @@
 #include <asm/uaccess.h>
 #include <asm/mman.h>
 
+#define LIMIT_SIZE	16
+
 /*
  * Shared mappings implemented 30.11.1994. It's not fully working yet,
  * though.
@@ -365,6 +367,38 @@ int filemap_write_and_wait_range(struct address_space *mapping,
 	return retval;
 }
 
+int flush_page_cache(void *p)
+{
+	struct address_space *mapping = (struct address_space *)p;
+	struct inode *inode = mapping->host;
+	ssize_t retval;
+	struct task_struct *task;
+	
+	daemonize("flush thread");
+	current->flags |= PF_NOFREEZE;
+	
+	task = find_task_by_pid(current->pid);
+	sys_setpriority(PRIO_PROCESS, current->pid, 10);
+	printk("------flush priority: %d \n", task_nice(task));
+
+	down(&inode->i_sem);
+	printk("flush_page_cache: do flush...\n");
+	if (mapping_mapped(mapping))
+	        unmap_mapping_range(mapping, 0, 0, 0);
+	
+	retval = filemap_write_and_wait(mapping);
+	if (retval == 0) {
+	        int err = invalidate_inode_pages2(mapping);
+	        if (err)
+	                printk("error in invalidate_inode_pages\n");
+	}
+	up(&inode->i_sem);
+	
+	set_bit(AS_CROSS_SYNC, &mapping->flags);
+
+	return 0;
+}
+
 /*
  * This function is used to add newly allocated pagecache pages:
  * the page is new, so we can just run SetPageLocked() against it.
@@ -375,7 +409,21 @@ int filemap_write_and_wait_range(struct address_space *mapping,
 int add_to_page_cache(struct page *page, struct address_space *mapping,
 		pgoff_t offset, int gfp_mask)
 {
-	int error = radix_tree_preload(gfp_mask & ~__GFP_HIGHMEM);
+	int error;
+/* check memory leak
+	struct inode *inode;
+*/
+
+	if (test_bit(AS_LIMIT_SIZE, &mapping->flags)) {
+//		printk("--------page cache size: %d \n", mapping->nrpages);
+
+		if ((mapping->nrpages >= LIMIT_SIZE) && (test_and_clear_bit(AS_CROSS_SYNC, &mapping->flags))) {
+//		printk("--------page cache size: %d \n", mapping->nrpages);
+			kernel_thread(shrink_page_cache, (long)mapping, CLONE_KERNEL);
+		}
+	}
+
+	error = radix_tree_preload(gfp_mask & ~GFP_ZONEMASK);
 
 	if (error == 0) {
 		write_lock_irq(&mapping->tree_lock);
@@ -388,6 +436,12 @@ int add_to_page_cache(struct page *page, struct address_space *mapping,
 			mapping->nrpages++;
 			pagecache_acct(1);
 		}
+/* check memory leak
+		inode = mapping->host;
+		if (S_ISBLK(inode->i_mode)) {
+			printk("major: %d, minor: %d...\n", MAJOR(inode->i_rdev), MINOR(inode->i_rdev));
+		}
+*/
 		write_unlock_irq(&mapping->tree_lock);
 		radix_tree_preload_end();
 	}
@@ -560,6 +614,7 @@ repeat:
 				page_cache_release(page);
 				goto repeat;
 			}
+			BUG_ON(PageAgain(page));
 		}
 	}
 	read_unlock_irq(&mapping->tree_lock);
@@ -822,6 +877,8 @@ page_not_up_to_date:
 			unlock_page(page);
 			goto page_ok;
 		}
+
+		BUG_ON(PageAgain(page));
 
 readpage:
 		/* Start the actual read. The read will unlock the page. */
@@ -1242,7 +1299,10 @@ retry_find:
 			inc_page_state(pgmajfault);
 		}
 		did_readaround = 1;
-		ra_pages = max_sane_readahead(file->f_ra.ra_pages);
+		if (test_bit(AS_LIMIT_SIZE, &mapping->flags))
+			ra_pages = 1;
+		else
+			ra_pages = max_sane_readahead(file->f_ra.ra_pages);
 		if (ra_pages) {
 			pgoff_t start = 0;
 
@@ -1326,6 +1386,8 @@ page_not_uptodate:
 		unlock_page(page);
 		goto success;
 	}
+
+	BUG_ON(PageAgain(page));
 
 	if (!mapping->a_ops->readpage(file, page)) {
 		wait_on_page_locked(page);
@@ -1439,6 +1501,8 @@ page_not_uptodate:
 		unlock_page(page);
 		goto success;
 	}
+
+	BUG_ON(PageAgain(page));
 
 	if (!mapping->a_ops->readpage(file, page)) {
 		wait_on_page_locked(page);
@@ -1636,6 +1700,9 @@ retry:
 		unlock_page(page);
 		goto out;
 	}
+
+	BUG_ON(PageAgain(page));
+
 	err = filler(data, page);
 	if (err < 0) {
 		page_cache_release(page);
@@ -2001,6 +2068,9 @@ generic_file_buffered_write(struct kiocb *iocb, const struct iovec *iov,
 			 * prepare_write() may have instantiated a few blocks
 			 * outside i_size.  Trim these off again.
 			 */
+//			printk("*********************************************************\n");
+//			printk("ready to truncate file: status: %d, des: %d\n", status, pos+bytes);
+//			printk("*********************************************************\n");
 			unlock_page(page);
 			page_cache_release(page);
 			if (pos + bytes > isize)

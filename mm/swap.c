@@ -31,6 +31,8 @@
 #include <linux/notifier.h>
 #include <linux/init.h>
 
+#define DEBUG_MSG
+ 
 /* How many pages do we try to swap or page in/out together? */
 int page_cluster;
 
@@ -483,3 +485,16 @@ void __init swap_setup(void)
 	 */
 	hotcpu_notifier(cpu_swap_callback, 0);
 }
+
+#ifdef DEBUG_MSG
+void print_pagevec_count(void)
+{
+        struct pagevec *pvec = &get_cpu_var(lru_add_pvecs);
+        printk("lru_add_pvecs\t\tcount: %d\n", (int)pvec->nr);
+        pvec = &__get_cpu_var(lru_add_active_pvecs);
+        printk("lru_add_active_pvecs\tcount: %d\n", (int)pvec->nr);
+        put_cpu_var(lru_add_pvecs);
+}
+EXPORT_SYMBOL(print_pagevec_count);
+#endif
+

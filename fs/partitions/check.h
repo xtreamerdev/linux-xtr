@@ -13,6 +13,10 @@ struct parsed_partitions {
 		sector_t from;
 		sector_t size;
 		int flags;
+		// add to know which partition is a extended partition
+		// by cfyeh 2007/11/13 +
+		int is_part_extended;
+		// by cfyeh 2007/11/13 -
 	} parts[MAX_PART];
 	int next;
 	int limit;

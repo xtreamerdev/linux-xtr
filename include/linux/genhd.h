@@ -112,6 +112,11 @@ struct gendisk {
 	int flags;
 	char devfs_name[64];		/* devfs crap */
 	int number;			/* more of the same */
+	int part_num;			/*  2007/05/23 cfyeh : partiton number */
+	// add to know which partition is a extended partition
+	// by cfyeh 2007/11/13 +
+	int part_extended;
+	// by cfyeh 2007/11/13 -
 	struct device *driverfs_dev;
 	struct kobject kobj;
 

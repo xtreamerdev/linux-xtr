@@ -32,6 +32,8 @@ static kmem_cache_t *bio_slab;
 
 #define BIOVEC_NR_POOLS 6
 
+extern void page_cache_release_dvr(struct page *page); 
+
 /*
  * a small number of entries is fine, not going to be performance critical.
  * basically we just need to survive
@@ -261,6 +263,7 @@ inline void __bio_clone(struct bio *bio, struct bio *bio_src)
 	 */
 	bio->bi_vcnt = bio_src->bi_vcnt;
 	bio->bi_size = bio_src->bi_size;
+	bio->bi_idx = bio_src->bi_idx;
 	bio_phys_segments(q, bio);
 	bio_hw_segments(q, bio);
 }
@@ -610,7 +613,7 @@ static struct bio *__bio_map_user(request_queue_t *q, struct block_device *bdev,
 	 * release the pages we didn't map into the bio, if any
 	 */
 	while (i < nr_pages)
-		page_cache_release(pages[i++]);
+		page_cache_release_dvr(pages[i++]);
 
 	kfree(pages);
 
@@ -680,7 +683,7 @@ static void __bio_unmap_user(struct bio *bio)
 		if (bio_data_dir(bio) == READ)
 			set_page_dirty_lock(bvec->bv_page);
 
-		page_cache_release(bvec->bv_page);
+		page_cache_release_dvr(bvec->bv_page);
 	}
 
 	bio_put(bio);
@@ -806,7 +809,7 @@ void bio_check_pages_dirty(struct bio *bio)
 		struct page *page = bvec[i].bv_page;
 
 		if (PageDirty(page) || PageCompound(page)) {
-			page_cache_release(page);
+			page_cache_release_dvr(page);
 			bvec[i].bv_page = NULL;
 		} else {
 			nr_clean_pages++;
@@ -855,8 +858,24 @@ void bio_endio(struct bio *bio, unsigned int bytes_done, int error)
 	bio->bi_size -= bytes_done;
 	bio->bi_sector += (bytes_done >> 9);
 
+#if 0 
 	if (bio->bi_end_io)
 		bio->bi_end_io(bio, bytes_done, error);
+#else
+	// added by cfyeh 2007/04/24
+	// for return different errno for remove scsi device
+	if (bio->bi_end_io)
+	{
+		if(test_bit(BIO_SCSI_NOT_READY, &bio->bi_flags))
+		{
+			bio->bi_end_io(bio, bytes_done, -ENODEV);
+		}
+		else
+		{
+			bio->bi_end_io(bio, bytes_done, error);
+		}
+	}
+#endif
 }
 
 void bio_pair_release(struct bio_pair *bp)

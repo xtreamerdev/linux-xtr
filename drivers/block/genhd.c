@@ -352,6 +352,20 @@ static ssize_t disk_size_read(struct gendisk * disk, char *page)
 {
 	return sprintf(page, "%llu\n", (unsigned long long)get_capacity(disk));
 }
+/*  2007/05/23 cfyeh + : partiton number */
+static ssize_t disk_part_read(struct gendisk * disk, char *page)
+{
+	return sprintf(page, "%d\n", disk->part_num);
+}
+/*  2007/05/23 cfyeh - : partiton number */
+
+// add to know which partition is a extended partition
+// by cfyeh 2007/11/13 +
+static ssize_t disk_part_extended_read(struct gendisk * disk, char *page)
+{
+	return sprintf(page, "%d\n", disk->part_extended);
+}
+// by cfyeh 2007/11/13 -
 
 static ssize_t disk_stats_read(struct gendisk * disk, char *page)
 {
@@ -394,6 +408,20 @@ static struct disk_attribute disk_attr_stat = {
 	.attr = {.name = "stat", .mode = S_IRUGO },
 	.show	= disk_stats_read
 };
+/*  2007/05/23 cfyeh + : partiton number */
+static struct disk_attribute disk_attr_part = {
+	.attr = {.name = "part_num", .mode = S_IRUGO },
+	.show	= disk_part_read
+};
+/*  2007/05/23 cfyeh - : partiton number */
+
+// add to know which partition is a extended partition
+// by cfyeh 2007/11/13 +
+static struct disk_attribute disk_attr_part_extended = {
+	.attr = {.name = "part_extended", .mode = S_IRUGO },
+	.show	= disk_part_extended_read
+};
+// by cfyeh 2007/11/13 -
 
 static struct attribute * default_attrs[] = {
 	&disk_attr_dev.attr,
@@ -401,6 +429,12 @@ static struct attribute * default_attrs[] = {
 	&disk_attr_removable.attr,
 	&disk_attr_size.attr,
 	&disk_attr_stat.attr,
+	&disk_attr_part.attr, /*  2007/05/23 cfyeh : partiton number */
+
+	// add to know which partition is a extended partition
+	// by cfyeh 2007/11/13 +
+	&disk_attr_part_extended.attr,
+	// by cfyeh 2007/11/13 -
 	NULL,
 };
 
@@ -602,6 +636,7 @@ struct gendisk *alloc_disk(int minors)
 			memset(disk->part, 0, size);
 		}
 		disk->minors = minors;
+		disk->part_num = -1; /*  2007/05/23 cfyeh : partiton number */
 		kobj_set_kset_s(disk,block_subsys);
 		kobject_init(&disk->kobj);
 		rand_initialize_disk(disk);

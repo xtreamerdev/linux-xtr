@@ -7,6 +7,9 @@
 #include <linux/sched.h>
 #include <linux/delay.h>
 #include <linux/init.h>
+#ifdef CONFIG_REALTEK_VENUS
+#include <platform.h>
+#endif
 
 static unsigned long preset_lpj;
 static int __init lpj_setup(char *str)
@@ -24,11 +27,54 @@ __setup("lpj=", lpj_setup);
  */
 #define LPS_PREC 8
 
+#ifdef CONFIG_REALTEK_VENUS
+static unsigned long default_lpj() 
+{
+	switch(platform_info.board_id) {
+		case realtek_qa_board:
+		case realtek_mk_board:
+		case realtek_mk2_board:
+		case realtek_1261_demo_board:
+		case realtek_1281_demo_board:
+		case realtek_neptune_qa_board:
+		case realtek_photoviewer_board:
+		case realtek_avhdd_demo_board:
+		case realtek_pvr_demo_board:
+		case realtek_pvrbox_demo_board:
+		case realtek_avhdd2_demo_board:
+		case realtek_neptuneB_qa_board:
+		case realtek_neptune_demo_board:
+		case realtek_neptuneB_demo_board:
+		case C02_avhdd_board:
+		case C03_pvr_board:
+		case C03_pvr2_board:
+		case C04_pvr_board:
+		case C04_pvr2_board:
+		case C05_pvrbox_board:
+		case C05_pvrbox2_board:
+		case C06_pvr_board:
+		case C08_pvr_board:
+		case C09_pvrbox_board:
+		case C09_pvrbox2_board:
+			return 995328;
+		default:
+			printk("Warning! Unknown board id.\n");
+			return 0;
+	}
+}
+#endif
+
 void __devinit calibrate_delay(void)
 {
 	unsigned long ticks, loopbit;
 	int lps_precision = LPS_PREC;
+#ifdef CONFIG_REALTEK_VENUS
+	unsigned long offset;
 
+#ifdef CONFIG_REALTEK_COMPACT
+	preset_lpj = default_lpj();
+#endif
+#endif
 	if (preset_lpj) {
 		loops_per_jiffy = preset_lpj;
 		printk("Calibrating delay loop (skipped)... "
@@ -74,6 +120,13 @@ void __devinit calibrate_delay(void)
 			loops_per_jiffy/(500000/HZ),
 			(loops_per_jiffy/(5000/HZ)) % 100,
 			loops_per_jiffy);
+#ifdef CONFIG_REALTEK_VENUS
+		offset = loops_per_jiffy-default_lpj();
+		if(offset<0)
+			offset = -offset;
+		if(offset > 5)
+			printk("==================== Warning! The calculated loops_per_jiffy is not similar to the default one. ====================\n");
+#endif
 	}
 
 }

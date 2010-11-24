@@ -71,6 +71,8 @@
 #include <asm/io.h>
 #include <asm/div64.h>
 
+#include "debug.h"
+
 struct ide_disk_obj {
 	ide_drive_t	*drive;
 	ide_driver_t	*driver;
@@ -303,6 +305,8 @@ static ide_startstop_t ide_do_rw_disk (ide_drive_t *drive, struct request *rq, s
 {
 	ide_hwif_t *hwif = HWIF(drive);
 
+	idediskinfo("ide_do_rw_disk\n");
+	
 	BUG_ON(drive->blocked);
 
 	if (!blk_fs_request(rq)) {
@@ -528,6 +532,8 @@ static void init_idedisk_capacity (ide_drive_t  *drive)
 	 */
 	int hpa = idedisk_supports_hpa(id);
 
+	idediskinfo("init_idedisk_capacity\n");
+	
 	if (idedisk_supports_lba48(id)) {
 		/* drive speaks 48-bit LBA */
 		drive->select.b.lba = 1;
@@ -548,6 +554,7 @@ static void init_idedisk_capacity (ide_drive_t  *drive)
 
 static sector_t idedisk_capacity (ide_drive_t *drive)
 {
+	idediskinfo("idedisk_capacity\n");
 	return drive->capacity64 - drive->sect0;
 }
 
@@ -685,6 +692,7 @@ static void idedisk_end_flush(request_queue_t *q, struct request *flush_rq)
 	int bad_sectors;
 	sector_t sector;
 
+	idediskinfo("idedisk_end_flush\n");
 	if (flush_rq->errors & ABRT_ERR) {
 		printk(KERN_ERR "%s: barrier support doesn't work\n", drive->name);
 		blk_queue_ordered(drive->queue, QUEUE_ORDERED_NONE);
@@ -743,6 +751,7 @@ static int idedisk_issue_flush(request_queue_t *q, struct gendisk *disk,
 	struct request *rq;
 	int ret;
 
+	idediskinfo("idedisk_issue_flush\n");
 	if (!drive->wcache)
 		return 0;
 
@@ -817,6 +826,7 @@ static int do_idedisk_flushcache (ide_drive_t *drive)
 {
 	ide_task_t args;
 
+	idediskinfo("do_idedisk_flushcache\n");
 	memset(&args, 0, sizeof(ide_task_t));
 	if (ide_id_has_flush_cache_ext(drive->id))
 		args.tfRegister[IDE_COMMAND_OFFSET]	= WIN_FLUSH_CACHE_EXT;
@@ -866,6 +876,7 @@ static void idedisk_add_settings(ide_drive_t *drive)
 {
 	struct hd_driveid *id = drive->id;
 
+	idediskinfo("idedisk_add_settings\n");
 	ide_add_setting(drive,	"bios_cyl",		SETTING_RW,					-1,			-1,			TYPE_INT,	0,	65535,				1,	1,	&drive->bios_cyl,		NULL);
 	ide_add_setting(drive,	"bios_head",		SETTING_RW,					-1,			-1,			TYPE_BYTE,	0,	255,				1,	1,	&drive->bios_head,		NULL);
 	ide_add_setting(drive,	"bios_sect",		SETTING_RW,					-1,			-1,			TYPE_BYTE,	0,	63,				1,	1,	&drive->bios_sect,		NULL);
@@ -886,6 +897,7 @@ static void idedisk_setup (ide_drive_t *drive)
 	unsigned long long capacity;
 	int barrier;
 
+	idediskinfo("idedisk_setup\n");
 	idedisk_add_settings(drive);
 
 	if (drive->id_read == 0)
@@ -915,7 +927,16 @@ static void idedisk_setup (ide_drive_t *drive)
 
 		blk_queue_max_sectors(drive->queue, max_s);
 	}
-
+	
+// modified by Richard Kuo 10/18/2005
+#ifdef VENUS_DMA_BUFFER
+	blk_queue_max_phys_segments(drive->queue, VENUS_MAX_SG_SEGMENT);	
+	blk_queue_max_sectors(drive->queue, VENUS_DMA_BUF_LEN/SECTOR_SIZE);	 	blk_queue_max_segment_size(drive->queue, VENUS_DMA_BUF_LEN);
+	
+#else
+	blk_queue_max_phys_segments(drive->queue, 1);	// added by frank 94/07/08
+#endif	
+	
 	printk(KERN_INFO "%s: max request size: %dKiB\n", drive->name, drive->queue->max_sectors / 2);
 
 	/* calculate drive capacity, and select LBA if possible */
@@ -1017,6 +1038,7 @@ static void idedisk_setup (ide_drive_t *drive)
 
 static void ide_cacheflush_p(ide_drive_t *drive)
 {
+	idediskinfo("ide_cacheflush_p\n");
 	if (!drive->wcache || !ide_id_has_flush_cache(drive->id))
 		return;
 
@@ -1030,6 +1052,7 @@ static int ide_disk_remove(struct device *dev)
 	struct ide_disk_obj *idkp = drive->driver_data;
 	struct gendisk *g = idkp->disk;
 
+	idediskinfo("ide_disk_remove\n");
 	ide_cacheflush_p(drive);
 
 	ide_unregister_subdriver(drive, idkp->driver);
@@ -1047,6 +1070,7 @@ static void ide_disk_release(struct kref *kref)
 	ide_drive_t *drive = idkp->drive;
 	struct gendisk *g = idkp->disk;
 
+	idediskinfo("ide_disk_release\n");
 	drive->driver_data = NULL;
 	drive->devfs_name[0] = '\0';
 	g->private_data = NULL;
@@ -1060,6 +1084,7 @@ static void ide_device_shutdown(struct device *dev)
 {
 	ide_drive_t *drive = container_of(dev, ide_drive_t, gendev);
 
+	idediskinfo("ide_device_shutdown\n");
 #ifdef	CONFIG_ALPHA
 	/* On Alpha, halt(8) doesn't actually turn the machine off,
 	   it puts you into the sort of firmware monitor. Typically,
@@ -1109,6 +1134,8 @@ static int idedisk_open(struct inode *inode, struct file *filp)
 	struct ide_disk_obj *idkp;
 	ide_drive_t *drive;
 
+	idediskinfo("idedisk_open\n");
+	
 	if (!(idkp = ide_disk_get(disk)))
 		return -ENXIO;
 
@@ -1138,7 +1165,7 @@ static int idedisk_release(struct inode *inode, struct file *filp)
 	struct gendisk *disk = inode->i_bdev->bd_disk;
 	struct ide_disk_obj *idkp = ide_disk_g(disk);
 	ide_drive_t *drive = idkp->drive;
-
+	idediskinfo("idedisk_release\n");
 	if (drive->usage == 1)
 		ide_cacheflush_p(drive);
 	if (drive->removable && drive->usage == 1) {
@@ -1162,6 +1189,7 @@ static int idedisk_ioctl(struct inode *inode, struct file *file,
 {
 	struct block_device *bdev = inode->i_bdev;
 	struct ide_disk_obj *idkp = ide_disk_g(bdev->bd_disk);
+	idediskinfo("idedisk_ioctl\n");
 	return generic_ide_ioctl(idkp->drive, file, bdev, cmd, arg);
 }
 
@@ -1170,6 +1198,7 @@ static int idedisk_media_changed(struct gendisk *disk)
 	struct ide_disk_obj *idkp = ide_disk_g(disk);
 	ide_drive_t *drive = idkp->drive;
 
+	idediskinfo("idedisk_media_changed\n");
 	/* do not scan partitions twice if this is a removable device */
 	if (drive->attach) {
 		drive->attach = 0;
@@ -1182,6 +1211,7 @@ static int idedisk_media_changed(struct gendisk *disk)
 static int idedisk_revalidate_disk(struct gendisk *disk)
 {
 	struct ide_disk_obj *idkp = ide_disk_g(disk);
+	idediskinfo("idedisk_revalidate_disk\n");
 	set_capacity(disk, idedisk_capacity(idkp->drive));
 	return 0;
 }
@@ -1203,6 +1233,7 @@ static int ide_disk_probe(struct device *dev)
 	struct ide_disk_obj *idkp;
 	struct gendisk *g;
 
+	idediskinfo("ide_disk_probe\n");
 	/* strstr("foo", "") is non-NULL */
 	if (!strstr("ide-disk", drive->driver_req))
 		goto failed;
@@ -1265,6 +1296,7 @@ static void __exit idedisk_exit (void)
 
 static int idedisk_init (void)
 {
+	idediskinfo("idedisk_init\n");
 	return driver_register(&idedisk_driver.gen_driver);
 }
 

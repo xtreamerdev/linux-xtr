@@ -402,6 +402,36 @@
 #define IP32_SERIAL_PORT_DEFNS
 #endif /* CONFIG_SGI_IP32 */
 
+#ifdef CONFIG_REALTEK_SYSTEM_OWNS_SECOND_UART
+#define REALTEK_SECOND_SERIAL_PORT_DEFN					\
+	{ .baud_base		= 27000000/16,				\
+	  .irq			= 3,					\
+	  .flags		= STD_COM_FLAGS,			\
+	  .iomem_base		= (u8*)KSEG1ADDR(VENUS_IO_PORT_BASE+VENUS_MIS_U1RBR_THR_DLL),	\
+	  .iomem_reg_shift	= 2,					\
+	  .io_type		= SERIAL_IO_MEM,			\
+	  .port			= VENUS_MIS_U1RBR_THR_DLL		\
+	 },
+#else
+#define REALTEK_SECOND_SERIAL_PORT_DEFN
+#endif
+
+#ifdef CONFIG_REALTEK_VENUS_SERIAL_PORT
+#include <venus.h>
+#define REALTEK_SERIAL_PORT_DEFNS					\
+	{ .baud_base		= 27000000/16,				\
+	  .irq			= 3,					\
+	  .flags		= STD_COM_FLAGS,			\
+	  .iomem_base		= (u8*)KSEG1ADDR(VENUS_IO_PORT_BASE+VENUS_MIS_U0RBR_THR_DLL),	\
+	  .iomem_reg_shift	= 2,					\
+	  .io_type		= SERIAL_IO_MEM,			\
+	  .port			= VENUS_MIS_U0RBR_THR_DLL		\
+	 },								\
+	 REALTEK_SECOND_SERIAL_PORT_DEFN
+#else
+#define REALTEK_SERIAL_PORT_DEFNS
+#endif
+
 #define SERIAL_PORT_DFNS				\
 	DDB5477_SERIAL_PORT_DEFNS			\
 	EV96100_SERIAL_PORT_DEFNS			\
@@ -416,6 +446,7 @@
 	MOMENCO_OCELOT_C_SERIAL_PORT_DEFNS		\
 	MOMENCO_OCELOT_SERIAL_PORT_DEFNS		\
 	MOMENCO_OCELOT_3_SERIAL_PORT_DEFNS		\
-	AU1000_SERIAL_PORT_DEFNS
+	AU1000_SERIAL_PORT_DEFNS			\
+	REALTEK_SERIAL_PORT_DEFNS
 
 #endif /* _ASM_SERIAL_H */

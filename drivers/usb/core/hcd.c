@@ -23,11 +23,6 @@
  */
 
 #include <linux/config.h>
-
-#ifdef CONFIG_USB_DEBUG
-#define DEBUG
-#endif
-
 #include <linux/module.h>
 #include <linux/version.h>
 #include <linux/kernel.h>
@@ -519,119 +514,120 @@ error:
 /*-------------------------------------------------------------------------*/
 
 /*
- * Root Hub interrupt transfers are synthesized with a timer.
- * Completions are called in_interrupt() but not in_irq().
+ * Root Hub interrupt transfers are polled using a timer if the
+ * driver requests it; otherwise the driver is responsible for
+ * calling usb_hcd_poll_rh_status() when an event occurs.
  *
- * Note: some root hubs (including common UHCI based designs) can't
- * correctly issue port change IRQs.  They're the ones that _need_ a
- * timer; most other root hubs don't.  Some systems could save a
- * lot of battery power by eliminating these root hub timer IRQs.
+ * Completions are called in_interrupt(), but they may or may not
+ * be in_irq().
  */
-
-static void rh_report_status (unsigned long ptr);
-
-static int rh_status_urb (struct usb_hcd *hcd, struct urb *urb) 
+void usb_hcd_poll_rh_status(struct usb_hcd *hcd)
 {
-	int	len = 1 + (urb->dev->maxchild / 8);
+	struct urb      *urb;
+	int             length;
+	unsigned long   flags;
+	char            buffer[4];      /* Any root hubs with > 31 ports? */
 
-	/* rh_timer protected by hcd_data_lock */
-	if (hcd->rh_timer.data || urb->transfer_buffer_length < len) {
-		dev_dbg (hcd->self.controller,
-				"not queuing rh status urb, stat %d\n",
-				urb->status);
-		return -EINVAL;
+	if (!hcd->uses_new_polling && !hcd->status_urb)
+		return;
+
+	length = hcd->driver->hub_status_data(hcd, buffer);
+	if (length > 0) {
+
+		/* try to complete the status urb */
+		local_irq_save (flags);
+		spin_lock(&hcd_root_hub_lock);
+		urb = hcd->status_urb;
+		if (urb) {
+			spin_lock(&urb->lock);
+			if (urb->status == -EINPROGRESS) {
+				hcd->poll_pending = 0;
+				hcd->status_urb = NULL;
+				urb->status = 0;
+				urb->hcpriv = NULL;
+				urb->actual_length = length;
+				memcpy(urb->transfer_buffer, buffer, length);
+			} else          /* urb has been unlinked */
+				length = 0;
+			spin_unlock(&urb->lock);
+		} else
+			length = 0;
+		spin_unlock(&hcd_root_hub_lock);
+
+		/* local irqs are always blocked in completions */
+		if (length > 0)
+			usb_hcd_giveback_urb (hcd, urb, NULL);
+		else
+			hcd->poll_pending = 1;
+		local_irq_restore (flags);
 	}
 
-	init_timer (&hcd->rh_timer);
-	hcd->rh_timer.function = rh_report_status;
-	hcd->rh_timer.data = (unsigned long) urb;
-	/* USB 2.0 spec says 256msec; this is close enough */
-	hcd->rh_timer.expires = jiffies + HZ/4;
-	add_timer (&hcd->rh_timer);
-	urb->hcpriv = hcd;	/* nonzero to indicate it's queued */
-	return 0;
+	/* The USB 2.0 spec says 256 ms.  This is close enough and won't
+	 * exceed that limit if HZ is 100. */
+	if (hcd->uses_new_polling ? hcd->poll_rh :
+			(length == 0 && hcd->status_urb != NULL))
+		mod_timer (&hcd->rh_timer, jiffies + msecs_to_jiffies(250));
 }
+EXPORT_SYMBOL_GPL(usb_hcd_poll_rh_status);
 
 /* timer callback */
-
-static void rh_report_status (unsigned long ptr)
+static void rh_timer_func (unsigned long _hcd)
 {
-	struct urb	*urb;
-	struct usb_hcd	*hcd;
-	int		length = 0;
-	unsigned long	flags;
-
-	urb = (struct urb *) ptr;
-	local_irq_save (flags);
-	spin_lock (&urb->lock);
-
-	/* do nothing if the urb's been unlinked */
-	if (!urb->dev
-			|| urb->status != -EINPROGRESS
-			|| (hcd = urb->dev->bus->hcpriv) == NULL) {
-		spin_unlock (&urb->lock);
-		local_irq_restore (flags);
-		return;
-	}
-
-	/* complete the status urb, or retrigger the timer */
-	spin_lock (&hcd_data_lock);
-	if (urb->dev->state == USB_STATE_CONFIGURED) {
-		length = hcd->driver->hub_status_data (
-					hcd, urb->transfer_buffer);
-		if (length > 0) {
-			hcd->rh_timer.data = 0;
-			urb->actual_length = length;
-			urb->status = 0;
-			urb->hcpriv = NULL;
-		} else
-			mod_timer (&hcd->rh_timer, jiffies + HZ/4);
-	}
-	spin_unlock (&hcd_data_lock);
-	spin_unlock (&urb->lock);
-
-	/* local irqs are always blocked in completions */
-	if (length > 0)
-		usb_hcd_giveback_urb (hcd, urb, NULL);
-	local_irq_restore (flags);
+	usb_hcd_poll_rh_status((struct usb_hcd *) _hcd);
 }
 
 /*-------------------------------------------------------------------------*/
+
+static int rh_queue_status (struct usb_hcd *hcd, struct urb *urb)
+{
+	int             retval;
+	unsigned long	flags;
+	int             len = 1 + (urb->dev->maxchild / 8);
+
+	spin_lock_irqsave (&hcd_root_hub_lock, flags);
+	if (urb->status != -EINPROGRESS)        /* already unlinked */
+		retval = urb->status;
+	else if (hcd->status_urb || urb->transfer_buffer_length < len) {
+		dev_dbg (hcd->self.controller, "not queuing rh status urb\n");
+		retval = -EINVAL;
+	} else {
+		hcd->status_urb = urb;
+		urb->hcpriv = hcd;      /* indicate it's queued */
+
+		if (!hcd->uses_new_polling)
+			mod_timer (&hcd->rh_timer, jiffies +
+					msecs_to_jiffies(250));
+
+		/* If a status change has already occurred, report it ASAP */
+		else if (hcd->poll_pending)
+			mod_timer (&hcd->rh_timer, jiffies);
+		retval = 0;
+	}
+	spin_unlock_irqrestore (&hcd_root_hub_lock, flags);
+	return retval;
+}
 
 static int rh_urb_enqueue (struct usb_hcd *hcd, struct urb *urb)
 {
-	if (usb_pipeint (urb->pipe)) {
-		int		retval;
-		unsigned long	flags;
-
-		spin_lock_irqsave (&hcd_data_lock, flags);
-		retval = rh_status_urb (hcd, urb);
-		spin_unlock_irqrestore (&hcd_data_lock, flags);
-		return retval;
-	}
+	if (usb_pipeint (urb->pipe))
+		return rh_queue_status (hcd, urb);
 	if (usb_pipecontrol (urb->pipe))
 		return rh_call_control (hcd, urb);
-	else
-		return -EINVAL;
+	return -EINVAL;
 }
 
 /*-------------------------------------------------------------------------*/
 
+/* Asynchronous unlinks of root-hub control URBs are legal, but they
+ * don't do anything.  Status URB unlinks must be made in process context
+ * with interrupts enabled.
+ */
 static int usb_rh_urb_dequeue (struct usb_hcd *hcd, struct urb *urb)
 {
-	unsigned long	flags;
+	if (usb_pipeendpoint(urb->pipe) == 0) { /* Control URB */
+		if (in_interrupt())
+			return 0;               /* nothing to do */
 
-	/* note:  always a synchronous unlink */
-	if ((unsigned long) urb == hcd->rh_timer.data) {
-		del_timer_sync (&hcd->rh_timer);
-		hcd->rh_timer.data = 0;
-
-		local_irq_save (flags);
-		urb->hcpriv = NULL;
-		usb_hcd_giveback_urb (hcd, urb, NULL);
-		local_irq_restore (flags);
-
-	} else if (usb_pipeendpoint(urb->pipe) == 0) {
 		spin_lock_irq(&urb->lock);	/* from usb_kill_urb */
 		++urb->reject;
 		spin_unlock_irq(&urb->lock);
@@ -642,8 +638,22 @@ static int usb_rh_urb_dequeue (struct usb_hcd *hcd, struct urb *urb)
 		spin_lock_irq(&urb->lock);
 		--urb->reject;
 		spin_unlock_irq(&urb->lock);
-	} else
-		return -EINVAL;
+
+	} else {                                /* Status URB */
+		if (!hcd->uses_new_polling)
+			del_timer_sync (&hcd->rh_timer);
+		local_irq_disable ();
+		spin_lock (&hcd_root_hub_lock);
+		if (urb == hcd->status_urb) {
+			hcd->status_urb = NULL;
+			urb->hcpriv = NULL;
+		} else
+			urb = NULL;             /* wasn't fully queued */
+		spin_unlock (&hcd_root_hub_lock);
+		if (urb)
+			usb_hcd_giveback_urb (hcd, urb, NULL);
+		local_irq_enable ();
+	}
 
 	return 0;
 }
@@ -891,6 +901,16 @@ int usb_hcd_register_root_hub (struct usb_device *usb_dev, struct usb_hcd *hcd)
 	return retval;
 }
 EXPORT_SYMBOL_GPL(usb_hcd_register_root_hub);
+
+void usb_enable_root_hub_irq (struct usb_bus *bus)
+{
+	struct usb_hcd *hcd;
+
+	hcd = container_of (bus, struct usb_hcd, self);
+	if (hcd->driver->hub_irq_enable && !hcd->poll_rh &&
+			hcd->state != HC_STATE_HALT)
+		hcd->driver->hub_irq_enable (hcd);
+}
 
 
 /*-------------------------------------------------------------------------*/
@@ -1168,7 +1188,9 @@ static int hcd_submit_urb (struct urb *urb, int mem_flags)
 	/* lower level hcd code should use *_dma exclusively,
 	 * unless it uses pio or talks to another transport.
 	 */
+#ifndef CONFIG_REALTEK_VENUS_USB	//cfyeh+ 2005/11/07
 	if (hcd->self.controller->dma_mask) {
+#endif /* CONFIG_REALTEK_VENUS_USB */	//cfyeh- 2005/11/07
 		if (usb_pipecontrol (urb->pipe)
 			&& !(urb->transfer_flags & URB_NO_SETUP_DMA_MAP))
 			urb->setup_dma = dma_map_single (
@@ -1185,7 +1207,9 @@ static int hcd_submit_urb (struct urb *urb, int mem_flags)
 					usb_pipein (urb->pipe)
 					    ? DMA_FROM_DEVICE
 					    : DMA_TO_DEVICE);
+#ifndef CONFIG_REALTEK_VENUS_USB	//cfyeh+ 2005/11/07
 	}
+#endif /* CONFIG_REALTEK_VENUS_USB */	//cfyeh- 2005/10/05
 
 	status = hcd->driver->urb_enqueue (hcd, ep, urb, mem_flags);
 done:
@@ -1284,11 +1308,13 @@ static int hcd_unlink_urb (struct urb *urb, int status)
 		goto done;
 	}
 
+#if 0 // usb suspend hack by cfyeh
 	/* running ~= hc unlink handshake works (irq, timer, etc)
 	 * halted ~= no unlink handshake is needed
 	 * suspended, resuming == should never happen
 	 */
 	WARN_ON (!HC_IS_RUNNING (hcd->state) && hcd->state != HC_STATE_HALT);
+#endif // usb suspend hack by cfyeh
 
 	/* insist the urb is still queued */
 	list_for_each(tmp, &ep->urb_list) {
@@ -1355,7 +1381,8 @@ hcd_endpoint_disable (struct usb_device *udev, struct usb_host_endpoint *ep)
 
 	hcd = udev->bus->hcpriv;
 
-	WARN_ON (!HC_IS_RUNNING (hcd->state) && hcd->state != HC_STATE_HALT);
+	WARN_ON (!HC_IS_RUNNING (hcd->state) && hcd->state != HC_STATE_HALT &&
+			udev->state != USB_STATE_NOTATTACHED);
 
 	local_irq_disable ();
 
@@ -1548,7 +1575,9 @@ void usb_hcd_giveback_urb (struct usb_hcd *hcd, struct urb *urb, struct pt_regs 
 	urb_unlink (urb);
 
 	/* lower level hcd code should use *_dma exclusively */
+#ifndef CONFIG_REALTEK_VENUS_USB	//cfyeh+ 2005/11/07
 	if (hcd->self.controller->dma_mask && !at_root_hub) {
+#endif /* CONFIG_REALTEK_VENUS_USB */	//cfyeh- 2005/11/07
 		if (usb_pipecontrol (urb->pipe)
 			&& !(urb->transfer_flags & URB_NO_SETUP_DMA_MAP))
 			dma_unmap_single (hcd->self.controller, urb->setup_dma,
@@ -1562,7 +1591,9 @@ void usb_hcd_giveback_urb (struct usb_hcd *hcd, struct urb *urb, struct pt_regs 
 					usb_pipein (urb->pipe)
 					    ? DMA_FROM_DEVICE
 					    : DMA_TO_DEVICE);
+#ifndef CONFIG_REALTEK_VENUS_USB	//cfyeh+ 2005/11/07
 	}
+#endif /* CONFIG_REALTEK_VENUS_USB */	//cfyeh- 2005/11/07
 
 	usbmon_urb_complete (&hcd->self, urb);
 	/* pass ownership to the completion handler */
@@ -1619,6 +1650,8 @@ void usb_hc_died (struct usb_hcd *hcd)
 
 	spin_lock_irqsave (&hcd_root_hub_lock, flags);
 	if (hcd->rh_registered) {
+		hcd->poll_rh = 0;
+		del_timer(&hcd->rh_timer);
 
 		/* make khubd clean up old urbs and devices */
 		usb_set_device_state (hcd->self.root_hub,
@@ -1672,6 +1705,8 @@ struct usb_hcd *usb_create_hcd (const struct hc_driver *driver,
 	hcd->self.bus_name = bus_name;
 
 	init_timer(&hcd->rh_timer);
+	hcd->rh_timer.function = rh_timer_func;
+	hcd->rh_timer.data = (unsigned long) hcd;
 
 	hcd->driver = driver;
 	hcd->product_desc = (driver->product_desc) ? driver->product_desc :
@@ -1755,6 +1790,8 @@ int usb_add_hcd(struct usb_hcd *hcd,
 		goto err3;
 	}
 
+	if (hcd->uses_new_polling && hcd->poll_rh)
+		usb_hcd_poll_rh_status(hcd);
 	return retval;
 
  err3:
@@ -1788,6 +1825,9 @@ void usb_remove_hcd(struct usb_hcd *hcd)
 	hcd->rh_registered = 0;
 	spin_unlock_irq (&hcd_root_hub_lock);
 	usb_disconnect(&hcd->self.root_hub);
+
+	hcd->poll_rh = 0;
+	del_timer_sync(&hcd->rh_timer);
 
 	hcd->driver->stop(hcd);
 	hcd->state = HC_STATE_HALT;

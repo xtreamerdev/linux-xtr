@@ -77,7 +77,7 @@ ohci_pci_start (struct usb_hcd *hcd)
 		 * even all NSC stuff.
 		 */
 		else if (pdev->vendor == PCI_VENDOR_ID_NS) {
-			struct pci_dev	*b;
+			struct pci_dev  *b;
 
 			b  = pci_find_slot (pdev->bus->number,
 					PCI_DEVFN (PCI_SLOT (pdev->devfn), 1));
@@ -88,7 +88,7 @@ ohci_pci_start (struct usb_hcd *hcd)
 			}
 		}
 
-		/* Check for Compaq's ZFMicro chipset, which needs short 
+		/* Check for Compaq's ZFMicro chipset, which needs short
 		 * delays before control or bulk queues get re-activated
 		 * in finish_unlinks()
 		 */
@@ -111,7 +111,7 @@ ohci_pci_start (struct usb_hcd *hcd)
 	return 0;
 }
 
-#ifdef	CONFIG_PM
+#if     defined(CONFIG_PM)
 
 static int ohci_pci_suspend (struct usb_hcd *hcd, pm_message_t message)
 {
@@ -179,7 +179,6 @@ static int ohci_pci_resume (struct usb_hcd *hcd)
 
 #endif	/* CONFIG_PM */
 
-
 /*-------------------------------------------------------------------------*/
 
 static const struct hc_driver ohci_pci_hc_driver = {
@@ -198,7 +197,7 @@ static const struct hc_driver ohci_pci_hc_driver = {
 	 */
 	.reset =		ohci_pci_reset,
 	.start =		ohci_pci_start,
-#ifdef	CONFIG_PM
+#if     defined(CONFIG_PM)
 	.suspend =		ohci_pci_suspend,
 	.resume =		ohci_pci_resume,
 #endif
@@ -230,38 +229,39 @@ static const struct hc_driver ohci_pci_hc_driver = {
 
 /*-------------------------------------------------------------------------*/
 
-
 static const struct pci_device_id pci_ids [] = { {
 	/* handle any USB OHCI controller */
 	PCI_DEVICE_CLASS((PCI_CLASS_SERIAL_USB << 8) | 0x10, ~0),
-	.driver_data =	(unsigned long) &ohci_pci_hc_driver,
+	.driver_data =  (unsigned long) &ohci_pci_hc_driver,
 	}, { /* end: all zeroes */ }
 };
 MODULE_DEVICE_TABLE (pci, pci_ids);
 
 /* pci driver glue; this is a "new style" PCI driver module */
 static struct pci_driver ohci_pci_driver = {
-	.name =		(char *) hcd_name,
-	.id_table =	pci_ids,
+	.name =         (char *) hcd_name,
+	.id_table =     pci_ids,
 
-	.probe =	usb_hcd_pci_probe,
-	.remove =	usb_hcd_pci_remove,
+	.probe =        usb_hcd_pci_probe,
+	.remove =       usb_hcd_pci_remove,
 
-#ifdef	CONFIG_PM
-	.suspend =	usb_hcd_pci_suspend,
-	.resume =	usb_hcd_pci_resume,
+#ifdef  CONFIG_PM
+	.suspend =      usb_hcd_pci_suspend,
+	.resume =       usb_hcd_pci_resume,
 #endif
 };
-
+/*-------------------------------------------------------------------------*/
  
 static int __init ohci_hcd_pci_init (void) 
 {
+	
 	printk (KERN_DEBUG "%s: " DRIVER_INFO " (PCI)\n", hcd_name);
 	if (usb_disabled())
 		return -ENODEV;
 
 	pr_debug ("%s: block sizes: ed %Zd td %Zd\n", hcd_name,
 		sizeof (struct ed), sizeof (struct td));
+
 	return pci_register_driver (&ohci_pci_driver);
 }
 module_init (ohci_hcd_pci_init);

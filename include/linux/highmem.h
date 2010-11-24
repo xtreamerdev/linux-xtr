@@ -46,7 +46,7 @@ static inline void clear_user_highpage(struct page *page, unsigned long vaddr)
 static inline struct page *
 alloc_zeroed_user_highpage(struct vm_area_struct *vma, unsigned long vaddr)
 {
-	struct page *page = alloc_page_vma(GFP_HIGHUSER, vma, vaddr);
+	struct page *page = alloc_page_vma(GFP_DVRUSER, vma, vaddr);
 
 	if (page)
 		clear_user_highpage(page, vaddr);

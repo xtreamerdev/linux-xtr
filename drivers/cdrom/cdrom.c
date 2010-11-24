@@ -991,6 +991,16 @@ static int cdrom_close_write(struct cdrom_device_info *cdi)
  * is in their own interest: device control becomes a lot easier
  * this way.
  */
+
+int venus_check_disk_change(struct block_device *bdev)
+{
+	printk("cdrom: venus_check_disk_change\n");
+	if (__invalidate_device(bdev))
+		printk("VFS: busy inodes on changed media.\n");
+
+	return 1;
+}
+ 
 int cdrom_open(struct cdrom_device_info *cdi, struct inode *ip, struct file *fp)
 {
 	int ret;
@@ -1025,7 +1035,10 @@ int cdrom_open(struct cdrom_device_info *cdi, struct inode *ip, struct file *fp)
 			cdi->name, cdi->use_count);
 	/* Do this on open.  Don't wait for mount, because they might
 	    not be mounting, but opening with O_NONBLOCK */
-	check_disk_change(ip->i_bdev);
+	if (fp->f_flags & O_SYNC)
+		venus_check_disk_change(ip->i_bdev);			// added by Frank Ting to speed up Tray in/out 
+	else
+		check_disk_change(ip->i_bdev);
 	return 0;
 err:
 	cdi->use_count--;
@@ -1212,6 +1225,12 @@ int cdrom_release(struct cdrom_device_info *cdi, struct file *fp)
 		cdrom_dvd_rw_close_write(cdi);
 	if (cdi->use_count == 0 &&
 	    (cdo->capability & CDC_LOCK) && !keeplocked) {
+	  // Modified by Frank Ting(95/10/19) for BTC-L28 Standby bug
+		//cdinfo(CD_CLOSE, "Unlocking door!\n");
+		//cdo->lock_door(cdi, 0);
+	  // I forgot what's the matter with BTC-L28.
+	  // However this mark will cause error for other loader while we
+	  // use eject -t after umount, so I restore the original codes.
 		cdinfo(CD_CLOSE, "Unlocking door!\n");
 		cdo->lock_door(cdi, 0);
 	}

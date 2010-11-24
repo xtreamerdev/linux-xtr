@@ -57,8 +57,14 @@ typedef unsigned long old_sigset_t;		/* at least 32 bits */
 #define SIGXCPU		30	/* CPU limit exceeded (4.2 BSD).  */
 #define SIGXFSZ		31	/* File size limit exceeded (4.2 BSD).  */
 
+#define SIGUSR_HOTPLUG_ADD	46	/* When a usb device is added, hotplug will use this to signal Dvdplayer. */
+#define SIGUSR_HOTPLUG_REMOVE	47	/* When a usb device is removed, hotplug will use this to signal Dvdplayer. */
+#define SIGUSR_BLOCK_ADD	48	/* When a block device is added, hotplug will use this to signal Dvdplayer. */
+#define SIGUSR_BLOCK_REMOVE	49	/* When a block device is removed, hotplug will use this to signal Dvdplayer. */
+#define SIGUSR_RTC_ALARM	50	/* The system is woken up by RTC alarm when in power saving mode. This will be sent to RootApp */
+
 /* These should not be considered constants from userland.  */
-#define SIGRTMIN	32
+#define SIGRTMIN	51
 #define SIGRTMAX	_NSIG
 
 /*

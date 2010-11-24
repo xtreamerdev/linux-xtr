@@ -64,6 +64,7 @@ obj-$(CONFIG_ADAPTEC_STARFIRE) += starfire.o
 #
 
 obj-$(CONFIG_MII) += mii.o
+obj-$(CONFIG_8139CP_VENUS) += 8139cplus.o
 
 obj-$(CONFIG_SUNDANCE) += sundance.o
 obj-$(CONFIG_HAMACHI) += hamachi.o
@@ -194,6 +195,7 @@ obj-$(CONFIG_WAN) += wan/
 obj-$(CONFIG_ARCNET) += arcnet/
 obj-$(CONFIG_NET_PCMCIA) += pcmcia/
 obj-$(CONFIG_NET_RADIO) += wireless/
+obj-$(CONFIG_NET_UWB) += uwb/
 obj-$(CONFIG_NET_TULIP) += tulip/
 obj-$(CONFIG_HAMRADIO) += hamradio/
 obj-$(CONFIG_IRDA) += irda/

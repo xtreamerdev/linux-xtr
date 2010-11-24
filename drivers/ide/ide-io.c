@@ -55,12 +55,19 @@
 #include <asm/io.h>
 #include <asm/bitops.h>
 
+#include "debug.h"
+extern int ide_debug;
+
 int __ide_end_request(ide_drive_t *drive, struct request *rq, int uptodate,
 		      int nr_sectors)
 {
 	int ret = 1;
 
 	BUG_ON(!(rq->flags & REQ_STARTED));
+	
+	if (rq->errors>ERROR_RESET) 
+		printk("%s: uptodate=%x nr_sectors=%x rq->data_len=%x\n", 
+		 			drive->name, uptodate, nr_sectors, rq->data_len);
 
 	/*
 	 * if failfast is set on a request, override number of sectors and
@@ -71,12 +78,18 @@ int __ide_end_request(ide_drive_t *drive, struct request *rq, int uptodate,
 
 	if (!blk_fs_request(rq) && end_io_error(uptodate) && !rq->errors)
 		rq->errors = -EIO;
+		
+	if (rq->errors>ERROR_RESET) 
+		printk("%s: uptodate=%x nr_sectors=%x rq->data_len=%x\n", 
+		 			drive->name, uptodate, nr_sectors, rq->data_len);
 
 	/*
 	 * decide whether to reenable DMA -- 3 is a random magic for now,
 	 * if we DMA timeout more than 3 times, just stay in PIO
 	 */
-	if (drive->state == DMA_PIO_RETRY && drive->retry_pio <= 3) {
+	//if (drive->state == DMA_PIO_RETRY && drive->retry_pio <= 3) {
+	// Modified by Frank Ting 95/6/23
+	if (drive->state == DMA_PIO_RETRY) {
 		drive->state = 0;
 		HWGROUP(drive)->hwif->ide_dma_on(drive);
 	}
@@ -91,7 +104,15 @@ int __ide_end_request(ide_drive_t *drive, struct request *rq, int uptodate,
 		HWGROUP(drive)->rq = NULL;
 		end_that_request_last(rq);
 		ret = 0;
-	}
+	}else{
+		//Added by Frank 96/1/10 due to failure of end_that_request_first(PIO mode with data transfer) 
+    if (!end_that_request_chunk(rq, uptodate, rq->data_len)){
+	    blkdev_dequeue_request(rq);
+      HWGROUP(drive)->rq = NULL;
+      end_that_request_last(rq);
+      ret = 0;
+    }
+  }
 	return ret;
 }
 EXPORT_SYMBOL(__ide_end_request);
@@ -310,6 +331,9 @@ void ide_end_drive_cmd (ide_drive_t *drive, u8 stat, u8 err)
 	rq = HWGROUP(drive)->rq;
 	spin_unlock_irqrestore(&ide_lock, flags);
 
+	// for SATA Bridge(JMicron), fail to execute WIN_IDENTIFY
+	err = (stat & ERR_STAT) ? err : 0;
+	// fixed by Frank 96/5/14
 	if (rq->flags & REQ_DRIVE_CMD) {
 		u8 *args = (u8 *) rq->buffer;
 		if (rq->errors == 0)
@@ -472,22 +496,32 @@ static ide_startstop_t ide_atapi_error(ide_drive_t *drive, struct request *rq, u
 {
 	ide_hwif_t *hwif = drive->hwif;
 
+	printk("%s: rq->errors=%x cmd=%x\n", drive->name, rq->errors, rq->cmd[0]);
+
 	if (stat & BUSY_STAT || ((stat & WRERR_STAT) && !drive->nowerr)) {
 		/* other bits are useless when BUSY */
 		rq->errors |= ERROR_RESET;
 	} else {
 		/* add decoding error stuff */
+		// added by Frank Ting 95/12/26
+		rq->errors |= ERROR_RESET;
+
 	}
 
 	if (hwif->INB(IDE_STATUS_REG) & (BUSY_STAT|DRQ_STAT))
 		/* force an abort */
 		hwif->OUTB(WIN_IDLEIMMEDIATE, IDE_COMMAND_REG);
 
-	if (rq->errors >= ERROR_MAX) {
+	if (rq->errors > ERROR_RESET) {
+	//if (rq->errors >= ERROR_MAX) {
 		ide_kill_rq(drive, rq);
 	} else {
+		// added by Frank Ting 95/12/26
+		
 		if ((rq->errors & ERROR_RESET) == ERROR_RESET) {
 			++rq->errors;
+			printk(KERN_ERR "%s: Reset loader\n", drive->name);
+
 			return ide_do_reset(drive);
 		}
 		++rq->errors;
@@ -899,6 +933,7 @@ static ide_startstop_t start_request (ide_drive_t *drive, struct request *rq)
 
 	/* bail early if we've exceeded max_failures */
 	if (drive->max_failures && (drive->failures > drive->max_failures)) {
+		printk("%s: drive->failures=%x\n", HWIF(drive)->name, drive->failures);
 		goto kill_rq;
 	}
 
@@ -1481,10 +1516,22 @@ irqreturn_t ide_intr (int irq, void *dev_id, struct pt_regs *regs)
 	ide_handler_t *handler;
 	ide_startstop_t startstop;
 
-	spin_lock_irqsave(&ide_lock, flags);
+ 	spin_lock_irqsave(&ide_lock, flags);
 	hwif = hwgroup->hwif;
 
+ 	ideinfo("ide_intr=%x\n", hwif->io_ports[IDE_IRQ_OFFSET]);
+ 	
+	// added by Frank(2005/6/7) 
+	if (!(hwif->INB(hwif->io_ports[IDE_IRQ_OFFSET]) & 0x08)){
+#ifdef IDE_1394_IRQ
+		printk("not me\n");
+#endif
+		spin_unlock_irqrestore(&ide_lock, flags);
+		return IRQ_NONE;
+	}
+	// *****
 	if (!ide_ack_intr(hwif)) {
+		printk("not ack\n");
 		spin_unlock_irqrestore(&ide_lock, flags);
 		return IRQ_NONE;
 	}
@@ -1524,6 +1571,7 @@ irqreturn_t ide_intr (int irq, void *dev_id, struct pt_regs *regs)
 #endif /* CONFIG_BLK_DEV_IDEPCI */
 		}
 		spin_unlock_irqrestore(&ide_lock, flags);
+		printk("not here\n");
 		return IRQ_NONE;
 	}
 	drive = hwgroup->drive;
@@ -1546,6 +1594,7 @@ irqreturn_t ide_intr (int irq, void *dev_id, struct pt_regs *regs)
 		 * enough advance overhead that the latter isn't a problem.
 		 */
 		spin_unlock_irqrestore(&ide_lock, flags);
+		printk("not drive is ready\n");
 		return IRQ_NONE;
 	}
 	if (!hwgroup->busy) {

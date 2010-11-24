@@ -26,13 +26,49 @@ config USB_ARCH_HAS_OHCI
 	default y if PPC_MPC52xx
 	# MIPS:
 	default y if SOC_AU1X00
+	# Realtek
+	default y if REALTEK_VENUS_USB
 	# more:
 	default PCI
+
+# Realtek Venus USB Support
+# cfyeh+
+config REALTEK_VENUS_USB
+	bool "Support for Realtek Venus USB"
+	depends on REALTEK_VENUS
+	---help---
+	  Support for Realtek Venus USB
+
+choice 
+	prompt "Realtek Venus USB setting"
+	depends on REALTEK_VENUS_USB
+
+config REALTEK_VENUS_USB_1261
+	bool "1261"
+	depends on REALTEK_VENUS_USB
+	---help---
+	  Realtek Venus USB 1261 setting
+
+config REALTEK_VENUS_USB_1261_ECO
+	bool "1261 ECO (RLE0150)"
+	depends on REALTEK_VENUS_USB
+	---help---
+	  Realtek Venus USB 1261 ECO (RLE0150) setting
+
+endchoice
+
+config REALTEK_VENUS_USB_TEST_MODE
+	bool "Support for Realtek Venus USB test mode for debug USB"
+	depends on PROC_FS && REALTEK_VENUS_USB
+	---help---
+	  Support for Realtek Venus USB test mode for debug USB.
+	  There are some items on /proc/ which name are ehci_* 
+	  or ohci_*.
 
 # ARM SA1111 chips have a non-PCI based "OHCI-compatible" USB host interface.
 config USB
 	tristate "Support for Host-side USB"
-	depends on USB_ARCH_HAS_HCD
+	depends on USB_ARCH_HAS_HCD || REALTEK_VENUS_USB
 	---help---
 	  Universal Serial Bus (USB) is a specification for a serial bus
 	  subsystem which offers higher speeds and more features than the

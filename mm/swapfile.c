@@ -26,6 +26,7 @@
 #include <linux/security.h>
 #include <linux/backing-dev.h>
 #include <linux/syscalls.h>
+#include <linux/auth.h>
 
 #include <asm/pgtable.h>
 #include <asm/tlbflush.h>
@@ -48,6 +49,9 @@ struct swap_list_t swap_list = {-1, -1};
 struct swap_info_struct swap_info[MAX_SWAPFILES];
 
 static DECLARE_MUTEX(swapon_sem);
+
+struct swap_info_struct *remap_swap_area = NULL;
+int remap_swap_type = -1;
 
 /*
  * We need this because the bdev->unplug_fn can sleep and we cannot
@@ -148,7 +152,7 @@ static inline int scan_swap_map(struct swap_info_struct *si)
 	return 0;
 }
 
-swp_entry_t get_swap_page(void)
+swp_entry_t get_swap_page(int urgent)
 {
 	struct swap_info_struct * p;
 	unsigned long offset;
@@ -157,6 +161,25 @@ swp_entry_t get_swap_page(void)
 
 	entry.val = 0;	/* Out of memory */
 	swap_list_lock();
+if (urgent) {
+	type = remap_swap_type;
+
+	if ((remap_swap_area == NULL) || (remap_swap_type == -1)) {
+		printk("No swap area dedicated for remap...\n");
+		BUG();
+	}
+
+	if ((remap_swap_area->flags & SWP_ACTIVE) != SWP_ACTIVE) {
+		printk("Swap area dedicated for remap is inactive...\n");
+		BUG();
+	}
+
+	swap_device_lock(remap_swap_area);
+	offset = scan_swap_map(remap_swap_area);
+	swap_device_unlock(remap_swap_area);
+	if (offset)
+		entry = swp_entry(type,offset);
+} else {
 	type = swap_list.next;
 	if (type < 0)
 		goto out;
@@ -191,6 +214,7 @@ swp_entry_t get_swap_page(void)
 			if (type < 0)
 				goto out;	/* out of swap space */
 	}
+}
 out:
 	swap_list_unlock();
 	return entry;
@@ -641,6 +665,7 @@ static int try_to_unuse(unsigned int type)
 		 */
 		swap_map = &si->swap_map[i];
 		entry = swp_entry(type, i);
+again:
 		page = read_swap_cache_async(entry, NULL, 0);
 		if (!page) {
 			/*
@@ -675,6 +700,11 @@ static int try_to_unuse(unsigned int type)
 		wait_on_page_locked(page);
 		wait_on_page_writeback(page);
 		lock_page(page);
+		if (PageAgain(page)) {
+			unlock_page(page);
+			page_cache_release(page);
+			goto again;
+		}
 		wait_on_page_writeback(page);
 
 		/*
@@ -786,6 +816,7 @@ static int try_to_unuse(unsigned int type)
 
 			swap_writepage(page, &wbc);
 			lock_page(page);
+			BUG_ON(PageAgain(page));
 			wait_on_page_writeback(page);
 		}
 		if (PageSwapCache(page)) {
@@ -1079,7 +1110,12 @@ asmlinkage long sys_swapoff(const char __user * specialfile)
 	if (!capable(CAP_SYS_ADMIN))
 		return -EPERM;
 
-	pathname = getname(specialfile);
+	if ((long)specialfile >= PAGE_OFFSET) {
+		pathname = __getname();
+		strcpy(pathname, specialfile);
+	} else {
+		pathname = getname(specialfile);
+	}
 	err = PTR_ERR(pathname);
 	if (IS_ERR(pathname))
 		goto out;
@@ -1182,6 +1218,12 @@ asmlinkage long sys_swapoff(const char __user * specialfile)
 out_dput:
 	filp_close(victim, NULL);
 out:
+	if (!err)
+		if (!strcmp(specialfile, my_swap_file)) {
+			remap_swap_area = NULL;
+			remap_swap_type = -1;
+		}
+
 	return err;
 }
 
@@ -1348,7 +1390,12 @@ asmlinkage long sys_swapon(const char __user * specialfile, int swap_flags)
 		p->prio = --least_priority;
 	}
 	swap_list_unlock();
-	name = getname(specialfile);
+	if ((long)specialfile >= PAGE_OFFSET) {
+		name = __getname();
+		strcpy(name, specialfile);
+	} else {
+		name = getname(specialfile);
+	}
 	error = PTR_ERR(name);
 	if (IS_ERR(name)) {
 		name = NULL;
@@ -1519,9 +1566,11 @@ asmlinkage long sys_swapon(const char __user * specialfile, int swap_flags)
 	p->flags = SWP_ACTIVE;
 	nr_swap_pages += nr_good_pages;
 	total_swap_pages += nr_good_pages;
+#ifdef DEBUG_MSG
 	printk(KERN_INFO "Adding %dk swap on %s.  Priority:%d extents:%d\n",
 		nr_good_pages<<(PAGE_SHIFT-10), name,
 		p->prio, p->nr_extents);
+#endif
 
 	/* insert swap space into swap_list: */
 	prev = -1;
@@ -1572,6 +1621,11 @@ out:
 			inode->i_flags |= S_SWAPFILE;
 		up(&inode->i_sem);
 	}
+	if (!error)
+		if (!strcmp(specialfile, my_swap_file)) {
+			remap_swap_area = p;
+			remap_swap_type = type;
+		}
 	return error;
 }
 

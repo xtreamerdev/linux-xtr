@@ -686,7 +686,7 @@ static void handle_stop_signal(int sig, struct task_struct *p)
 {
 	struct task_struct *t;
 
-	if (p->flags & SIGNAL_GROUP_EXIT)
+	if (p->signal->flags & SIGNAL_GROUP_EXIT)
 		/*
 		 * The process is in the middle of dying already.
 		 */
@@ -910,6 +910,10 @@ force_sig_info(int sig, struct siginfo *info, struct task_struct *t)
 	unsigned long int flags;
 	int ret;
 
+	if ((sig == SIGKILL) || (sig == SIGSEGV)) {
+		printk("sending signal: %d \n", sig);
+		dump_stack();
+	}
 	spin_lock_irqsave(&t->sighand->siglock, flags);
 	if (sigismember(&t->blocked, sig) || t->sighand->action[sig-1].sa.sa_handler == SIG_IGN) {
 		t->sighand->action[sig-1].sa.sa_handler = SIG_DFL;

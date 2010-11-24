@@ -115,13 +115,6 @@ static int preferred_console = -1;
 /* Flag: console code may call schedule() */
 static int console_may_schedule;
 
-#ifdef CONFIG_PRINTK
-
-static char __log_buf[__LOG_BUF_LEN];
-static char *log_buf = __log_buf;
-static int log_buf_len = __LOG_BUF_LEN;
-static unsigned long logged_chars; /* Number of chars produced since last read+clear operation */
-
 /*
  *	Setup a list of consoles. Called from init/main.c
  */
@@ -159,6 +152,13 @@ static int __init console_setup(char *str)
 }
 
 __setup("console=", console_setup);
+
+#ifdef CONFIG_PRINTK
+
+static char __log_buf[__LOG_BUF_LEN];
+static char *log_buf = __log_buf;
+static int log_buf_len = __LOG_BUF_LEN;
+static unsigned long logged_chars; /* Number of chars produced since last read+clear operation */
 
 static int __init log_buf_len_setup(char *str)
 {
@@ -560,11 +560,19 @@ asmlinkage int vprintk(const char *fmt, va_list args)
 				}
 				t = sched_clock();
 				nanosec_rem = do_div(t, 1000000000);
+#if 1
 				tlen = sprintf(tbuf,
 						"<%c>[%5lu.%06lu] ",
 						loglev_char,
 						(unsigned long)t,
 						nanosec_rem/1000);
+#else
+/* This can be used to measure the time by "Count" register. */
+				tlen = sprintf(tbuf,
+						"<%c>[%lu] ",
+						loglev_char,
+						(unsigned long)read_c0_count());
+#endif
 
 				for (tp = tbuf; tp < tbuf + tlen; tp++)
 					emit_log_char(*tp);

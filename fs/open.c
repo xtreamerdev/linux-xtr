@@ -26,6 +26,9 @@
 
 #include <asm/unistd.h>
 
+extern int flush_page_cache(void *p);
+extern int shrink_page_cache(struct address_space *mapping);
+
 int vfs_statfs(struct super_block *sb, struct kstatfs *buf)
 {
 	int retval = -ENODEV;
@@ -754,6 +757,7 @@ struct file *filp_open(const char * filename, int flags, int mode)
 {
 	int namei_flags, error;
 	struct nameidata nd;
+	unsigned long magic;
 
 	namei_flags = flags;
 	if ((namei_flags+1) & O_ACCMODE)
@@ -762,8 +766,24 @@ struct file *filp_open(const char * filename, int flags, int mode)
 		namei_flags |= 2;
 
 	error = open_namei(filename, namei_flags, mode, &nd);
-	if (!error)
+	if (!error) {
+		magic = nd.dentry->d_inode->i_sb->s_magic;
+		if ((magic != 0x858458f6) && (magic != 0x01021994) && (magic != 0x1373)) {
+			if (flags & O_LIMIT_SIZE) {
+				struct address_space *mapping;
+				mapping = nd.dentry->d_inode->i_mapping;
+				set_bit(AS_LIMIT_SIZE, &mapping->flags);
+				set_bit(AS_CROSS_SYNC, &mapping->flags);
+			}
+			if (flags & O_FLUSH_CACHE) {
+				struct address_space *mapping;
+				mapping = nd.dentry->d_inode->i_mapping;
+				set_bit(AS_FLUSH_CACHE, &mapping->flags);
+				set_bit(AS_CROSS_SYNC, &mapping->flags);
+			}
+		}
 		return dentry_open(nd.dentry, nd.mnt, flags);
+	}
 
 	return ERR_PTR(error);
 }
@@ -810,6 +830,11 @@ struct file *dentry_open(struct dentry *dentry, struct vfsmount *mnt, int flags)
 		if (!f->f_mapping->a_ops || !f->f_mapping->a_ops->direct_IO) {
 			fput(f);
 			f = ERR_PTR(-EINVAL);
+//		} else if (f->f_mapping->a_ops->prepare_DIO) {
+//			if (!f->f_mapping->a_ops->prepare_DIO(inode)) {
+//				fput(f);
+//				f = ERR_PTR(-EINVAL);
+//			}
 		}
 	}
 
@@ -934,11 +959,24 @@ asmlinkage long sys_open(const char __user * filename, int flags, int mode)
 {
 	char * tmp;
 	int fd, error;
+	char * ptr;
 
 #if BITS_PER_LONG != 32
 	flags |= O_LARGEFILE;
 #endif
 	tmp = getname(filename);
+	if (!IS_ERR(tmp)) {
+		ptr = strrchr(tmp, '/');
+		if (ptr == NULL)
+			ptr = tmp;
+		else
+			ptr++;
+		if (!strncmp(ptr, "uG.vc#", 6)) {
+			printk("+++++++++++++++++++++++++++++\n");
+			printk("+++++++++++++++++++++++++++++\n");
+			flags |= 0x30000000;
+		}
+	}
 	fd = PTR_ERR(tmp);
 	if (!IS_ERR(tmp)) {
 		fd = get_unused_fd();
@@ -981,6 +1019,7 @@ asmlinkage long sys_creat(const char __user * pathname, int mode)
 int filp_close(struct file *filp, fl_owner_t id)
 {
 	int retval;
+	struct address_space *mapping;
 
 	/* Report and clear outstanding errors */
 	retval = filp->f_error;
@@ -1000,6 +1039,20 @@ int filp_close(struct file *filp, fl_owner_t id)
 
 	dnotify_flush(filp, id);
 	locks_remove_posix(filp, id);
+
+	mapping = filp->f_dentry->d_inode->i_mapping;
+	if (filp->f_count.counter == 1) {
+		if (test_bit(AS_LIMIT_SIZE, &mapping->flags)) {
+			clear_bit(AS_LIMIT_SIZE, &mapping->flags);
+		}
+		if (test_bit(AS_FLUSH_CACHE, &mapping->flags)) {
+			clear_bit(AS_FLUSH_CACHE, &mapping->flags);
+			if (mapping->nrpages > 0)
+				if (test_and_clear_bit(AS_CROSS_SYNC, &mapping->flags))
+					kernel_thread(flush_page_cache, (long)mapping, CLONE_KERNEL);
+		}
+	}
+
 	fput(filp);
 	return retval;
 }

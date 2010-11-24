@@ -117,9 +117,6 @@
 // #define	VERBOSE			// more; success messages
 
 #include <linux/config.h>
-#ifdef	CONFIG_USB_DEBUG
-#   define DEBUG
-#endif
 #include <linux/module.h>
 #include <linux/kmod.h>
 #include <linux/sched.h>
@@ -1922,7 +1919,7 @@ static int genelink_rx_fixup (struct usbnet *dev, struct sk_buff *skb)
 
 			// copy the packet data to the new skb
 			memcpy(skb_put(gl_skb, size), packet->packet_data, size);
-			skb_return (dev, skb);
+			skb_return (dev, gl_skb);
 		}
 
 		// advance to the next packet

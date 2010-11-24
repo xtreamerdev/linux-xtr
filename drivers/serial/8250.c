@@ -44,6 +44,10 @@
 #include <asm/io.h>
 #include <asm/irq.h>
 
+#ifdef CONFIG_REALTEK_VENUS_SERIAL_PORT
+#include <venus.h>
+#endif
+
 #include "8250.h"
 
 /*
@@ -275,7 +279,11 @@ static _INLINE_ unsigned int serial_in(struct uart_8250_port *up, int offset)
 		return inb(up->port.iobase + 1);
 
 	case UPIO_MEM:
+#ifdef CONFIG_REALTEK_VENUS_SERIAL_PORT
+		return readl(up->port.membase + offset)&0xff;
+#else
 		return readb(up->port.membase + offset);
+#endif
 
 	case UPIO_MEM32:
 		return readl(up->port.membase + offset);
@@ -297,7 +305,11 @@ serial_out(struct uart_8250_port *up, int offset, int value)
 		break;
 
 	case UPIO_MEM:
+#ifdef CONFIG_REALTEK_VENUS_SERIAL_PORT
+		writel(value&0xff, up->port.membase + offset);
+#else
 		writeb(value, up->port.membase + offset);
+#endif
 		break;
 
 	case UPIO_MEM32:
@@ -945,6 +957,12 @@ static void autoconfig(struct uart_8250_port *up, unsigned int probeflags)
 	serial8250_clear_fifos(up);
 	(void)serial_in(up, UART_RX);
 	serial_outp(up, UART_IER, 0);
+#ifdef CONFIG_REALTEK_VENUS_SERIAL_PORT
+	if(old_serial_port[0].iomem_base == up->port.membase)
+		outl(0x4, VENUS_MIS_ISR);
+	else if(old_serial_port[1].iomem_base == up->port.membase)
+		outl(0x8, VENUS_MIS_ISR);
+#endif
 
  out:	
 	spin_unlock_irqrestore(&up->port.lock, flags);
@@ -1255,6 +1273,13 @@ static irqreturn_t serial8250_interrupt(int irq, void *dev_id, struct pt_regs *r
 			end = NULL;
 		} else if (end == NULL)
 			end = l;
+
+#ifdef CONFIG_REALTEK_VENUS_SERIAL_PORT
+		if(old_serial_port[0].iomem_base == up->port.membase)
+			outl(0x4, VENUS_MIS_ISR);
+		else if(old_serial_port[1].iomem_base == up->port.membase)
+			outl(0x8, VENUS_MIS_ISR);
+#endif
 
 		l = l->next;
 

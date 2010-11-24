@@ -39,7 +39,42 @@
 #include "xattr.h"
 #include "acl.h"
 
+#ifdef EXT3_ABCOPY
+#define MAX_RTL_COPIES 	30
+
+extern int ext3_debug;
+#define myprint(format, args...) if (ext3_debug) printk(format, args);
+
+struct ext3_rtl_rcd {
+        unsigned long st_b; /* starting logical block */
+        unsigned long st_phy_b; /* starting physical block on disk */
+        unsigned long nblocks; /* number of blocks */
+        unsigned long rsvd;
+};
+
+struct ext3_rtl_hd {
+        __le16  parent;         /* parent present 1 or 0 */
+        __le16  child_n;                /* child count */
+	struct ext3_rtl_rcd me;
+        struct ext3_rtl_rcd rcd[MAX_RTL_COPIES]; /* account for each child */
+};
+#endif
+
 static int ext3_writepage_trans_blocks(struct inode *inode);
+
+#ifdef EXT3_ABCOPY
+static int ext3_rtl_find_ptr (struct inode *inode, unsigned long block,
+                              __le32 **datab, unsigned long *count,
+			      struct buffer_head **bh);
+static int ext3_rtl_del_child (handle_t *handle, struct inode *child,
+				struct ext3_rtl_hd *ctx);
+static unsigned long ext3_rtl_cal_iblock (int offsets[4], int depth,
+                                          int top, int nptr);
+static unsigned long rtl_depth_to_nptr (int depth, int nptr); 
+static int ext3_rtl_del_decision(struct inode * inode,
+                                 struct ext3_rtl_hd * ctx,
+                                 unsigned long block);
+#endif
 
 /*
  * Test whether an inode is a fast symlink.
@@ -1862,7 +1897,12 @@ ext3_clear_blocks(handle_t *handle, struct inode *inode, struct buffer_head *bh,
  */
 static void ext3_free_data(handle_t *handle, struct inode *inode,
 			   struct buffer_head *this_bh,
+#ifdef EXT3_ABCOPY
+			   __le32 *first, __le32 *last, 
+			   struct ext3_rtl_hd * ctx, unsigned long iblock)
+#else
 			   __le32 *first, __le32 *last)
+#endif
 {
 	unsigned long block_to_free = 0;    /* Starting block # of a run */
 	unsigned long count = 0;	    /* Number of blocks in the run */ 
@@ -1884,6 +1924,18 @@ static void ext3_free_data(handle_t *handle, struct inode *inode,
 	}
 
 	for (p = first; p < last; p++) {
+#ifdef EXT3_ABCOPY
+		if (ctx != NULL) {
+			if (!ext3_rtl_del_decision(inode, ctx, iblock++)) {
+				/*if ((iblock-1) == 3037 || (iblock-1) == 1037 || 
+				    (iblock-1) == 10000) {
+					printk("iblock %d, is %d, no del\n",
+						iblock-1, le32_to_cpu(*p));
+				}*/
+				continue;
+			}
+		}
+#endif
 		nr = le32_to_cpu(*p);
 		if (nr) {
 			/* accumulate blocks to free if they're contiguous */
@@ -1929,22 +1981,44 @@ static void ext3_free_data(handle_t *handle, struct inode *inode,
  */
 static void ext3_free_branches(handle_t *handle, struct inode *inode,
 			       struct buffer_head *parent_bh,
+#ifdef EXT3_ABCOPY
+			       __le32 *first, __le32 *last, int depth,
+			       struct ext3_rtl_hd * ctx, unsigned long iblock)
+#else
 			       __le32 *first, __le32 *last, int depth)
+#endif 
 {
 	unsigned long nr;
 	__le32 *p;
+#ifdef EXT3_ABCOPY
+	unsigned long decre = 0, start = 0;
+	int addr_per_block = EXT3_ADDR_PER_BLOCK(inode->i_sb);
+#endif
 
 	if (is_handle_aborted(handle))
 		return;
 
+#ifdef EXT3_ABCOPY
+	if (ctx) {
+                decre = rtl_depth_to_nptr (depth, addr_per_block);
+                start = iblock + (last - 1 - first) * decre;
+        }
+#endif
+
 	if (depth--) {
 		struct buffer_head *bh;
+#ifndef EXT3_ABCOPY
 		int addr_per_block = EXT3_ADDR_PER_BLOCK(inode->i_sb);
+#endif
 		p = last;
 		while (--p >= first) {
 			nr = le32_to_cpu(*p);
-			if (!nr)
+			if (!nr) {
+#ifdef EXT3_ABCOPY
+				start -= decre;
+#endif
 				continue;		/* A hole */
+			}
 
 			/* Go read the buffer for the next level down */
 			bh = sb_bread(inode->i_sb, nr);
@@ -1957,6 +2031,9 @@ static void ext3_free_branches(handle_t *handle, struct inode *inode,
 				ext3_error(inode->i_sb, "ext3_free_branches",
 					   "Read failure, inode=%ld, block=%ld",
 					   inode->i_ino, nr);
+#ifdef EXT3_ABCOPY
+				start -= decre;
+#endif
 				continue;
 			}
 
@@ -1965,7 +2042,12 @@ static void ext3_free_branches(handle_t *handle, struct inode *inode,
 			ext3_free_branches(handle, inode, bh,
 					   (__le32*)bh->b_data,
 					   (__le32*)bh->b_data + addr_per_block,
+#ifndef EXT3_ABCOPY
 					   depth);
+#else	
+					   depth, ctx, start);
+			start-= decre;
+#endif
 
 			/*
 			 * We've probably journalled the indirect block several
@@ -2032,7 +2114,11 @@ static void ext3_free_branches(handle_t *handle, struct inode *inode,
 	} else {
 		/* We have reached the bottom of the tree. */
 		BUFFER_TRACE(parent_bh, "free data blocks");
+#ifdef EXT3_ABCOPY
+		ext3_free_data(handle, inode, parent_bh, first, last, ctx, iblock);
+#else
 		ext3_free_data(handle, inode, parent_bh, first, last);
+#endif
 	}
 }
 
@@ -2080,6 +2166,11 @@ void ext3_truncate(struct inode * inode)
 	long last_block;
 	unsigned blocksize = inode->i_sb->s_blocksize;
 	struct page *page;
+#ifdef EXT3_ABCOPY
+        struct ext3_rtl_hd * context = NULL;
+	int rtl_file = 0;
+	unsigned iblock = 0;
+#endif
 
 	if (!(S_ISREG(inode->i_mode) || S_ISDIR(inode->i_mode) ||
 	    S_ISLNK(inode->i_mode)))
@@ -2089,6 +2180,15 @@ void ext3_truncate(struct inode * inode)
 	if (IS_APPEND(inode) || IS_IMMUTABLE(inode))
 		return;
 
+#ifdef EXT3_ABCOPY
+	if (ei->i_flags & EXT3_RTL_CHILD ||
+	    ei->i_flags & EXT3_RTL_PARENT) {
+		rtl_file = 1;
+		context = kmalloc(sizeof(struct ext3_rtl_hd), GFP_KERNEL);
+		if (!context) 
+			return;
+	}
+#endif
 	/*
 	 * We have to lock the EOF page here, because lock_page() nests
 	 * outside journal_start().
@@ -2113,6 +2213,12 @@ void ext3_truncate(struct inode * inode)
 		}
 		return;		/* AKPM: return what? */
 	}
+
+#ifdef EXT3_ABCOPY
+        if (rtl_file) {
+                ext3_rtl_del_child (handle, inode, context);
+        }
+#endif
 
 	last_block = (inode->i_size + blocksize-1)
 					>> EXT3_BLOCK_SIZE_BITS(inode->i_sb);
@@ -2153,7 +2259,11 @@ void ext3_truncate(struct inode * inode)
 
 	if (n == 1) {		/* direct blocks */
 		ext3_free_data(handle, inode, NULL, i_data+offsets[0],
+#ifdef EXT3_ABCOPY
+			       i_data + EXT3_NDIR_BLOCKS, context, offsets[0]);
+#else
 			       i_data + EXT3_NDIR_BLOCKS);
+#endif
 		goto do_indirects;
 	}
 
@@ -2161,27 +2271,62 @@ void ext3_truncate(struct inode * inode)
 	/* Kill the top of shared branch (not detached) */
 	if (nr) {
 		if (partial == chain) {
+#ifdef EXT3_ABCOPY
+			if (rtl_file) {
+				iblock = ext3_rtl_cal_iblock(offsets, 
+							(chain+n-1) - partial,
+							1, addr_per_block);
+			}
+#endif
 			/* Shared branch grows from the inode */
 			ext3_free_branches(handle, inode, NULL,
+#ifdef EXT3_ABCOPY
+					   &nr, &nr+1, (chain+n-1) - partial,
+					   context, iblock);
+#else
 					   &nr, &nr+1, (chain+n-1) - partial);
+#endif
 			*partial->p = 0;
 			/*
 			 * We mark the inode dirty prior to restart,
 			 * and prior to stop.  No need for it here.
 			 */
 		} else {
+#ifdef EXT3_ABCOPY
+			if (rtl_file) {
+                                iblock = ext3_rtl_cal_iblock(offsets,
+                                                        (chain+n-1) - partial,
+                                                        1, addr_per_block);
+                        }
+#endif
 			/* Shared branch grows from an indirect block */
 			BUFFER_TRACE(partial->bh, "get_write_access");
 			ext3_free_branches(handle, inode, partial->bh,
 					partial->p,
+#ifdef EXT3_ABCOPY
+					partial->p+1, (chain+n-1) - partial,
+					context, iblock);
+#else
 					partial->p+1, (chain+n-1) - partial);
+#endif
 		}
 	}
 	/* Clear the ends of indirect blocks on the shared branch */
 	while (partial > chain) {
+#ifdef EXT3_ABCOPY
+		if (rtl_file) {
+                        iblock = ext3_rtl_cal_iblock(offsets,
+                                                     (chain+n-1) - partial,
+                                                     0, addr_per_block);
+                }
+#endif
 		ext3_free_branches(handle, inode, partial->bh, partial->p + 1,
 				   (__le32*)partial->bh->b_data+addr_per_block,
+#ifdef EXT3_ABCOPY
+				   (chain+n-1) - partial, context, iblock);
+#else
 				   (chain+n-1) - partial);
+#endif
 		BUFFER_TRACE(partial->bh, "call brelse");
 		brelse (partial->bh);
 		partial--;
@@ -2193,21 +2338,38 @@ do_indirects:
 			nr = i_data[EXT3_IND_BLOCK];
 			if (nr) {
 				ext3_free_branches(handle, inode, NULL,
+#ifdef EXT3_ABCOPY
+						   &nr, &nr+1, 1, context,
+						   EXT3_IND_BLOCK);
+#else
 						   &nr, &nr+1, 1);
+#endif
 				i_data[EXT3_IND_BLOCK] = 0;
 			}
 		case EXT3_IND_BLOCK:
 			nr = i_data[EXT3_DIND_BLOCK];
 			if (nr) {
 				ext3_free_branches(handle, inode, NULL,
+#ifdef EXT3_ABCOPY
+						   &nr, &nr+1, 2,
+						   context, EXT3_IND_BLOCK + 
+						   addr_per_block);
+#else
 						   &nr, &nr+1, 2);
+#endif
 				i_data[EXT3_DIND_BLOCK] = 0;
 			}
 		case EXT3_DIND_BLOCK:
 			nr = i_data[EXT3_TIND_BLOCK];
 			if (nr) {
 				ext3_free_branches(handle, inode, NULL,
+#ifdef EXT3_ABCOPY
+						   &nr, &nr+1, 3, context,
+						   EXT3_IND_BLOCK + 
+						   addr_per_block * addr_per_block);
+#else
 						   &nr, &nr+1, 3);
+#endif
 				i_data[EXT3_TIND_BLOCK] = 0;
 			}
 		case EXT3_TIND_BLOCK:
@@ -2225,6 +2387,10 @@ do_indirects:
 	if (IS_SYNC(inode))
 		handle->h_sync = 1;
 out_stop:
+#ifdef EXT3_ABCOPY
+	if (context)
+		kfree(context);
+#endif
 	/*
 	 * If this was a simple ftruncate(), and the file will remain alive
 	 * then we need to clear up the orphan record which we created above.
@@ -3062,3 +3228,773 @@ int ext3_change_inode_journal_flag(struct inode *inode, int val)
 
 	return err;
 }
+
+#ifdef EXT3_ABCOPY
+static unsigned long ext3_find_1stblock(struct inode *inode)
+{
+        unsigned long bg_start;
+        unsigned long colour;
+	struct ext3_inode_info *ei = EXT3_I(inode);
+
+        bg_start = (ei->i_block_group * EXT3_BLOCKS_PER_GROUP(inode->i_sb)) +
+                le32_to_cpu(EXT3_SB(inode->i_sb)->s_es->s_first_data_block);
+        colour = (current->pid % 16) *
+                        (EXT3_BLOCKS_PER_GROUP(inode->i_sb) / 16);
+        return bg_start + colour;
+}
+
+static int ext3_rtl_copy_leaf(handle_t *handle, struct inode *in_node,
+			  struct inode *out_node, unsigned long startb,
+			  unsigned long upto, __le32 *pout)
+{
+        struct buffer_head *inbh;
+        unsigned long copied, count;
+	__le32 *pin;
+
+	copied = 0;
+	/* copy straight into pout from pin */
+	if (ext3_rtl_find_ptr(in_node, startb, &pin, 
+			      &count, &inbh) < 0) {
+               	return 0;
+       	}
+
+	while (copied < upto) {
+             	*pout = *pin;
+		/*if (startb == 3037 || startb == 1037 || startb == 10000) {
+			printk("copy startb %d is %d\n", startb, le32_to_cpu(*pin));
+		}*/
+
+               	pout ++;
+               	pin ++;
+               	count --;
+               	copied ++;
+               	startb ++;
+	
+               	if ((count == 0) && (copied < upto)) {
+                       	brelse(inbh);
+                       	if (ext3_rtl_find_ptr(in_node, startb, &pin,
+                               	              &count, &inbh) < 0) {
+                               	goto done;
+                       	}
+               	}
+       	}
+done:
+	brelse(inbh);
+	return copied;
+}
+
+/* return the logical offset of a block given the path */
+static unsigned long ext3_rtl_cal_iblock (int offsets[4], int depth, 
+					  int top, int nptr)
+{
+	int i;
+	unsigned long base=0, incre=0;
+	
+	if (depth == 0) 
+		return offsets[0];
+
+	for (i=0; i<=depth; i++) {
+		if (i==0) {
+			switch (offsets[0]) {
+			case EXT3_IND_BLOCK:
+				base = EXT3_NDIR_BLOCKS; 
+				incre = 1;
+				break;
+			case EXT3_DIND_BLOCK:
+				base = EXT3_NDIR_BLOCKS + nptr;
+				incre = nptr;
+				break;
+			case EXT3_TIND_BLOCK:
+				base = EXT3_NDIR_BLOCKS + nptr*nptr;
+				incre = nptr * nptr;
+				break;
+			default:
+				/* error */
+				return 0;
+			}
+		}
+
+		if (i == depth && top) {
+			base += (offsets[i] - 1) * incre;
+			return base;
+		}
+		base += (offsets[i]) * incre;
+		incre = rtl_depth_to_nptr(depth - i, nptr);
+	}
+	return base;
+}
+
+static unsigned long rtl_depth_to_nptr (int depth, int nptr) {
+	if (depth == 0) 
+		return 1;
+	while (--depth) {
+		nptr = nptr * nptr;
+	}
+	return nptr;
+}
+
+static int ext3_rtl_copy_branch(handle_t *handle, struct inode *in_node,
+				unsigned long startb, unsigned long nblock,
+				struct inode *out_node, int *lastalloc,
+				int *block, int depth)
+{
+	struct buffer_head *bh;
+	unsigned long max, copied, oblock;
+	int err, branch, ret, nextb;
+	struct super_block *osb = out_node->i_sb;
+	__le32 *pout;
+	int nptr = EXT3_ADDR_PER_BLOCK(in_node->i_sb);
+	unsigned long blocksize = (1 << in_node->i_blkbits);
+
+	if (depth <= 0) 
+		return -1;
+
+	if (*lastalloc == 0) {
+		*lastalloc = ext3_find_1stblock(out_node);
+	}
+
+	branch = ext3_alloc_block(handle, out_node, *lastalloc, &err);
+        if (!branch) {
+                return -1;
+        }
+        *lastalloc = branch;
+	*block = branch;
+        bh = sb_getblk(osb, branch);
+	lock_buffer(bh);
+        /*err = ext3_journal_get_create_access(handle, bh);
+        if (err) {
+                unlock_buffer(bh);
+                brelse(bh);
+                return 0;
+        }*/
+
+        memset(bh->b_data, 0, blocksize);
+        pout = (__le32*)bh->b_data;
+
+	if (depth == 1) {
+		oblock = nptr;
+		if (oblock > nblock) 
+			oblock = nblock;
+		ret = ext3_rtl_copy_leaf(handle, in_node,
+                          		 out_node, startb,
+                          		 oblock, pout);
+		copied = ret;
+		goto finish;
+	}	
+
+	/* copy each branch in */
+	copied = 0;
+	while (copied < nblock) {
+		max = rtl_depth_to_nptr(depth-1, nptr);
+		if (max > (nblock-copied))
+			max = (nblock-copied);
+		ret = ext3_rtl_copy_branch(handle, in_node,
+                                	   startb, max,
+                                	   out_node, lastalloc,
+                                	   &nextb, depth-1);
+		if (ret <= 0) {
+			goto finish;
+		}
+
+		copied += ret;
+		*pout = cpu_to_le32(nextb); pout++;
+		startb += ret;
+	}
+
+finish:
+	set_buffer_uptodate(bh);
+        unlock_buffer(bh);
+	mark_buffer_dirty_inode(bh, out_node);
+        //err = ext3_journal_dirty_metadata(handle, bh);
+	brelse(bh);
+	return copied;
+}
+
+static int ext3_do_tindirect(handle_t *handle, struct inode *in_node,
+			     unsigned long startb, unsigned long nblock,
+			     struct inode *out_node, int *alloc) {
+	unsigned long blocksize = (1 << in_node->i_blkbits);
+        struct ext3_inode_info *ei = EXT3_I(out_node);
+        unsigned long copied, oblock;
+        int branch;
+        __le32 * pout;
+
+	oblock = EXT3_ADDR_PER_BLOCK(in_node->i_sb);
+        oblock = oblock * oblock * oblock;
+
+        if (oblock > nblock) {
+                oblock = nblock;
+        }
+
+        copied = ext3_rtl_copy_branch(handle, in_node,
+                                      startb, oblock,
+                                      out_node, alloc,
+                                      &branch, 3);
+
+        if (copied <= 0) {
+                return 0;
+        }
+
+        pout = EXT3_I(out_node)->i_data + EXT3_TIND_BLOCK;
+        *pout = cpu_to_le32(branch);
+        ei->i_disksize += copied * blocksize;
+        out_node->i_size = ei->i_disksize;
+	out_node->i_blocks += copied * blocksize >> 9;
+        ext3_mark_inode_dirty(handle, out_node);
+}
+
+static int ext3_do_dindirect(handle_t *handle, struct inode *in_node,
+                             unsigned long startb, unsigned long nblock,
+                             struct inode *out_node, int *alloc) {
+	unsigned long blocksize = (1 << in_node->i_blkbits);
+	struct ext3_inode_info *ei = EXT3_I(out_node);
+	unsigned long copied, oblock;
+	int branch;
+	__le32 * pout;
+
+	oblock = EXT3_ADDR_PER_BLOCK(in_node->i_sb);
+	oblock = oblock * oblock;
+
+	if (oblock > nblock) {
+                oblock = nblock;
+        }
+
+	copied = ext3_rtl_copy_branch(handle, in_node,
+                                      startb, oblock,
+                                      out_node, alloc,
+                                      &branch, 2);
+
+        if (copied <= 0) {
+                return 0;
+        }
+
+	pout = EXT3_I(out_node)->i_data + EXT3_DIND_BLOCK;
+        *pout = cpu_to_le32(branch);
+        ei->i_disksize += copied * blocksize;
+        out_node->i_size = ei->i_disksize;
+	out_node->i_blocks += copied * blocksize >> 9;
+        ext3_mark_inode_dirty(handle, out_node);
+        return copied;
+}
+
+
+/* 
+ * copy data blocks into the 1st indirect tree of the output file.
+ */
+static int ext3_do_indirect(handle_t * handle, struct inode *in_node, 
+			     unsigned long startb, unsigned long nblock,
+                             struct inode *out_node, int *alloc) {
+        __le32 *pout;
+        struct ext3_inode_info *ei = EXT3_I(out_node);
+	int parent;
+	unsigned long copied, oblock;
+	unsigned long blocksize = (1 << in_node->i_blkbits);
+
+	oblock = EXT3_ADDR_PER_BLOCK(in_node->i_sb);
+	if (oblock > nblock) {
+		oblock = nblock;
+	}
+	
+	copied = ext3_rtl_copy_branch(handle, in_node,
+                   	              startb, oblock,
+                      	 	      out_node, alloc,
+                       		      &parent, 1);
+
+	if (copied <= 0) {
+		return 0;
+	}
+	pout = EXT3_I(out_node)->i_data + EXT3_IND_BLOCK;
+	*pout = cpu_to_le32(parent);
+	ei->i_disksize += copied * blocksize;	
+	out_node->i_size = ei->i_disksize;
+	out_node->i_blocks += copied * blocksize >> 9;
+	ext3_mark_inode_dirty(handle, out_node);
+	return copied;
+}
+
+/*
+ * do copy for the direct data blocks (0-11) of the first output file.
+ */
+static int ext3_do_direct(handle_t *handle, struct inode *in_node, 
+			  unsigned long startb, unsigned long nblock,
+			  struct inode *out_node) {
+	__le32  *pout;
+	pout = EXT3_I(out_node)->i_data;
+	unsigned long oblock;
+	int copied = 0;
+	struct ext3_inode_info *ei = EXT3_I(out_node);
+	unsigned long blocksize = (1 << in_node->i_blkbits);
+
+	if (nblock <= EXT3_NDIR_BLOCKS) {
+		oblock = nblock;
+	} else {
+		oblock = EXT3_NDIR_BLOCKS;
+	}
+
+	copied = ext3_rtl_copy_leaf(handle, in_node,
+                           out_node, startb,
+                           oblock, pout);
+
+	out_node->i_size = ei->i_disksize = blocksize*copied;
+	out_node->i_ctime = CURRENT_TIME_SEC;
+	out_node->i_blocks += copied * blocksize >> 9;
+        ext3_mark_inode_dirty(handle, out_node);
+	return copied;
+}
+
+/* 
+ * given a logical block number, find the ptr to the first data block
+ * also return how many times the ptrs can be incremented
+ */
+static int ext3_rtl_find_ptr (struct inode *inode, unsigned long block, 
+			      __le32 **datab, unsigned long *count,
+			      struct buffer_head **inbh)
+{
+	int offsets[4];
+        int boundary = 0, *offset;
+	int addrsn = EXT3_ADDR_PER_BLOCK(inode->i_sb);
+        int depth = ext3_block_to_path(inode, block, offsets, &boundary);
+	struct buffer_head *bh = NULL;
+	__le32 *datap = NULL;
+	struct super_block *sb = inode->i_sb;
+
+	offset = offsets;
+	if (depth <= 0) 
+		return -1;
+	if (depth == 1) 
+		*count = EXT3_NDIR_BLOCKS - *offset;
+	datap = EXT3_I(inode)->i_data + *offsets;
+
+	while (--depth) {
+		if (bh != NULL) {
+			brelse(bh);
+		}
+		offset ++;
+		bh = sb_bread(sb, le32_to_cpu(*datap));
+		if (!bh)
+			return -1;
+
+		datap = (__le32*)bh->b_data + *offset;
+		*count = addrsn - *offset;
+	}
+	*datab = datap;
+	*inbh = bh;
+	return 0;
+}
+
+static int ext3_rtl_del_decision(struct inode * inode, 
+				 struct ext3_rtl_hd * ctx, 
+				 unsigned long block)
+{
+	struct ext3_inode_info * ei = EXT3_I(inode);
+	int i;
+
+	if (ei->i_flags & EXT3_RTL_PARENT) {
+		if (ctx->child_n == 0) 
+			return 1;
+		for (i=0; i<ctx->child_n; i++) {
+			if (block >= ctx->rcd[i].st_b && 
+			    block < ctx->rcd[i].st_b + ctx->rcd[i].nblocks) {
+				return 0;
+			}
+		}
+		return 1;
+	}
+	
+	/* for child, if parent around don't remove */
+	if (ctx->parent) 
+		return 0;
+
+	/* multi children around... */
+	for (i=0; i<ctx->child_n; i++) {
+                if ((block+ctx->me.st_b) >= ctx->rcd[i].st_b &&
+                    (block+ctx->me.st_b) < ctx->rcd[i].st_b + ctx->rcd[i].nblocks) {
+                       return 0;
+                }
+        }
+
+	return 1;
+}
+
+static int ext3_rtl_del_child (handle_t *handle, struct inode *child,
+				struct ext3_rtl_hd *ctx)
+{
+	struct ext3_inode_info * ei = EXT3_I(child);
+	struct ext3_inode *raw_inode;
+	struct ext3_iloc iloc;
+	struct buffer_head *bh;
+	struct super_block *osb = child->i_sb;
+	int blocksize = (1 << child->i_blkbits);
+	__le32 phyb, ctrl;
+	__le32 *firstb = EXT3_I(child)->i_data;
+	struct ext3_rtl_hd *cp_head;
+	unsigned int nrcd, i, found, rcd;
+	struct ext3_rtl_rcd * chd;
+
+	if (__ext3_get_inode_loc(child, &iloc, 0)) {
+                printk("error getting child iloc\n");
+                return -1;
+        }
+
+	raw_inode = ext3_raw_inode(&iloc);
+	phyb = le32_to_cpu(*firstb);
+	ctrl = le32_to_cpu(raw_inode->i_reserved1);
+	if (!ctrl) {
+		brelse(iloc.bh);
+		return -1;
+	}
+	bh = sb_bread(osb, ctrl);
+	if (!bh) {
+		brelse(iloc.bh);
+		return -1;
+	}
+
+	cp_head = (struct ext3_rtl_hd *) bh->b_data;
+	nrcd = cp_head->child_n;
+
+	found = 0; rcd = 0;
+	if (ei->i_flags & EXT3_RTL_PARENT) {
+		cp_head->parent = 0;
+	} else {
+		cp_head->child_n --;
+	}
+	ctx->parent = cp_head->parent;
+	ctx->child_n = cp_head->child_n;
+
+	printk("result: parent %d, childn %d\n", ctx->parent, ctx->child_n);
+
+	for (i=0; i<nrcd; i++) {
+		chd = &cp_head->rcd[i];
+		if (ei->i_flags & EXT3_RTL_PARENT) {
+			printk("copy child, %ld, %ld\n", cp_head->rcd[i].st_b, 
+				cp_head->rcd[i].nblocks);
+			ctx->rcd[i].st_b = cp_head->rcd[i].st_b;
+			ctx->rcd[i].st_phy_b = cp_head->rcd[i].st_phy_b;
+			ctx->rcd[i].nblocks = cp_head->rcd[i].nblocks;
+			continue;	
+		}
+
+		ctx->rcd[i].st_b = cp_head->rcd[i].st_b;
+		ctx->rcd[i].st_phy_b = cp_head->rcd[i].st_phy_b;
+		ctx->rcd[i].nblocks = cp_head->rcd[i].nblocks;
+
+		if (found) {
+			cp_head->rcd[i-1].st_b = cp_head->rcd[i].st_b;
+			cp_head->rcd[i-1].st_phy_b = cp_head->rcd[i].st_phy_b;
+			cp_head->rcd[i-1].nblocks = cp_head->rcd[i].nblocks;
+
+			ctx->rcd[i-1].st_b = cp_head->rcd[i].st_b;
+			ctx->rcd[i-1].st_phy_b = cp_head->rcd[i].st_phy_b;
+			ctx->rcd[i-1].nblocks = cp_head->rcd[i].nblocks;
+			cp_head->rcd[i].st_b = 0;
+			continue;
+		}
+		if ((chd->st_phy_b == phyb) &&
+                    (chd->nblocks * blocksize) == ei->i_disksize) {
+                        /* found it */
+			printk("found me, %ld to %ld\n", chd->st_b, chd->nblocks);
+			ctx->me.st_b = chd->st_b;
+			ctx->me.nblocks = chd->nblocks;
+			ctx->me.st_phy_b = chd->st_phy_b;
+                        chd->st_phy_b = 0;
+                        found = 1;
+                        continue;
+                }
+	}
+
+	if (ctx->parent == 0 && ctx->child_n == 0) {
+		ext3_free_blocks(handle, child, ctrl, 1);
+	}
+
+	brelse(iloc.bh);
+	//submit_bh(WRITE, bh);
+	mark_buffer_dirty_inode(bh, child);
+	brelse(bh);
+	//printk("done with del child\n");
+	return 0;
+}
+
+static int ext3_rtl_mark_files (handle_t * handle,
+				struct inode *parent, struct inode *child,
+				unsigned long startb, unsigned long nblock,
+				int *lastalloc)
+{
+	struct ext3_inode_info *p_ei, *c_ei;
+	struct ext3_inode *p_raw_inode, *c_raw_inode;
+	int branch, err, newblock = 0;
+	unsigned long count;
+	struct buffer_head *bh, *inbh;
+	struct ext3_iloc p_iloc, c_iloc;
+	struct super_block *osb = child->i_sb;
+	struct ext3_rtl_hd *cp_head;
+	int blocksize = (1 << child->i_blkbits);
+	__le32 phyb, *pin;
+
+	p_ei = EXT3_I(parent);
+        c_ei = EXT3_I(child);
+
+	/* sanity */
+	if (c_ei->i_flags & EXT3_RTL_PARENT ||
+	    c_ei->i_flags & EXT3_RTL_CHILD) {
+		printk("Error: dst is already AB copied\n");
+		return -1;
+	}
+
+	if (__ext3_get_inode_loc(parent, &p_iloc, 0)) {
+		printk("Error: cannot get parent inode location\n");
+		return -1;
+	}
+	/*if (__ext3_get_inode_loc(child, &c_iloc, 0)) {
+		brelse(p_iloc.bh);
+		printk("cannot get child iloc\n");
+		return -1;
+	}*/
+
+	if (ext3_rtl_find_ptr(parent, startb, &pin,
+                              &count, &inbh) < 0) {
+		brelse(p_iloc.bh);
+		printk("Error: unable to find starting loc of parent\n");
+		return -1;
+	}
+	phyb = le32_to_cpu(*pin);
+	brelse(inbh);
+
+	p_raw_inode = ext3_raw_inode(&p_iloc);
+	/*c_raw_inode = ext3_raw_inode(&c_iloc);*/
+
+	if (p_ei->i_flags & EXT3_RTL_PARENT) {
+		branch = le32_to_cpu(p_raw_inode->i_reserved1);
+		bh = sb_bread(osb, branch);
+		cp_head = (struct ext3_rtl_hd*) bh->b_data;
+		printk("info: src file is already AB parent, ab loc %d\n", branch);
+		if (cp_head->child_n >= MAX_RTL_COPIES) {
+			brelse(bh);
+			printk("Error: Max copies reached on this parent\n");
+			return -1;
+		}
+	} else if (p_ei->i_flags & EXT3_RTL_CHILD) {
+		struct ext3_rtl_rcd * chd;
+		unsigned int nrcd, i, found = 0;
+		__le32 *firstb = p_ei->i_data;
+		__le32 chdphyb;
+
+		chdphyb = le32_to_cpu(*firstb);
+		branch = le32_to_cpu(p_raw_inode->i_reserved1);
+		bh = sb_bread(osb, branch);
+		/* copy source is a child, find it in record first */
+		cp_head = (struct ext3_rtl_hd *) bh->b_data;
+		nrcd = cp_head->child_n;
+		printk("info: src file AB child, ab loc %d\n", branch);
+		for (i=0; i<nrcd; i++) {
+		        chd = &cp_head->rcd[i];
+			if ((chd->st_phy_b != chdphyb) ||
+			    (chd->nblocks * blocksize) != p_ei->i_disksize) {
+			       continue;
+			}
+			/* found it */
+			printk("found child, %ld to %ld, copy to %ld\n", chd->st_b, chd->nblocks, startb+chd->st_b);
+			startb += chd->st_b;
+			found = 1;
+			break;
+		}
+		if (!found) {
+		        printk("Error: unable to locate child's record in src\n");
+			return -1;
+		}
+
+	} else {
+		if (*lastalloc == 0) {
+                	*lastalloc = ext3_find_1stblock(child);
+        	}
+		p_ei->i_flags |= EXT3_RTL_PARENT;
+		branch = ext3_alloc_block(handle, child, *lastalloc, &err);
+        	if (!branch) {
+			brelse(p_iloc.bh);
+			printk("Error: cannot alloc meta block for ab parent\n");
+                	return -1;
+        	}
+		newblock = 1;
+		p_raw_inode->i_reserved1 = cpu_to_le32(branch);
+		*lastalloc = branch;
+		bh = sb_getblk(osb, branch);
+		lock_buffer(bh);
+		memset(bh->b_data, 0, blocksize);
+		cp_head = (struct ext3_rtl_hd*) bh->b_data;
+		cp_head->parent = 1;
+		printk("info: alloc new meta block %d for AB parent\n", branch);
+		ext3_set_inode_flags(parent);
+		mark_buffer_dirty(p_iloc.bh);
+	}
+	brelse(p_iloc.bh);
+
+	if (__ext3_get_inode_loc(child, &c_iloc, 0)) {
+                printk("Error:cannot get child info loc\n");
+                return -1;
+        }
+	c_raw_inode = ext3_raw_inode(&c_iloc);
+	c_ei->i_flags |= EXT3_RTL_CHILD;
+	ext3_set_inode_flags(child);
+	mark_inode_dirty(child);
+
+	c_raw_inode->i_reserved1 = cpu_to_le32(branch);
+	cp_head->child_n ++;
+	//chd = &cp_head->rcd[cp_head->child_n - 1];
+	cp_head->rcd[cp_head->child_n - 1].st_b = startb;
+        cp_head->rcd[cp_head->child_n - 1].st_phy_b = phyb; 
+        cp_head->rcd[cp_head->child_n - 1].nblocks = nblock;
+
+	//ext3_journal_dirty_metadata(handle, c_iloc.bh);	
+	if (newblock) {
+		set_buffer_uptodate(bh);
+        	unlock_buffer(bh);
+		ext3_set_inode_flags(parent);
+        	mark_buffer_dirty_inode(bh, child);
+		mark_inode_dirty(parent);
+		//ext3_journal_dirty_metadata(handle, p_iloc.bh);
+	} else {
+		mark_buffer_dirty_inode(bh, parent);
+	}
+	mark_buffer_dirty(c_iloc.bh);
+	brelse(c_iloc.bh);
+	brelse(bh);
+	return 0;
+}
+
+ssize_t ext3_rtl_sendpage(struct file *file, struct page *page,
+                             int offset, size_t size, loff_t *ppos, int more)
+{
+	printk("this function should not be invoked\n");
+        return -1;
+}
+
+
+ssize_t ext3_file_sendfile(struct file *in_file, loff_t *ppos,
+                         size_t count, read_actor_t actor, void *target) {
+	struct file *out_file;
+	struct inode *in_node, *out_node;
+	sector_t start_block, end_block;
+	unsigned long nblock, blocksize;
+	handle_t *handle;
+	unsigned long needed_blocks, startb;
+	struct ext3_inode_info *in_ei, *out_ei;
+	int nptr, alloc_b=0;
+	unsigned long copied=0, togo, expect, ret;
+
+	out_file = (struct file *) target;
+	if (out_file->f_op->sendpage != ext3_rtl_sendpage) {
+		return generic_file_sendfile(in_file, ppos, count, actor, target);
+	}
+
+	if (ppos ==NULL) {
+		return -1;
+	}
+	
+	if (!in_file->f_dentry || !in_file->f_dentry->d_inode) {
+                return -1;
+        }
+
+	out_file = (struct file *) target;
+	if (!out_file->f_dentry || !out_file->f_dentry->d_inode) {
+                return -1;
+        }
+
+	in_node = in_file->f_dentry->d_inode;
+	out_node = out_file->f_dentry->d_inode;
+	if (in_node->i_blkbits != out_node->i_blkbits) 
+		return -1;
+	nptr = EXT3_ADDR_PER_BLOCK(in_node->i_sb);
+	/*printk("ptr per block is %d\n", nptr);*/
+
+	if (out_node->i_sb != in_node->i_sb) {
+		printk("error: src/dst files have different superb (partition?)\n");
+		return -1;
+	} 
+	in_ei = EXT3_I(in_node);
+	out_ei = EXT3_I(out_node);
+	/*if (!(in_ei->i_flags & EXT3_RTL_COPY) ||
+	    !(out_ei->i_flags & EXT3_RTL_COPY)) 
+		return -1;*/
+
+	blocksize = (1 << in_node->i_blkbits);
+
+	if (*ppos > in_ei->i_disksize) {
+		printk("error: starting offset greater than disksize\n");
+		return -1;
+	}
+	if ((*ppos + count) > in_ei->i_disksize) {
+		count = in_ei->i_disksize - *ppos;
+	}
+
+	if (((*ppos >> in_node->i_blkbits) << in_node->i_blkbits) !=
+	      *ppos) {
+		printk("error: starting offset %lld is not block aligned\n", *ppos);
+		return -1;
+	}
+
+	if (((count >> in_node->i_blkbits) << in_node->i_blkbits) !=
+	    count) {
+		printk("error: copy size %d is not block aligned\n", count);
+		return -1;
+	}
+
+	needed_blocks = ext3_writepage_trans_blocks(out_node);
+	handle = ext3_journal_start(out_node, needed_blocks);
+        if (IS_ERR(handle)) {
+                return -1;
+        }
+
+	start_block = (*ppos) >> in_node->i_blkbits ;
+	end_block = (count + *ppos -1) >> in_node->i_blkbits;
+	togo = nblock = end_block - start_block + 1;
+	printk("offsets (%lld - %lld) is %ld blocks: (%ld - %ld)\n", 
+	       *ppos, *ppos+count, nblock,
+		start_block, end_block);
+
+	/* mark file parent/child */
+	if (ext3_rtl_mark_files (handle, in_node, out_node,
+                                 start_block, nblock, &alloc_b)< 0) {
+		printk("cannot mark files correctly\n");
+		goto finished;	
+	}
+
+	startb = start_block;
+	expect = EXT3_NDIR_BLOCKS;
+	out_node->i_blocks = 0;
+	ret = ext3_do_direct(handle, in_node, startb, togo, out_node);
+	copied += ret;
+	if (ret < expect) {
+		goto finished;
+	}
+
+	togo -= expect;
+	startb += expect;
+	expect = nptr;
+	ret = ext3_do_indirect(handle, in_node, startb, togo, out_node,
+			       &alloc_b);
+	copied += ret;
+	if (ret < expect) {
+		goto finished;
+	}
+
+	togo -= expect;
+	startb += expect;
+	expect = nptr * nptr;
+	ret = ext3_do_dindirect(handle, in_node, startb, togo, out_node,
+			       &alloc_b);
+	copied += ret;
+	if (ret < expect) {
+		goto finished;
+	} 
+
+	togo -= expect;	
+	startb += expect;
+	expect = nptr * nptr *nptr;
+	ret = ext3_do_tindirect(handle, in_node, startb, togo, out_node,
+                               &alloc_b);
+	copied += ret;
+
+finished:
+	ext3_journal_stop(handle);
+	return copied * blocksize;
+}
+#endif /* EXT3_ABCOPY */

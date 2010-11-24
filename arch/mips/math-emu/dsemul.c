@@ -157,6 +157,9 @@ int do_dsemulret(struct pt_regs *xcp)
 #endif
 	if (__get_user(epc, &fr->epc)) {		/* Saved EPC */
 		/* This is not a good situation to be in */
+		printk("error in dealing FPU emulator, epc == %0*lx cause == %0*lx \n", 
+		8, xcp->cp0_epc,
+		8, xcp->cp0_cause);
 		force_sig(SIGBUS, current);
 
 		return 0;

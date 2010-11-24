@@ -497,4 +497,18 @@ config I2C_MV64XXX
 	  This driver can also be built as a module.  If so, the module
 	  will be called i2c-mv64xxx.
 
+config I2C_VENUS
+	tristate "Realtek Venus I2C"
+	depends on I2C && REALTEK_VENUS
+	select I2C_ALGO_VENUS
+	help
+	  This driver supports I2C Controller on Realtek Venus SoC
+	  
+config I2C_VENUS_WAIT_COMPLETE_AT_END
+	bool "Venus I2C Wait complete at end of xfer"
+	depends on I2C
+	default 'y'
+	help
+	  Say Y here if you want the Venus I2C bus wait completion at end of xfer.	  
+	  	  
 endmenu
