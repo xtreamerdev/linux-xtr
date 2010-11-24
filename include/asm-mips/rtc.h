@@ -30,6 +30,8 @@
 unsigned int get_rtc_time(struct rtc_time *time);
 int set_rtc_time(struct rtc_time *time);
 unsigned int get_rtc_ss(void);
+unsigned int get_rtc_alarm_time(struct rtc_time *time);
+int set_rtc_alarm_time(struct rtc_time *time);
 int get_rtc_pll(struct rtc_pll_info *pll);
 int set_rtc_pll(struct rtc_pll_info *pll);
 

@@ -186,7 +186,8 @@ static int worker_thread(void *__cwq)
 	struct k_sigaction sa;
 	sigset_t blocked;
 
-	current->flags |= PF_NOFREEZE;
+//	current->flags |= PF_NOFREEZE;
+	current->flags &= ~PF_NOFREEZE;
 
 	set_user_nice(current, -5);
 
@@ -209,6 +210,9 @@ static int worker_thread(void *__cwq)
 		else
 			__set_current_state(TASK_RUNNING);
 		remove_wait_queue(&cwq->more_work, &wait);
+
+		if (current->flags & PF_FREEZE)
+			refrigerator(PF_FREEZE);
 
 		if (!list_empty(&cwq->worklist))
 			run_workqueue(cwq);

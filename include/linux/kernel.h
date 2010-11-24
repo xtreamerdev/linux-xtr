@@ -317,11 +317,13 @@ extern unsigned int            *buf_head;
 extern unsigned int            *buf_tail;
 extern unsigned int            *buf_ptr;
 extern unsigned int            sched_log_flag;
+extern unsigned int            time_scale;
 static inline void log_sched(int pid)
 {
 	unsigned int count;
 
 	asm ("mfc0 %0, $9;": "=r"(count));
+	count /= time_scale;
 	*buf_ptr = count;
 	if (++buf_ptr == buf_tail) {
 		buf_ptr = buf_head;
@@ -338,8 +340,12 @@ static inline void log_sched(int pid)
 static inline void log_event(int event)
 {
 	unsigned int count;
+	unsigned int status;
 
+	asm ("mfc0 %0, $12;": "=r"(status));
+	asm ("mtc0 %0, $12;": : "r"(status & 0xfffffffe));
 	asm ("mfc0 %0, $9;": "=r"(count));
+	count /= time_scale;
 	*buf_ptr = count;
 	if (++buf_ptr == buf_tail) {
 		buf_ptr = buf_head;
@@ -351,6 +357,7 @@ static inline void log_event(int event)
 		buf_ptr = buf_head;
 		sched_log_flag |= 2;
 	}
+	asm ("mtc0 %0, $12;": : "r"(status));
 }
 
 static inline void log_intr_enter(int irq)
@@ -358,6 +365,7 @@ static inline void log_intr_enter(int irq)
 	unsigned int count;
 
 	asm ("mfc0 %0, $9;": "=r"(count));
+	count /= time_scale;
 	*buf_ptr = count;
 	if (++buf_ptr == buf_tail) {
 		buf_ptr = buf_head;
@@ -376,6 +384,7 @@ static inline void log_intr_exit(int irq)
 	unsigned int count;
 
 	asm ("mfc0 %0, $9;": "=r"(count));
+	count /= time_scale;
 	*buf_ptr = count;
 	if (++buf_ptr == buf_tail) {
 		buf_ptr = buf_head;

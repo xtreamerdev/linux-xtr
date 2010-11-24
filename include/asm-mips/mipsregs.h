@@ -1321,9 +1321,11 @@ set_c0_##name(unsigned int set)					\
 {								\
 	unsigned int res;					\
 								\
+	irq_enable_hazard();					\
 	res = read_c0_##name();					\
 	res |= set;						\
 	write_c0_##name(res);					\
+	irq_disable_hazard();					\
 								\
 	return res;						\
 }								\
@@ -1333,9 +1335,11 @@ clear_c0_##name(unsigned int clear)				\
 {								\
 	unsigned int res;					\
 								\
+	irq_enable_hazard();					\
 	res = read_c0_##name();					\
 	res &= ~clear;						\
 	write_c0_##name(res);					\
+	irq_disable_hazard();					\
 								\
 	return res;						\
 }								\
@@ -1345,10 +1349,12 @@ change_c0_##name(unsigned int change, unsigned int new)		\
 {								\
 	unsigned int res;					\
 								\
+	irq_enable_hazard();					\
 	res = read_c0_##name();					\
 	res &= ~change;						\
 	res |= (new & change);					\
 	write_c0_##name(res);					\
+	irq_disable_hazard();					\
 								\
 	return res;						\
 }

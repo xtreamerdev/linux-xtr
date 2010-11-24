@@ -22,14 +22,14 @@ const char		*dvr_auth = "Realtek DVR";
 unsigned long		map_start_addr;
 struct radix_tree_root	dvr_tree;
 spinlock_t              dvr_tree_lock;
+struct semaphore	remap_sem;
 struct address_space	*as_record_dirty = NULL;
 unsigned long		*vm_record_dirty = NULL;
 
 // variable declaration
-extern long		swap_name_addr;
 extern unsigned long	dvr_asid;
 
-const char		*my_swap_file = "/mnt/rd/swap.img";
+const char		*dvr_swap_file = "/mnt/rd/swap.img";
 #ifdef	CONFIG_REALTEK_SCHED_LOG
 unsigned int		*buf_head = NULL;
 unsigned int		*buf_tail = NULL;
@@ -46,10 +46,14 @@ unsigned long		monitor_pfn = 0;
 #ifdef	CONFIG_REALTEK_WATCHDOG
 unsigned int		watchdog_task_addr = 0;
 #endif
+#ifdef	CONFIG_SHARED_PRINTK
+extern unsigned int	av_lock;
+#endif
 
 // function declaration
 void print_pagevec_count(void);		// in mm/swap.c...
 void start_remap(void);			// in mm/pageremap.c...
+void end_remap(void);			// in mm/pageremap.c...
 void my_print_tlb_content(void);
 void free_all_memory(void);
 
@@ -57,8 +61,9 @@ void free_all_memory(void);
 const int	pli_signature = 0x77000000;
 const int	max_buddy_size = 1 << (12+MAX_ORDER-1);
 const int	buddy_id = 0x10000;
-const int	max_cache_size = 1 << 12;
+const int	max_cache_size = 1 << 15;
 const int	cache_id = 0x20000;
+const int	driver_id = 0x30000;
 
 static int record_insert(int type, unsigned long addr)
 {
@@ -181,6 +186,10 @@ static void free_all_memory_allocation(void)
 			printk(" release address: %x \n", pRecords[cnt][1]);
 			if ((pRecords[cnt][0] & 0x00ff0000) == cache_id) {
 				kfree((void *)pRecords[cnt][1]);
+			} else if ((pRecords[cnt][0] & 0x00ff0000) == driver_id) {
+				printk("\towned by module...\n");
+				start_index = pRecords[cnt][1];
+				continue;
 			} else {
 #ifdef	CONFIG_REALTEK_ADVANCED_RECLAIM
 				int order = pRecords[cnt][0] & 0x000000ff;
@@ -233,6 +242,40 @@ static int cal_order(int num)
 
 	return cnt;
 }
+
+#ifdef	CONFIG_REALTEK_PLI_DEBUG_MODE
+static unsigned long
+pli_follow_pfn(struct mm_struct *mm, unsigned long address)
+{
+	pgd_t *pgd;
+	pud_t *pud;
+	pmd_t *pmd;
+	pte_t *pte;
+	unsigned long pfn;
+	struct page *page;
+
+	pgd = pgd_offset(mm, address);
+	if (pgd_none(*pgd) || unlikely(pgd_bad(*pgd)))
+		goto out;
+
+	pud = pud_offset(pgd, address);
+	if (pud_none(*pud) || unlikely(pud_bad(*pud)))
+		goto out;
+
+	pmd = pmd_offset(pud, address);
+	if (pmd_none(*pmd) || unlikely(pmd_bad(*pmd)))
+		goto out;
+
+	pte = pte_offset(pmd, address);
+	if (!pte)
+		goto out;
+
+	pfn = pte_pfn(*pte);
+	return pfn << PAGE_SHIFT;
+out:
+	return NULL;
+}
+#endif
 
 static int do_auth(const char *str)
 {
@@ -351,6 +394,9 @@ int auth_ioctl(struct inode *inode, struct file *filp,
 	sched_log_struct log_struct;
 	unsigned long cause;
 #endif
+#ifdef	CONFIG_REALTEK_PLI_DEBUG_MODE
+	int vir_addr;
+#endif
 #ifdef DEBUG_MSG
 	struct mm_struct *mm = current->mm;
 #endif
@@ -384,7 +430,7 @@ int auth_ioctl(struct inode *inode, struct file *filp,
 					break;
 				}
 				
-				map_start_addr += DEF_MAP_SIZE;
+				map_start_addr += DEF_MEM_SIZE;
 			}
 
 #ifdef DEBUG_MSG
@@ -421,9 +467,11 @@ int auth_ioctl(struct inode *inode, struct file *filp,
 			if (arg <= max_cache_size) {
 				ret = (int)kmalloc(arg, GFP_KERNEL);
 				if (!ret) {
+					struct zone **zones;
+
 					show_buddy_info();
-					swap_name_addr = (long)my_swap_file;
-					start_remap();
+					zones = NODE_DATA(0)->node_zonelists[__GFP_HIGHMEM].zones;
+					try_to_free_pages(zones, __GFP_IO | __GFP_FS | __GFP_HUGEFREE, 0, 0);
 					ret = (int)kmalloc(arg, GFP_KERNEL);
 					if (!ret)
 						show_buddy_info();
@@ -439,14 +487,11 @@ int auth_ioctl(struct inode *inode, struct file *filp,
 				}
 			} else {
 				order = cal_order(arg);
+				start_remap();
 				ret = __get_free_pages(GFP_DVRUSER | __GFP_NOWARN | __GFP_EXHAUST | __GFP_HUGEFREE, order);
+				end_remap();
 				if (!ret) {
 					show_buddy_info();
-					swap_name_addr = (long)my_swap_file;
-					start_remap();
-					ret = __get_free_pages(GFP_DVRUSER | __GFP_NOWARN | __GFP_EXHAUST | __GFP_HUGEFREE, order);
-					if (!ret)
-						show_buddy_info();
 				}
 				if (ret) {
 #ifdef	CONFIG_REALTEK_ADVANCED_RECLAIM
@@ -486,10 +531,22 @@ int auth_ioctl(struct inode *inode, struct file *filp,
 					return ret;
 				}
 			}
+#ifdef	CONFIG_REALTEK_PLI_DEBUG_MODE
+			ret = pli_map_memory(ret&0x0fffffff, arg);
+			return ret;
+#else
+			*(int *)ret = 0;
+			__asm__ __volatile__ ("cache 0x15, (%0);": :"r"(ret));
 			return (ret&0x0fffffff)+map_start_addr;
+#endif
 
 		case AUTH_IOCQFREE:
+#ifdef	CONFIG_REALTEK_PLI_DEBUG_MODE
+			vir_addr = arg;
+			arg = pli_follow_pfn(current->mm, arg)|0x80000000;
+#else
 			arg = (arg-map_start_addr)|0x80000000;
+#endif
 			ret = 0;
 			value = record_lookup((unsigned long)arg);
 			if ((value & 0xff000000) != pli_signature) {
@@ -499,6 +556,9 @@ int auth_ioctl(struct inode *inode, struct file *filp,
 				if ((value & 0x00ff0000) == cache_id) {
 					kfree((void *)arg);
 				} else {
+#ifdef	CONFIG_REALTEK_PLI_DEBUG_MODE
+					pli_unmap_memory(vir_addr);
+#endif
 #ifdef	CONFIG_REALTEK_ADVANCED_RECLAIM
 					int cnt = value & 0x0000ff00;
 					struct page *page;
@@ -581,8 +641,8 @@ int auth_ioctl(struct inode *inode, struct file *filp,
 			break;
 			
 		case AUTH_IOCTDOREMAP:
-			swap_name_addr = arg;
 			start_remap();
+			end_remap();
 			break;
 			
 		case AUTH_IOCQGETASID:
@@ -722,6 +782,49 @@ int auth_ioctl(struct inode *inode, struct file *filp,
 			break;
 #endif
 
+		case AUTH_IOCTINITHWSEM:
+#if CONFIG_REALTEK_TEXT_DEBUG || CONFIG_REALTEK_MEMORY_DEBUG_MODE
+			// reset the software debug register set from 0 to 4
+			outl(0x0002a02, SB2_DGB_CTRL_REG0);
+			outl(0x0002a02, SB2_DGB_CTRL_REG1);
+			outl(0x0002a02, SB2_DGB_CTRL_REG2);
+			outl(0x0002a02, SB2_DGB_CTRL_REG3);
+			outl(0x0002a02, SB2_DGB_CTRL_REG4);
+#endif
+			break;
+
+		case AUTH_IOCTGETHWSEM:
+			{
+				volatile unsigned int *ptr = 0xb801a000;
+
+#ifdef	CONFIG_SHARED_PRINTK
+				/* We set this flag to indicate that audio & video won't occupy the hareware semaphore 
+				 * from now on. So, it's safe for the system cpu to access the shared printk buffer 
+				 * without checking the hardware semaphore */
+				av_lock = 1;
+#endif
+				ret = *ptr;
+			}
+			break;
+
+		case AUTH_IOCTPUTHWSEM:
+			{
+				volatile unsigned int *ptr = 0xb801a000;
+				
+#ifdef	CONFIG_SHARED_PRINTK
+				local_irq_disable();
+#endif
+				*ptr = 0;
+#ifdef	CONFIG_SHARED_PRINTK
+				/* We directly release the hardware semaphore because the lock_hw_sem() & unlock_hw_sem() 
+				 * are protected by logbuf_lock. If someone else got the hareware semaphore, we should 
+				 * not be able to run here. */
+				av_lock = 0;
+				local_irq_enable();
+#endif
+			}
+			break;
+
 		default:  /* redundant, as cmd was checked against MAXNR */
 			return -ENOTTY;
 	}
@@ -795,7 +898,7 @@ int config_watchdog(void *p)
 	outl(0x40, VENUS_MIS_RTCCR);
 	outl(0x1, VENUS_MIS_RTCCR);
 #else
-	writel(0x20000000, (void *)WATCHDOG_CTL_ADDR);
+	writel(0x40000000, (void *)WATCHDOG_CTL_ADDR);
 #endif
 	watchdog_task_addr = (unsigned long)current;
 	while (1) {
@@ -814,7 +917,7 @@ int config_watchdog(void *p)
 			refrigerator(PF_FREEZE);
 
 			/* enable watchdog */
-			writel(0x20000000, (void *)WATCHDOG_CTL_ADDR);
+			writel(0x40000000, (void *)WATCHDOG_CTL_ADDR);
 		}
 		if (signal_pending(current)) {
 			printk("watchdog got terminating signal...\n");
@@ -825,6 +928,52 @@ int config_watchdog(void *p)
 	}
 }
 #endif
+
+void *dvr_malloc(size_t size)
+{
+	int ret = 0, order;
+
+	order = cal_order(size);
+	start_remap();
+	ret = __get_free_pages(GFP_DVRUSER | __GFP_NOWARN | __GFP_EXHAUST | __GFP_HUGEFREE, order);
+	end_remap();
+	if (ret) {
+		if (record_insert(pli_signature | driver_id | order, (unsigned long)ret)) {
+			free_pages((unsigned long)ret, order);
+			return 0;
+		}
+		data_cache_flush(ret, size);
+	} else {
+		show_buddy_info();
+	}
+//	printk("***********Allocate dvr memory %x...\n", ret);
+	return (void *)ret;
+}
+EXPORT_SYMBOL(dvr_malloc);
+
+void dvr_free(const void *arg)
+{
+	int value, order;
+
+	value = record_lookup((unsigned long)arg);
+	if ((value & 0xff000000) != pli_signature) {
+		printk("Free DVR memory error 1...\n");
+		BUG();
+		return;
+	} else {
+		record_delete((unsigned long)arg);
+		if ((value & 0x00ff0000) != driver_id) {
+			printk("Free DVR memory error 2...\n");
+			BUG();
+			return;
+		} else {
+			order = value & 0x000000ff;
+			free_pages((unsigned long)arg, order);
+		}
+	}
+//	printk("***********Free dvr memory %p...\n", arg);
+}
+EXPORT_SYMBOL(dvr_free);
 
 static int auth_init(void)
 {
@@ -851,6 +1000,8 @@ static int auth_init(void)
 	// Initialize the radix tree used to record memory allocation
 	INIT_RADIX_TREE(&dvr_tree, GFP_ATOMIC);
 	spin_lock_init(&dvr_tree_lock);
+
+	sema_init(&remap_sem, 1);
 	
 #ifdef CONFIG_REALTEK_WATCHDOG
 	kernel_thread(config_watchdog, NULL, CLONE_KERNEL);

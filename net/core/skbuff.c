@@ -68,6 +68,14 @@
 #include <asm/uaccess.h>
 #include <asm/system.h>
 
+#ifdef CONFIG_REALTEK_TEXT_DEBUG
+#include <asm/io.h>
+#include <asm/r4kcache.h>
+#include <venus.h>
+
+extern atomic_t text_count;
+#endif
+
 static kmem_cache_t *skbuff_head_cache;
 
 /*
@@ -912,9 +920,22 @@ int skb_copy_bits(const struct sk_buff *skb, int offset, void *to, int len)
 {
 	int i, copy;
 	int start = skb_headlen(skb);
+#ifdef CONFIG_REALTEK_TEXT_DEBUG
+	unsigned long dc_lsize = current_cpu_data.dcache.linesz;
+	unsigned long addr = (unsigned long)to, flag;
+	int size = len;
+#endif
 
 	if (offset > (int)skb->len - len)
 		goto fault;
+
+#ifdef CONFIG_REALTEK_TEXT_DEBUG
+	if (page_zone(virt_to_page(to)) == zone_table[ZONE_TEXT]) {
+		atomic_inc(&text_count);
+		outl(0x0003edf, SB2_DGB_CTRL_REG7);
+		__asm__ __volatile__ ("sync");
+	}
+#endif
 
 	/* Copy header. */
 	if ((copy = start - offset) > 0) {
@@ -922,7 +943,11 @@ int skb_copy_bits(const struct sk_buff *skb, int offset, void *to, int len)
 			copy = len;
 		memcpy(to, skb->data + offset, copy);
 		if ((len -= copy) == 0)
+#ifdef CONFIG_REALTEK_TEXT_DEBUG
+			goto out;
+#else
 			return 0;
+#endif
 		offset += copy;
 		to     += copy;
 	}
@@ -946,7 +971,11 @@ int skb_copy_bits(const struct sk_buff *skb, int offset, void *to, int len)
 			kunmap_skb_frag(vaddr);
 
 			if ((len -= copy) == 0)
+#ifdef CONFIG_REALTEK_TEXT_DEBUG
+				goto out;
+#else
 				return 0;
+#endif
 			offset += copy;
 			to     += copy;
 		}
@@ -969,7 +998,11 @@ int skb_copy_bits(const struct sk_buff *skb, int offset, void *to, int len)
 						  to, copy))
 					goto fault;
 				if ((len -= copy) == 0)
+#ifdef CONFIG_REALTEK_TEXT_DEBUG
+					goto out;
+#else
 					return 0;
+#endif
 				offset += copy;
 				to     += copy;
 			}
@@ -980,7 +1013,39 @@ int skb_copy_bits(const struct sk_buff *skb, int offset, void *to, int len)
 		return 0;
 
 fault:
+#ifdef CONFIG_REALTEK_TEXT_DEBUG
+	if (page_zone(virt_to_page(to)) == zone_table[ZONE_TEXT]) {
+		local_irq_save(flag);
+		if (atomic_add_return(-1, &text_count) == 0) {
+			__asm__ __volatile__("sync");
+			outl(0x0003fdf, SB2_DGB_CTRL_REG7);
+		}
+		local_irq_restore(flag);
+	}
+#endif
 	return -EFAULT;
+
+#ifdef CONFIG_REALTEK_TEXT_DEBUG
+out:
+	if (page_zone(virt_to_page(to)) == zone_table[ZONE_TEXT]) {
+		while (size > 0) {
+//			printk("flushing %x %d \n", addr, size);
+			flush_dcache_line(addr);
+			addr += dc_lsize;
+			size -= dc_lsize;
+		}
+		flush_dcache_line(addr);
+
+		local_irq_save(flag);
+		if (atomic_add_return(-1, &text_count) == 0) {
+			__asm__ __volatile__("sync");
+			outl(0x0003fdf, SB2_DGB_CTRL_REG7);
+		}
+		local_irq_restore(flag);
+	}
+
+	return 0;
+#endif
 }
 
 /**

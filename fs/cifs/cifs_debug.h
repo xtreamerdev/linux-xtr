@@ -50,6 +50,8 @@ extern int cifsFYI;
 
 #define cifswarn(format, arg...) printk(KERN_WARNING ": " format "\n" , ## arg)
 
+#define cWARN(button, prspec) if (button) cifswarn prspec
+
 /* debug event message: */
 extern int cifsERROR;
 

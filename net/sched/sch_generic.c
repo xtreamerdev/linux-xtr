@@ -35,6 +35,8 @@
 #include <net/sock.h>
 #include <net/pkt_sched.h>
 
+
+
 /* Main transmission queue. */
 
 /* Main qdisc structure lock. 
@@ -138,7 +140,33 @@ int qdisc_restart(struct net_device *dev)
 				int ret;
 				if (netdev_nit)
 					dev_queue_xmit_nit(skb, dev);
+#ifdef NET_DEBUG
+		printk("Going To dev: %s hard_start_xmit"
+			 "skb=0x%x \n", &dev->name,
+			  skb);	
 
+
+
+{
+	u8 *p;
+	int i;
+	p = (u8 *)skb->data;
+	for (i=0; i<skb->len ; i++)
+	{
+		if (i%16 == 0)
+		{
+			printk("\n %02x",*p++ ) ;
+		}
+		else
+		{
+			printk(" %02x",*p++ ) ;
+		}
+	}
+	printk("\n" ) ;
+}
+
+
+#endif				
 				ret = dev->hard_start_xmit(skb, dev);
 				if (ret == NETDEV_TX_OK) { 
 					if (!nolock) {

@@ -98,6 +98,8 @@
 	nop
 1:
 	SAVE_ALL
+#elif  CONFIG_REALTEK_USE_DMEM
+	DMEM_SAVE_ALL
 #else
 	SAVE_ALL
 #endif

@@ -531,7 +531,9 @@ static inline int __sock_sendmsg(struct kiocb *iocb, struct socket *sock,
 {
 	struct sock_iocb *si = kiocb_to_siocb(iocb);
 	int err;
-
+#ifdef NET_DEBUG	
+	printk("__sock_sendmsg \n");//cy test
+#endif	
 	si->sock = sock;
 	si->scm = NULL;
 	si->msg = msg;
@@ -549,6 +551,10 @@ int sock_sendmsg(struct socket *sock, struct msghdr *msg, size_t size)
 	struct kiocb iocb;
 	struct sock_iocb siocb;
 	int ret;
+#ifdef NET_DEBUG
+	        printk("Entering sock_sendmsg \n");
+
+#endif
 
 	init_sync_kiocb(&iocb, NULL);
 	iocb.private = &siocb;
@@ -563,6 +569,9 @@ int kernel_sendmsg(struct socket *sock, struct msghdr *msg,
 {
 	mm_segment_t oldfs = get_fs();
 	int result;
+#ifdef NET_DEBUG
+	        printk("kernel_sendmsg \n");//cy test
+#endif
 
 	set_fs(KERNEL_DS);
 	/*
@@ -645,7 +654,10 @@ static ssize_t sock_aio_read(struct kiocb *iocb, char __user *ubuf,
 	struct sock_iocb *x, siocb;
 	struct socket *sock;
 	int flags;
-
+#ifdef NET_DEBUG
+	printk("Entering sock_aio_read \n");
+#endif	
+	
 	if (pos != 0)
 		return -ESPIPE;
 	if (size==0)		/* Match SYS5 behaviour */
@@ -687,7 +699,25 @@ static ssize_t sock_aio_write(struct kiocb *iocb, const char __user *ubuf,
 {
 	struct sock_iocb *x, siocb;
 	struct socket *sock;
-	
+#ifdef NET_DEBUG
+	printk("Entering sock_aio_write \n");//cy test
+	{
+		u8 *p;
+		int i;
+		p = (u8 *)ubuf ;
+		for (i=0; i<size ; i++)
+		{
+			if (i%16 == 0)
+			{
+				printk("\n %02x",*p++ ) ;
+			}
+			else
+	                {                                                                                                          printk(" %02x",*p++ ) ;
+	       	         }
+ 		}
+		printk("\n" ) ;
+	}
+#endif         	
 	if (pos != 0)
 		return -ESPIPE;
 	if(size==0)		/* Match SYS5 behaviour */
@@ -725,7 +755,10 @@ ssize_t sock_sendpage(struct file *file, struct page *page,
 {
 	struct socket *sock;
 	int flags;
-
+#ifdef NET_DEBUG
+	printk("Entering sock_sendpage \n");
+	
+#endif
 	sock = SOCKET_I(file->f_dentry->d_inode);
 
 	flags = !(file->f_flags & O_NONBLOCK) ? 0 : MSG_DONTWAIT;
@@ -741,6 +774,10 @@ static int sock_readv_writev(int type, struct inode * inode,
 {
 	struct msghdr msg;
 	struct socket *sock;
+#ifdef NET_DEBUG
+        printk("Entering sock_readv_writev type=0x%x\n", type);
+
+#endif	
 
 	sock = SOCKET_I(inode);
 
@@ -1503,7 +1540,10 @@ asmlinkage long sys_sendto(int fd, void __user * buff, size_t len, unsigned flag
 	int err;
 	struct msghdr msg;
 	struct iovec iov;
-	
+#ifdef NET_DEBUG
+                printk("sys_sendto \n");//cy test
+#endif
+		
 	sock = sockfd_lookup(fd, &err);
 	if (!sock)
 		goto out;
@@ -1698,7 +1738,10 @@ asmlinkage long sys_sendmsg(int fd, struct msghdr __user *msg, unsigned flags)
 	unsigned char *ctl_buf = ctl;
 	struct msghdr msg_sys;
 	int err, ctl_len, iov_size, total_len;
-	
+#ifdef NET_DEBUG
+	printk("Entering sys_sendmsg \n");
+
+#endif	
 	err = -EFAULT;
 	if (MSG_CMSG_COMPAT & flags) {
 		if (get_compat_msghdr(&msg_sys, msg_compat))

@@ -560,6 +560,8 @@ struct Scsi_Host {
 	/* ldm bits */
 	struct device		shost_gendev;
 	struct class_device	shost_classdev;
+	char			port_structure[32];	/*  2009/03/03 cfyeh : port structure */
+	char			bus_type[8];		/*  2009/03/04 cfyeh : bus type */
 
 	/*
 	 * List of hosts per template.

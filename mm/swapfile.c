@@ -53,6 +53,8 @@ static DECLARE_MUTEX(swapon_sem);
 struct swap_info_struct *remap_swap_area = NULL;
 int remap_swap_type = -1;
 
+extern const char *dvr_swap_file;
+
 /*
  * We need this because the bdev->unplug_fn can sleep and we cannot
  * hold swap_list_lock while calling the unplug_fn. And swap_list_lock
@@ -188,7 +190,11 @@ if (urgent) {
 
 	while (1) {
 		p = &swap_info[type];
+#ifdef CONFIG_REALTEK_PREVENT_DC_ALIAS
+		if (((p->flags & SWP_ACTIVE) == SWP_ACTIVE) && type != remap_swap_type) {
+#else
 		if ((p->flags & SWP_ACTIVE) == SWP_ACTIVE) {
+#endif
 			swap_device_lock(p);
 			offset = scan_swap_map(p);
 			swap_device_unlock(p);
@@ -361,11 +367,12 @@ int can_share_swap_page(struct page *page)
  * Work out if there are any other processes sharing this
  * swap cache page. Free it if you can. Return success.
  */
-int remove_exclusive_swap_page(struct page *page)
+int __remove_exclusive_swap_page(struct page *page, int force)
 {
 	int retval;
 	struct swap_info_struct * p;
 	swp_entry_t entry;
+	int mapcount = force ? page_mapcount(page) : 0;
 
 	BUG_ON(PagePrivate(page));
 	BUG_ON(!PageLocked(page));
@@ -374,8 +381,9 @@ int remove_exclusive_swap_page(struct page *page)
 		return 0;
 	if (PageWriteback(page))
 		return 0;
-	if (page_count(page) != 2) /* 2: us + cache */
-		return 0;
+	if (page_count(page) - mapcount != 2) /* 2: us + cache */
+ 		return 0;
+
 
 	entry.val = page->private;
 	p = swap_info_get(entry);
@@ -387,7 +395,8 @@ int remove_exclusive_swap_page(struct page *page)
 	if (p->swap_map[swp_offset(entry)] == 1) {
 		/* Recheck the page count with the swapcache lock held.. */
 		write_lock_irq(&swapper_space.tree_lock);
-		if ((page_count(page) == 2) && !PageWriteback(page)) {
+		mapcount = force ? page_mapcount(page) : 0;
+		if ((page_count(page) - mapcount == 2) && !PageWriteback(page)) {
 			__delete_from_swap_cache(page);
 			SetPageDirty(page);
 			retval = 1;
@@ -1219,7 +1228,7 @@ out_dput:
 	filp_close(victim, NULL);
 out:
 	if (!err)
-		if (!strcmp(specialfile, my_swap_file)) {
+		if (!strcmp(specialfile, dvr_swap_file)) {
 			remap_swap_area = NULL;
 			remap_swap_type = -1;
 		}
@@ -1622,7 +1631,7 @@ out:
 		up(&inode->i_sem);
 	}
 	if (!error)
-		if (!strcmp(specialfile, my_swap_file)) {
+		if (!strcmp(specialfile, dvr_swap_file)) {
 			remap_swap_area = p;
 			remap_swap_type = type;
 		}

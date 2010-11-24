@@ -18,6 +18,15 @@ static void drop_pagecache_sb(struct super_block *sb)
 
 	spin_lock(&inode_lock);
 	list_for_each_entry(inode, &sb->s_inodes, i_sb_list) {
+#if 0
+		if (inode->i_mapping->nrpages) {
+			struct dentry *dentry;
+
+			dentry = list_entry(inode->i_dentry.next, struct dentry, d_alias);
+			printk("inode %d %d name: %s pages: %d \n", MAJOR(inode->i_sb->s_dev), MINOR(inode->i_sb->s_dev), 
+					dentry->d_iname, inode->i_mapping->nrpages);
+		}
+#endif
 		if (inode->i_state & (I_FREEING))
 			continue;
 		__invalidate_mapping_pages(inode->i_mapping, 0, -1, true);

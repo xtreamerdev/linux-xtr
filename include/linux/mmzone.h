@@ -66,11 +66,18 @@ struct per_cpu_pageset {
 #define ZONE_DMA		0
 #define ZONE_NORMAL		1
 #define ZONE_HIGHMEM		2
+#ifdef CONFIG_REALTEK_TEXT_DEBUG
+#define ZONE_DVR		3
+#define ZONE_TEXT		4
+
+#define MAX_NR_ZONES		5	/* Sync this with ZONES_SHIFT */
+#define ZONES_SHIFT		3	/* ceil(log2(MAX_NR_ZONES)) */
+#else
 #define ZONE_DVR		3
 
 #define MAX_NR_ZONES		4	/* Sync this with ZONES_SHIFT */
 #define ZONES_SHIFT		2	/* ceil(log2(MAX_NR_ZONES)) */
-
+#endif
 
 /*
  * When a memory allocation must conform to specific limitations (such
@@ -85,7 +92,11 @@ struct per_cpu_pageset {
  * be 8 (2 ** 3) zonelists.  GFP_ZONETYPES defines the number of possible
  * combinations of zone modifiers in "zone modifier space".
  */
+#ifdef CONFIG_REALTEK_TEXT_DEBUG
+#define GFP_ZONEMASK	0x07
+#else
 #define GFP_ZONEMASK	0x03
+#endif
 /*
  * As an optimisation any zone modifier bits which are only valid when
  * no other zone modifier bits are set (loners) should be placed in
@@ -97,8 +108,14 @@ struct per_cpu_pageset {
  * Use the first form when the left most bit is not a "loner", otherwise
  * use the second.
  */
+#ifdef CONFIG_REALTEK_TEXT_DEBUG
+#define GFP_ZONETYPES	((GFP_ZONEMASK + 1) / 2 + 1) 		/* Loner */
+#else
 #define GFP_ZONETYPES	(GFP_ZONEMASK + 1) 			/* Non-loner */
-/* #define GFP_ZONETYPES	((GFP_ZONEMASK + 1) / 2 + 1) */	/* Loner */
+#endif
+
+#define ZN_EXHAUSTABLE	0x01
+#define ZN_DISABLE	0x02
 
 /*
  * On machines where it is needed (eg PCs) we divide physical memory
@@ -208,9 +225,9 @@ struct zone {
 	unsigned long		present_pages;	/* amount of memory (excluding holes) */
 
         /*
-         * Used to determine if flag GFP_EXHAUST can be used.
+         * Used to record the zone properties.
          */
-        unsigned long           exhaustable;
+        unsigned long           flags;
 
 	/*
 	 * rarely used fields:
@@ -224,7 +241,7 @@ struct zone {
  * go. A value of 12 for DEF_PRIORITY implies that we will scan 1/4096th of the
  * queues ("queue_length >> 12") during an aging round.
  */
-#define DEF_PRIORITY 12
+#define DEF_PRIORITY 4
 
 /*
  * One allocation request operates on a zonelist. A zonelist
@@ -431,7 +448,11 @@ extern struct pglist_data contig_page_data;
 #endif
 
 /* There are currently 3 zones: DMA, Normal & Highmem, thus we need 2 bits */
+#ifdef CONFIG_REALTEK_TEXT_DEBUG
+#define MAX_ZONES_SHIFT		3
+#else
 #define MAX_ZONES_SHIFT		2
+#endif
 
 #if ZONES_SHIFT > MAX_ZONES_SHIFT
 #error ZONES_SHIFT > MAX_ZONES_SHIFT

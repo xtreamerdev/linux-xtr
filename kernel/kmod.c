@@ -169,7 +169,7 @@ static int wait_for_helper(void *data)
 	do_sigaction(SIGCHLD, &sa, (struct k_sigaction *)0);
 	allow_signal(SIGCHLD);
 
-	pid = kernel_thread(____call_usermodehelper, sub_info, SIGCHLD);
+	pid = kernel_thread(____call_usermodehelper, sub_info, CLONE_HELPER | SIGCHLD);
 	if (pid < 0) {
 		sub_info->retval = pid;
 	} else {
@@ -203,7 +203,7 @@ static void __call_usermodehelper(void *data)
 				    CLONE_FS | CLONE_FILES | SIGCHLD);
 	else
 		pid = kernel_thread(____call_usermodehelper, sub_info,
-				    CLONE_VFORK | SIGCHLD);
+				    CLONE_HELPER | CLONE_VFORK | SIGCHLD);
 
 	if (pid < 0) {
 		sub_info->retval = pid;
@@ -250,6 +250,12 @@ int call_usermodehelper(char *path, char **argv, char **envp, int wait)
 	return sub_info.retval;
 }
 EXPORT_SYMBOL(call_usermodehelper);
+
+void empty_usermodehelper_queue(void)
+{
+	flush_workqueue(khelper_wq);
+}
+EXPORT_SYMBOL(empty_usermodehelper_queue);
 
 void __init usermodehelper_init(void)
 {

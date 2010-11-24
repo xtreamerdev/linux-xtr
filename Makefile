@@ -1,7 +1,7 @@
 VERSION = 2
 PATCHLEVEL = 6
 SUBLEVEL = 12
-EXTRAVERSION =
+EXTRAVERSION = 
 NAME=Woozy Numbat
 
 # *DOCUMENTATION*
@@ -349,6 +349,7 @@ CPPFLAGS        := -D__KERNEL__ $(LINUXINCLUDE)
 CFLAGS 		:= -Wall -Wstrict-prototypes -Wno-trigraphs \
 	  	   -fno-strict-aliasing -fno-common \
 		   -ffreestanding
+#		   -ffreestanding -Wno-unused-value
 AFLAGS		:= -D__ASSEMBLY__
 
 export	VERSION PATCHLEVEL SUBLEVEL EXTRAVERSION LOCALVERSION KERNELRELEASE \
@@ -860,7 +861,6 @@ all: modules
 modules: $(vmlinux-dirs) $(if $(KBUILD_BUILTIN),vmlinux)
 	@echo '  Building modules, stage 2.';
 	$(Q)$(MAKE) -rR -f $(srctree)/scripts/Makefile.modpost
-
 
 # Target to prepare building external modules
 .PHONY: modules_prepare

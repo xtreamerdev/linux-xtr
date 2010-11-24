@@ -16,20 +16,25 @@
 #include <linux/pagemap.h>
 #include <linux/preempt.h>
 #include <linux/buffer_head.h>
+#include <linux/mm_inline.h>
 #include <linux/writeback.h>
 #include <linux/auth.h>
-#include <asm/smp.h>
-
 #include <linux/pageremap.h>
+#include <asm/smp.h>
+#include <asm/r4kcache.h>
+
+#include <platform.h>
 
 //#define USE_KERNEL_THREAD
-long		swap_name_addr;
 
 #ifdef CONFIG_SWAP
 
-atomic_t	remapd_count;
+extern const char *dvr_swap_file;
 
-EXPORT_SYMBOL(swap_name_addr);
+#ifdef USE_KERNEL_THREAD
+atomic_t	remapd_count;
+#else
+#endif
 
 static void print_buffer(struct page* page)
 {
@@ -83,42 +88,41 @@ remap_delete_page(struct page *page)
 static int
 remap_copy_page(struct page *to, struct page *from)
 {
+#ifdef CONFIG_REALTEK_PREVENT_DC_ALIAS
+	copy_user_highpage(to, from, 0);
+#else
 	copy_highpage(to, from);
+#endif
 	return 0;
+}
+
+static inline void
+putback_page_to_lru(struct zone *zone, struct page *page)
+{
+	if (TestSetPageLRU(page))
+		BUG();
+	if (PageActive(page))
+		add_page_to_active_list(zone, page);
+	else
+		add_page_to_inactive_list(zone, page);
 }
 
 static int
 remap_lru_add_page(struct page *page, int active)
 {
-	if (active)
-		lru_cache_add_active(page);
-	else
-		lru_cache_add(page);
+	struct zone *zone = page_zone(page);
+
+	spin_lock_irq(&zone->lru_lock);
+	putback_page_to_lru(zone, page);
+	spin_unlock_irq(&zone->lru_lock);
+
 	return 0;
 }
 
 static int
 stick_mlocked_page(struct list_head *vlist)
 {
-	struct page_va_list *v1;
-	struct vm_area_struct *vma;
-	int error;
-
-	while(!list_empty(vlist)) {
-		v1 = list_entry(vlist->next, struct page_va_list, list);
-		list_del(&v1->list);
-		down_read(&v1->mm->mmap_sem);
-		vma = find_vma(v1->mm, v1->addr);
-		if (vma == NULL || !(vma->vm_flags & VM_LOCKED))
-			goto out;
-		error = get_user_pages(current, v1->mm, v1->addr, PAGE_SIZE,
-		    (vma->vm_flags & VM_WRITE) != 0, 0, NULL, NULL);
-	out:
-		up_read(&v1->mm->mmap_sem);
-		mmput(v1->mm);
-		kfree(v1);
-	}
-	return 0;
+	return touch_unmapped_address(vlist);
 }
 
 /* helper function for remap_onepage */
@@ -132,25 +136,19 @@ static int
 remap_preparepage(struct page *page, int fastmode)
 {
 	struct address_space *mapping;
-	int waitcnt = fastmode ? 0 : 100;
+	int waitcnt = fastmode ? 0 : 10;
 
 	BUG_ON(!PageLocked(page));
 
 	mapping = page_mapping(page);
 
-	if (!PagePrivate(page) && PageWriteback(page) && !PageSwapCache(page)) {
+	if (PageWriteback(page) && !PagePrivate(page) && !PageSwapCache(page)) {
 		printk("remap: mapping %p page %p\n", page->mapping, page);
 		return -REMAPPREP_WB;
 	}
 
-	while (PageWriteback(page)) {
-		if (!waitcnt)
-			return -REMAPPREP_WB;
-		__set_current_state(TASK_INTERRUPTIBLE);
-		schedule_timeout(10);
-		__set_current_state(TASK_RUNNING);
-		waitcnt--;
-	}
+	if (PageWriteback(page))
+		wait_on_page_writeback(page);
 
 	if (PagePrivate(page)) {
 #ifdef DEBUG_MSG
@@ -188,7 +186,6 @@ remap_preparepage(struct page *page, int fastmode)
 					ClearPageReclaim(page);
 				}
 				lock_page(page);
-				mapping = page_mapping(page);
 				if (!PagePrivate(page))
 					return 0;
 			} else
@@ -200,9 +197,7 @@ remap_preparepage(struct page *page, int fastmode)
 				break;
 			if (!waitcnt)
 				return -REMAPPREP_BUFFER;
-			__set_current_state(TASK_INTERRUPTIBLE);
-			schedule_timeout(10);
-			__set_current_state(TASK_RUNNING);
+			msleep(10);
 			waitcnt--;
 			if (!waitcnt)
 				print_buffer(page);
@@ -210,35 +205,6 @@ remap_preparepage(struct page *page, int fastmode)
 	}
 
 	return 0;
-}
-
-/*
- * Just assign swap space to a anonymous page if it doesn't have yet,
- * so that the page can be handled like a page in the page cache
- * since it in the swap cache. 
- */
-static struct address_space *
-make_page_mapped(struct page *page)
-{	
-	if (!page_mapped(page)) {
-		if (page_count(page) > 1)
-			printk("remap: page %p not mapped: count %d\n",
-			    page, page_count(page));
-		return NULL;
-	}
-	/* The page is an anon page.  Allocate its swap entry. */
-//	page_map_unlock(page);
-//	if (!add_to_swap(page))
-//		printk("remap: swap cache allocation fail...\n");	// ***
-	while (!add_to_swap(page, 1)) {
-#ifdef DEBUG_MSG
-		printk("remap: reinitialize swap area...\n");
-#endif
-		sys_swapoff((char *)swap_name_addr);
-		sys_swapon((char *)swap_name_addr, 0);
-	}
-//	page_map_lock(page);
-	return page_mapping(page);
 }
 
 /*
@@ -370,17 +336,11 @@ unmap_page(struct page *page, struct list_head *vlist)
 {
 	int error = SWAP_SUCCESS;
 
-//	page_map_lock(page);
 	while (page_mapped(page) &&
 	    (error = try_to_unmap(page, vlist)) == SWAP_AGAIN) {
-//		page_map_unlock(page);
-		__set_current_state(TASK_INTERRUPTIBLE);
-		schedule_timeout(1);
-		__set_current_state(TASK_RUNNING);
-//		page_map_lock(page);
+		msleep(1);
 	}
-//	page_map_unlock(page);
-	if (error == SWAP_FAIL) {
+	if (error != SWAP_SUCCESS) {
 		/* either during mremap or mlocked */
 		return -1;
 	}
@@ -406,10 +366,18 @@ wait_on_page_freeable(struct page *page, struct address_space *mapping,
 
 		while ((truncated + page_count(page)) > 2) {
 			nretry--;
-			current->state = TASK_INTERRUPTIBLE;
-			schedule_timeout(1);
-			if ((nretry % 5000) == 0) {
+			msleep(1);
+			if ((nretry % HZ) == 0) {
 				printk("remap: still waiting on %p %d\n", page, nretry);
+				printk("page cout: %d, major: %d, minor: %d\n", page_count(page), 
+						MAJOR(mapping->host->i_sb->s_dev),
+						MINOR(mapping->host->i_sb->s_dev));
+				{
+					struct dentry *dentry;
+					dentry = list_entry(mapping->host->i_dentry.next, struct dentry, d_alias);
+					if (dentry)
+						printk("NAME: %s\n", dentry->d_iname);
+				}
 				break;
 			}
 			if (PagePrivate(page) || page_mapped(page))
@@ -422,8 +390,12 @@ wait_on_page_freeable(struct page *page, struct address_space *mapping,
 		if (mapping != mapping1 && mapping1 != NULL)
 			printk("remap: mapping changed %p -> %p, page %p\n",
 			    mapping, mapping1, page);
-		if (PagePrivate(page))
-			ops->remap_release_buffers(page);
+		if (PagePrivate(page)) {
+			printk("page buffer reappeared\n");
+//			ops->remap_release_buffers(page);
+			if (ops->remap_prepare)
+				ops->remap_prepare(page, 0);
+		}
 		unmap_page(page, vlist);
 	}
 	return nretry;
@@ -492,15 +464,22 @@ static void
 remap_exchange_pages(struct page *page, struct page *newpage,
 			 struct address_space *mapping)
 {
+	/* We are done.  Finish and let the waiters run. */
 	if (PageDirty(page))
 		set_page_dirty(newpage);
+	if (PageUptodate(page))
+		SetPageUptodate(newpage);
 	page->mapping = NULL;
+	if (PageSwapCache(page)) {
+		/*
+		 * The page is not mapped from anywhere now.
+		 * Detach it from the swapcache completely.
+		 */
+		ClearPageSwapCache(page);
+		page->private = 0;
+	}
 	unlock_page(page);
-
 	__put_page(page);
-
-	/* We are done.  Finish and let the waiters run. */
-	SetPageUptodate(newpage);
 }
 
 static int
@@ -526,16 +505,12 @@ static struct remap_operations remap_ops = {
 int remap_onepage(struct page *page, int fastmode, struct remap_operations *ops)
 {
 	struct page *newpage;
-	struct zone *zone;
 	struct address_space *mapping;
 	LIST_HEAD(vlist);
 	int truncated = 0;
 	int nretry = fastmode ? HZ/50: HZ*10; /* XXXX */
 
-	zone = zone_table[ZONE_DMA];
-	if (!zone_watermark_ok(zone, 0, zone->pages_high, 0, 0, 0))
-		return -ENOMEM;
-	if ((newpage = ops->remap_alloc_page(GFP_HIGHUSER)) == NULL)
+	if ((newpage = ops->remap_alloc_page(GFP_HIGHUSER | __GFP_HUGEFREE)) == NULL)
 		return -ENOMEM;
 	if (TestSetPageLocked(newpage))
 		BUG();
@@ -544,13 +519,20 @@ int remap_onepage(struct page *page, int fastmode, struct remap_operations *ops)
 	if (ops->remap_prepare && ops->remap_prepare(page, fastmode))
 		goto radixfail;
 
-//	page_map_lock(page);
-	if (PageAnon(page) && !PageSwapCache(page))
-		make_page_mapped(page);
+	if (PageAnon(page) && !PageSwapCache(page)) {
+		while (!add_to_swap(page, 1)) {
+			printk("remap: reinitialize swap area...\n");
+			sys_swapoff((char *)dvr_swap_file);
+			sys_swapon((char *)dvr_swap_file, 0);
+		}
+	}
+
 	mapping = page_mapping(page);
-//	page_map_unlock(page);
 	if (mapping == NULL) {
+		/* truncation is in progress */
 		printk("remap: mapping is NULL\n");
+		if (PagePrivate(page))
+			try_to_release_page(page, GFP_KERNEL);
 		goto radixfail;
 	}
 
@@ -597,7 +579,6 @@ wait_again:
 	if (ops->remap_lru_add_page)
 		ops->remap_lru_add_page(newpage, PageActive(page));
 	ClearPageActive(page);
-	ClearPageSwapCache(page);
 	ops->remap_delete_page(page);
 
 	/*
@@ -606,16 +587,28 @@ wait_again:
 	 */
 	unlock_page(newpage);
 
-	if (ops->remap_stick_page)
+	if (ops->remap_stick_page) {
 		ops->remap_stick_page(&vlist);
+		if (PageSwapCache(newpage)) {
+			lock_page(newpage);
+			__remove_exclusive_swap_page(newpage, 1);
+			unlock_page(newpage);
+		}
+	}
 	page_cache_release(newpage);
 	return 0;
 
 unmapfail:
 	printk("remap: rewind...\n");
 	radix_tree_rewind_page(page, newpage, mapping);
-	if (ops->remap_stick_page)
+	if (ops->remap_stick_page) {
 		ops->remap_stick_page(&vlist);
+		if (PageSwapCache(page)) {
+			lock_page(page);
+			__remove_exclusive_swap_page(page, 1);
+			unlock_page(page);
+		}
+	}
 	ClearPageActive(newpage);
 	ClearPageSwapCache(newpage);
 	ops->remap_delete_page(newpage);
@@ -624,8 +617,11 @@ unmapfail:
 radixfail:
 	unlock_page(page);
 	unlock_page(newpage);
-	if (ops->remap_stick_page)
-		ops->remap_stick_page(&vlist);
+	if (PageSwapCache(page)) {
+		lock_page(page);
+		__remove_exclusive_swap_page(page, 1);
+		unlock_page(page);
+	}
 	ops->remap_delete_page(newpage);
 	return 1;
 }
@@ -643,15 +639,17 @@ int remap_DVR_zone(void *p)
 //	preempt_disable();
 #ifdef USE_KERNEL_THREAD
 	daemonize("remap%d", zone->zone_start_pfn);
-#endif //USE_KERNEL_THREAD
 	if (atomic_add_return(1, &remapd_count) > 1) {
 		printk("remap: remapd already running\n");
 		atomic_dec(&remapd_count);
 		return 0;
 	}
+	zone->flags |= ZN_DISABLE;
+#endif //USE_KERNEL_THREAD
 //	on_each_cpu(lru_drain_schedule, NULL, 1, 1);
 	printk("1. start remap DVR zone...\n");
 	lru_add_drain();							// flush pagevec
+	invalidate_bh_lrus();
 
 	while (nr_failed < 100) {
 		spin_lock_irq(&zone->lru_lock);
@@ -704,7 +702,7 @@ int remap_DVR_zone(void *p)
 		spin_unlock_irq(&zone->lru_lock);
 		break;
 
-	got_page:
+got_page:
 		if (retvalue = remap_onepage(page, fastmode, &remap_ops)) {
 			nr_failed++;
 			if (fastmode)
@@ -755,9 +753,15 @@ out:
 	printk("fastmode is %d...\n", fastmode);
 	printk("map_done is %d...\n", map_done);
 	printk("map_fail is %d...\n", map_fail);
+#ifdef USE_KERNEL_THREAD
+	zone->flags &= ~ZN_DISABLE;
 	atomic_dec(&remapd_count);
+#endif //USE_KERNEL_THREAD
 //	preempt_enable();
-	return 0;
+	if (map_fail)
+		return 1;
+	else
+		return 0;
 }
 
 void start_remap(void)
@@ -765,10 +769,46 @@ void start_remap(void)
 #ifdef USE_KERNEL_THREAD
 	kernel_thread(remap_DVR_zone, NULL, CLONE_KERNEL);
 #else
-	remap_DVR_zone(NULL);
+#ifndef CONFIG_REALTEK_MARS_256MB
+	struct zonelist zonelist = {0};
+#endif
+	struct zone *zone = zone_table[ZONE_DVR];
+	int orig;
+
+	if (atomic_dec_return(&remap_sem.count) < 0) {
+		printk("remap: remapd already running\n");
+		__down_interruptible(&remap_sem);
+	} else {
+		// here, we are in charge of doing the remapping...
+		zone->flags |= ZN_DISABLE;
+#ifndef CONFIG_REALTEK_MARS_256MB
+		zonelist.zones[0] = zone;
+		try_to_free_pages(zonelist.zones, __GFP_IO | __GFP_FS | __GFP_HUGEFREE, 0, 0);
+#endif
+		orig = task_nice(current);
+		set_user_nice(current, 10);
+		while (remap_DVR_zone(NULL)) {
+			printk("\tretry remapping...\n");
+			msleep(10);
+		}
+		set_user_nice(current, orig);
+	}
 #endif //USE_KERNEL_THREAD
 }
 
+void end_remap(void)
+{
+#ifndef USE_KERNEL_THREAD
+	struct zone *zone = zone_table[ZONE_DVR];
+
+	if (atomic_inc_return(&remap_sem.count) <= 0) {
+		printk("remap: remapd complete\n");
+		__up(&remap_sem);
+	} else {
+		zone->flags &= ~ZN_DISABLE;
+	}
+#endif
+}
 #else
 
 void start_remap(void)
@@ -776,6 +816,9 @@ void start_remap(void)
 	printk("CONFIG_SWAP option is not open...\n");
 }
 
+void end_remap(void)
+{
+}
 #endif
 
 EXPORT_SYMBOL(start_remap);

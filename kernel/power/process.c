@@ -18,6 +18,7 @@
  */
 #define TIMEOUT	(6 * HZ)
 
+long wait_hotplug(struct task_struct *p);
 
 static inline int freezeable(struct task_struct * p)
 {
@@ -57,10 +58,28 @@ void refrigerator(unsigned long flag)
 /* 0 = success, else # of processes that we failed to stop */
 int freeze_processes(void)
 {
-       int todo;
-       unsigned long start_time;
+	int todo;
+	unsigned long start_time;
 	struct task_struct *g, *p;
 	
+	// wait until the khelper_wq is empty...
+	empty_usermodehelper_queue();
+
+	// ensure that all hotplug is running...
+	msleep(10);
+
+	// wait until all hotplug is done...
+restart:
+	read_lock(&tasklist_lock);
+	do_each_thread(g, p) {
+		if ((p->flags & PF_HELPER) && !(p->flags & PF_EXITING)) {
+			read_unlock(&tasklist_lock);
+			wait_hotplug(p);
+			goto restart;
+		}
+	} while_each_thread(g, p);
+	read_unlock(&tasklist_lock);
+
 	printk( "Stopping tasks: " );
 	start_time = jiffies;
 	do {

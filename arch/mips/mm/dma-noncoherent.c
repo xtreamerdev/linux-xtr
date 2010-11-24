@@ -16,6 +16,7 @@
 
 #include <asm/cache.h>
 #include <asm/io.h>
+#include <asm/highmem.h>
 
 /*
  * Warning on the terminology - Linux calls an uncached area coherent;
@@ -82,6 +83,71 @@ EXPORT_SYMBOL(dma_free_coherent);
 static inline void __dma_sync(unsigned long addr, size_t size,
 	enum dma_data_direction direction)
 {
+#ifdef CONFIG_REALTEK_PREVENT_DC_ALIAS
+	struct page *page = NULL;
+	unsigned long addr1, addr2, flags;
+
+	while ((addr & PAGE_MASK) != ((addr+size-1) & PAGE_MASK)) {
+		int remains;
+
+		remains = PAGE_SIZE-(addr & (PAGE_SIZE-1));
+		page = virt_to_page(addr);
+		addr1 = (unsigned long)kmap_coherent(page, &flags)+(addr & (PAGE_SIZE-1));
+		addr2 = addr1+0x1000;
+//		printk(" *** 3 page: %x, addr: %x, size: %x, remains: %x \n", page, addr, size, remains);
+		
+		switch (direction) {
+		case DMA_TO_DEVICE:
+			dma_cache_wback(addr1, remains);
+			dma_cache_wback(addr2, remains);
+			break;
+	
+		case DMA_FROM_DEVICE:
+			dma_cache_inv(addr1, remains);
+			dma_cache_inv(addr2, remains);
+			break;
+	
+		case DMA_BIDIRECTIONAL:
+			dma_cache_wback_inv(addr1, remains);
+			dma_cache_wback_inv(addr2, remains);
+			break;
+	
+		default:
+			BUG();
+		}
+
+		kunmap_coherent(&flags);
+		addr += remains;
+		size -= remains;
+	}
+
+	page = virt_to_page(addr);
+	addr1 = (unsigned long)kmap_coherent(page, &flags)+(addr & (PAGE_SIZE-1));
+	addr2 = addr1+0x1000;
+//	printk(" *** 1 page: %x, addr: %x, size: %x \n", page, addr, size);
+
+	switch (direction) {
+	case DMA_TO_DEVICE:
+		dma_cache_wback(addr1, size);
+		dma_cache_wback(addr2, size);
+		break;
+
+	case DMA_FROM_DEVICE:
+		dma_cache_inv(addr1, size);
+		dma_cache_inv(addr2, size);
+		break;
+
+	case DMA_BIDIRECTIONAL:
+		dma_cache_wback_inv(addr1, size);
+		dma_cache_wback_inv(addr2, size);
+		break;
+
+	default:
+		BUG();
+	}
+
+	kunmap_coherent(&flags);
+#else
 	switch (direction) {
 	case DMA_TO_DEVICE:
 		dma_cache_wback(addr, size);
@@ -98,6 +164,7 @@ static inline void __dma_sync(unsigned long addr, size_t size,
 	default:
 		BUG();
 	}
+#endif
 }
 
 dma_addr_t dma_map_single(struct device *dev, void *ptr, size_t size,
@@ -105,6 +172,71 @@ dma_addr_t dma_map_single(struct device *dev, void *ptr, size_t size,
 {
 	unsigned long addr = (unsigned long) ptr;
 
+#ifdef CONFIG_REALTEK_PREVENT_DC_ALIAS
+	struct page *page = NULL;
+	unsigned long addr1, addr2, flags;
+
+	while ((addr & PAGE_MASK) != ((addr+size-1) & PAGE_MASK)) {
+		int remains;
+	
+		remains = PAGE_SIZE-(addr & (PAGE_SIZE-1));
+		page = virt_to_page(addr);
+		addr1 = (unsigned long)kmap_coherent(page, &flags)+(addr & (PAGE_SIZE-1));
+		addr2 = addr1+0x1000;
+//		printk(" *** 4 page: %x, addr: %x, size: %x, remains: %x \n", page, addr, size, remains);
+	
+		switch (direction) {
+			case DMA_TO_DEVICE:
+				dma_cache_wback(addr1, remains);
+				dma_cache_wback(addr2, remains);
+				break;
+	
+			case DMA_FROM_DEVICE:
+				dma_cache_inv(addr1, remains);
+				dma_cache_inv(addr2, remains);
+				break;
+	
+			case DMA_BIDIRECTIONAL:
+				dma_cache_wback_inv(addr1, remains);
+				dma_cache_wback_inv(addr2, remains);
+				break;
+	
+			default:
+				BUG();
+		}
+	
+		kunmap_coherent(&flags);
+		addr += remains;
+		size -= remains;
+	}
+
+	page = virt_to_page(addr);
+	addr1 = (unsigned long)kmap_coherent(page, &flags)+(addr & (PAGE_SIZE-1));
+	addr2 = addr1+0x1000;
+//	printk(" *** 2 page: %x, addr: %x, size: %x \n", page, addr, size);
+
+	switch (direction) {
+	case DMA_TO_DEVICE:
+		dma_cache_wback(addr1, size);
+		dma_cache_wback(addr2, size);
+		break;
+
+	case DMA_FROM_DEVICE:
+		dma_cache_inv(addr1, size);
+		dma_cache_inv(addr2, size);
+		break;
+
+	case DMA_BIDIRECTIONAL:
+		dma_cache_wback_inv(addr1, size);
+		dma_cache_wback_inv(addr2, size);
+		break;
+
+	default:
+		BUG();
+	}
+
+	kunmap_coherent(&flags);
+#else
 	switch (direction) {
 	case DMA_TO_DEVICE:
 		dma_cache_wback(addr, size);
@@ -121,6 +253,7 @@ dma_addr_t dma_map_single(struct device *dev, void *ptr, size_t size,
 	default:
 		BUG();
 	}
+#endif
 
 	return virt_to_phys(ptr);
 }
@@ -178,12 +311,25 @@ EXPORT_SYMBOL(dma_map_sg);
 dma_addr_t dma_map_page(struct device *dev, struct page *page,
 	unsigned long offset, size_t size, enum dma_data_direction direction)
 {
+#ifdef CONFIG_REALTEK_PREVENT_DC_ALIAS
+	unsigned long addr1, addr2, flags;
+
+	addr1 = (unsigned long)kmap_coherent(page, &flags)+offset;
+	addr2 = addr1+0x1000;
+	BUG_ON((addr1 & PAGE_MASK) != ((addr1+size-1) & PAGE_MASK));
+
+	dma_cache_wback_inv(addr1, size);
+	dma_cache_wback_inv(addr2, size);
+
+	kunmap_coherent(&flags);
+#else
 	unsigned long addr;
 
 	BUG_ON(direction == DMA_NONE);
 
 	addr = (unsigned long) page_address(page) + offset;
 	dma_cache_wback_inv(addr, size);
+#endif
 
 	return page_to_phys(page) + offset;
 }
@@ -196,6 +342,9 @@ void dma_unmap_page(struct device *dev, dma_addr_t dma_address, size_t size,
 	BUG_ON(direction == DMA_NONE);
 
 	if (direction != DMA_TO_DEVICE) {
+#ifdef CONFIG_REALTEK_PREVENT_DC_ALIAS
+		/* EJ: i think user should not access these memory during the DMA, so... */
+#endif
 		unsigned long addr;
 
 		addr = dma_address + PAGE_OFFSET;
@@ -220,6 +369,9 @@ void dma_unmap_sg(struct device *dev, struct scatterlist *sg, int nhwentries,
 		addr = (unsigned long) page_address(sg->page);
 		if (!addr)
 			continue;
+#ifdef CONFIG_REALTEK_PREVENT_DC_ALIAS
+		/* EJ: i think user should not access these memory during the DMA, so... */
+#endif
 		dma_cache_wback_inv(addr + sg->offset, sg->length);
 	}
 }
@@ -342,7 +494,22 @@ void dma_cache_sync(void *vaddr, size_t size, enum dma_data_direction direction)
 	if (direction == DMA_NONE)
 		return;
 
+#ifdef CONFIG_REALTEK_PREVENT_DC_ALIAS
+	struct page *page = NULL;
+	unsigned long addr1, addr2, flags;
+
+	page = virt_to_page((unsigned long)vaddr);
+	addr1 = (unsigned long)kmap_coherent(page, &flags)+((unsigned long)vaddr & (PAGE_SIZE-1));
+	addr2 = addr1+0x1000;
+	BUG_ON((addr1 & PAGE_MASK) != ((addr1+size-1) & PAGE_MASK));
+
+	dma_cache_wback_inv(addr1, size);
+	dma_cache_wback_inv(addr2, size);
+
+	kunmap_coherent(&flags);
+#else
 	dma_cache_wback_inv((unsigned long)vaddr, size);
+#endif
 }
 
 EXPORT_SYMBOL(dma_cache_sync);
@@ -382,7 +549,23 @@ void pci_dac_dma_sync_single_for_cpu(struct pci_dev *pdev,
 {
 	BUG_ON(direction == PCI_DMA_NONE);
 
+#ifdef CONFIG_REALTEK_PREVENT_DC_ALIAS
+	struct page *page = NULL;
+	unsigned long addr, addr1, addr2, flags;
+
+	addr = dma_addr+PAGE_OFFSET;
+	page = virt_to_page((unsigned long)addr);
+	addr1 = (unsigned long)kmap_coherent(page, &flags)+(addr & (PAGE_SIZE-1));
+	addr2 = addr1+0x1000;
+	BUG_ON((addr & PAGE_MASK) != ((addr+size-1) & PAGE_MASK));
+
+	dma_cache_wback_inv(addr1, size);
+	dma_cache_wback_inv(addr2, size);
+
+	kunmap_coherent(&flags);
+#else
 	dma_cache_wback_inv(dma_addr + PAGE_OFFSET, len);
+#endif
 }
 
 EXPORT_SYMBOL(pci_dac_dma_sync_single_for_cpu);
@@ -392,7 +575,23 @@ void pci_dac_dma_sync_single_for_device(struct pci_dev *pdev,
 {
 	BUG_ON(direction == PCI_DMA_NONE);
 
+#ifdef CONFIG_REALTEK_PREVENT_DC_ALIAS
+	struct page *page = NULL;
+	unsigned long addr, addr1, addr2, flags;
+
+	addr = dma_addr+PAGE_OFFSET;
+	page = virt_to_page((unsigned long)addr);
+	addr1 = (unsigned long)kmap_coherent(page, &flags)+(addr & (PAGE_SIZE-1));
+	addr2 = addr1+0x1000;
+	BUG_ON((addr & PAGE_MASK) != ((addr+size-1) & PAGE_MASK));
+
+	dma_cache_wback_inv(addr1, size);
+	dma_cache_wback_inv(addr2, size);
+
+	kunmap_coherent(&flags);
+#else
 	dma_cache_wback_inv(dma_addr + PAGE_OFFSET, len);
+#endif
 }
 
 EXPORT_SYMBOL(pci_dac_dma_sync_single_for_device);

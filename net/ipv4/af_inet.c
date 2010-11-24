@@ -645,7 +645,9 @@ int inet_sendmsg(struct kiocb *iocb, struct socket *sock, struct msghdr *msg,
 		 size_t size)
 {
 	struct sock *sk = sock->sk;
-
+#ifdef NET_DEBUG
+	printk("inet_sendmsg \n");
+#endif	
 	/* We may need to bind the socket. */
 	if (!inet_sk(sk)->num && inet_autobind(sk))
 		return -EAGAIN;

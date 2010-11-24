@@ -259,7 +259,11 @@ struct runqueue {
 #endif
 };
 
+#ifdef CONFIG_REALTEK_SBSS_IN_DMEM
+static DEFINE_PER_CPU(struct runqueue, runqueues) __attribute__ ((section(".sbss")));
+#else
 static DEFINE_PER_CPU(struct runqueue, runqueues);
+#endif
 
 #define for_each_domain(cpu, domain) \
 	for (domain = cpu_rq(cpu)->sd; domain; domain = domain->parent)
@@ -2234,7 +2238,11 @@ static inline int wake_priority_sleeper(runqueue_t *rq)
 	return ret;
 }
 
+#ifdef CONFIG_REALTEK_SBSS_IN_DMEM_ADVANCED
+DEFINE_PER_CPU(struct kernel_stat, kstat) __attribute__ ((section(".sbss")));
+#else
 DEFINE_PER_CPU(struct kernel_stat, kstat);
+#endif
 
 EXPORT_PER_CPU_SYMBOL(kstat);
 

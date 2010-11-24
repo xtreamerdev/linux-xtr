@@ -494,6 +494,10 @@ int udp_sendmsg(struct kiocb *iocb, struct sock *sk, struct msghdr *msg,
 	u8  tos;
 	int err;
 	int corkreq = up->corkflag || msg->msg_flags&MSG_MORE;
+#ifdef NET_DEBUG
+                printk("udp_sendmsg \n");
+#endif
+		
 
 	if (len > 0xFFFF)
 		return -EMSGSIZE;

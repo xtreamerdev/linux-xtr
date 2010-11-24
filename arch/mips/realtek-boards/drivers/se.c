@@ -39,10 +39,41 @@
 #include <asm/irq.h>
 #include <linux/signal.h>
 #include <linux/interrupt.h>
+#include <platform.h>
 
 #include "se_driver.h"
-#include "sb2_reg.h"
-#include "dcu_reg.h"
+#include "SeReg.h"
+
+#define SeClearWriteData 0
+
+typedef enum
+{
+    SeWriteData = BIT0,
+    SeGo = BIT1,
+    SeEndianSwap = BIT2
+
+} SE_CTRL_REG;
+
+typedef enum
+{
+    SeIdle = BIT0
+
+} SE_IDLE_REG;
+
+
+//interrupt status and control bits
+typedef enum
+{
+    SeIntCommandEmpty = BIT3,
+    SeIntCommandError = BIT2,
+    SeIntSync = BIT1
+
+} SE_INT_STATUS_REG, SE_INT_CTRL_REG;
+
+
+#define SEINFO_COMMAND_QUEUE0 0                         //The Definition of Command Queue Type: Command Queue 0
+#define SEINFO_COMMAND_QUEUE1 1                         //The Definition of Command Queue Type: Command Queue 1
+#define SEINFO_COMMAND_QUEUE2 2                         //The Definition of Command Queue Type: Command Queue 2
 
 #include <linux/devfs_fs_kernel.h>
 
@@ -84,6 +115,14 @@
 
 #define endian_swap_32(a) (((a)>>24) | (((a)>>8) & 0xFF00) | (((a)<<8) & 0xFF0000) | (((a)<<24) & 0xFF000000))
 
+typedef struct vsync_queue {
+    uint32_t u32Occupied;
+    uint32_t u32Size;
+    uint32_t u32RdPtr;
+    uint32_t u32WrPtr;
+    uint32_t go;
+    uint8_t *u8Buf[1];
+} vsync_queue_t;
 
 /*
  * Our parameters which can be set at load time.
@@ -108,8 +147,83 @@ MODULE_LICENSE("Dual BSD/GPL");
 #define DG_UNLOCK
 #define SE_IRQ 5
 
+
 struct se_dev *se_devices;	/* allocated in se_init_module */
 
+void WriteCmd(struct se_dev *dev, uint8_t *pbyCommandBuffer, int32_t lCommandLength, int go)
+{
+    uint32_t    dwDataCounter = 0;
+    uint8_t     *pbyWritePointer = NULL;
+    uint8_t     *pWptr = NULL;
+    uint8_t     *pWptrLimit = NULL;
+    volatile SEREG_INFO  *SeRegInfo = (volatile SEREG_INFO  *)0xB800C000;
+
+    if(lCommandLength == 0) return;
+
+    while(0 == (pbyWritePointer = (uint8_t *) SeRegInfo->SeCmdWritePtr[SEINFO_COMMAND_QUEUE1].Value))
+    {
+        int ii;
+        for(ii=0; ii<64; ii++) ; //add some delay here
+    }
+
+    while(1)
+    {
+        uint8_t *pbyReadPointer;
+        while(0 == (pbyReadPointer = (uint8_t *) SeRegInfo->SeCmdReadPtr[SEINFO_COMMAND_QUEUE1].Value))
+        {
+            int ii;
+            for(ii=0; ii<64; ii++) ; //add some delay here
+        }
+
+        if(pbyReadPointer <= pbyWritePointer)
+        {
+            pbyReadPointer += dev->size;
+        }
+
+        if((pbyWritePointer + lCommandLength) < pbyReadPointer)
+        {
+            break;
+        }
+    }
+
+    pWptrLimit = (uint8_t *) dev->CmdBuf + dev->size;
+    pWptr = (uint8_t *) dev->CmdBuf + dev->wrptr;
+
+    //DBG_PRINT("[\n");
+    //Start writing command words to the ring buffer.
+    for(dwDataCounter = 0; dwDataCounter < (uint32_t) lCommandLength; dwDataCounter += sizeof(uint32_t))
+    {
+        DBG_PRINT("(%8x-%8x)\n", (uint32_t)pWptr, *(uint32_t *)(pbyCommandBuffer + dwDataCounter));
+
+        //*(uint32_t *)((uint32_t)pWptr) = endian_swap_32(*(uint32_t *)(pbyCommandBuffer + dwDataCounter));
+        *(uint32_t *)((uint32_t)pWptr | 0xA0000000) = (*(uint32_t *)(pbyCommandBuffer + dwDataCounter));
+
+        pWptr += sizeof(uint32_t);
+        if(pWptr >= pWptrLimit)
+        {
+            pWptr = pWptr - dev->size;
+        }
+    }
+
+    //DBG_PRINT("]\n");
+
+    dev->wrptr = pWptr - (uint8_t *)dev->CmdBuf;
+
+    DBG_PRINT("wreg= %x, value=%x\n", SeRegInfo->SeCmdWritePtr[SEINFO_COMMAND_QUEUE1].Value, (uint32_t) pWptr - dev->v_to_p_offset );
+
+    if(go)
+    {
+        // sync the write buffer
+        __asm__ __volatile__ (".set push");
+        __asm__ __volatile__ (".set mips32");
+        __asm__ __volatile__ ("sync;");
+        __asm__ __volatile__ (".set pop");
+
+        //convert to physical address
+        SeRegInfo->SeCmdWritePtr[SEINFO_COMMAND_QUEUE1].Value = (uint32_t) pWptr - dev->v_to_p_offset ;
+        SeRegInfo->SeCtrl[SEINFO_COMMAND_QUEUE1].Value = (SeGo | SeEndianSwap | SeWriteData);
+    }
+}
 
 /* This function services keyboard interrupts. It reads the relevant
  *  * information from the keyboard and then scheduales the bottom half
@@ -117,12 +231,84 @@ struct se_dev *se_devices;	/* allocated in se_init_module */
  *    */
 irqreturn_t se_irq_handler(int irq, void *dev_id, struct pt_regs *regs)
 {
-
     struct se_dev *dev = dev_id;
+    
+  if(dev->isMars)
+  {
+    if((*(volatile uint32_t *)0xA00000DC) & endian_swap_32(0x2))
+    {
+        int ii;
+        int dirty = 0;
+
+        *(volatile uint32_t *)0xA00000DC = endian_swap_32(1);//(*(volatile uint32_t *)0xA00000DC) & endian_swap_32(~0x2);
+//DBG_PRINT("@@ %x\n", endian_swap_32(*(volatile uint32_t *)0xA00000DC));
+
+        for(ii=0; ii< dev->u32_max_queue_num; ii++)
+        {
+            vsync_queue_t *p_vsync_queue = (vsync_queue_t *)dev->p_vsync_queue;
+
+            p_vsync_queue = (vsync_queue_t *)((uint32_t)p_vsync_queue + (uint32_t)(p_vsync_queue->u32Size + offsetof(vsync_queue_t, u8Buf)) * ii);
+            DBG_PRINT("1: queue=%d, addr=%p\n", ii, p_vsync_queue);
+            if(p_vsync_queue->go)
+            {
+                uint8_t *buf = (uint8_t *)&p_vsync_queue->u8Buf;
+                uint32_t rdptr = p_vsync_queue->u32RdPtr;
+                uint32_t u32Size = p_vsync_queue->u32Size;
+
+                DBG_PRINT("1: queue=%d, r=%d, w=%d, size=%d\n", ii, p_vsync_queue->u32RdPtr, p_vsync_queue->u32WrPtr, *(uint32_t *)&buf[rdptr]);
+                while(p_vsync_queue->u32RdPtr != p_vsync_queue->u32WrPtr)
+                {
+                    uint32_t len = *(uint32_t *)&buf[rdptr];
+                    dirty = 1;
+
+                DBG_PRINT("2: queue=%d, r=%d, w=%d, size=%d\n", ii, p_vsync_queue->u32RdPtr, p_vsync_queue->u32WrPtr, *(uint32_t *)&buf[rdptr]);
+
+                    if(len == 0)
+                    {
+                        p_vsync_queue->u32RdPtr += 4;
+                        if(p_vsync_queue->u32RdPtr >= p_vsync_queue->u32Size)
+                        {
+                            p_vsync_queue->u32RdPtr -= p_vsync_queue->u32Size;
+                        }
+                        break;
+                    }
+                    else
+                    {
+                        len -= 4;
+                        rdptr += 4;
+                        if(rdptr >= u32Size) rdptr -= u32Size;
+
+                        if((rdptr + len) >= u32Size)
+                        {
+                            WriteCmd(dev, &buf[rdptr], u32Size - rdptr, 0);
+                            WriteCmd(dev, &buf[0], rdptr + len - u32Size, 1);
+                            rdptr = rdptr + len - u32Size;
+                        }
+                        else
+                        {
+                            WriteCmd(dev, &buf[rdptr], len, 1);
+                            rdptr += len;
+                        }
+                        p_vsync_queue->u32RdPtr = rdptr;
+                    }
+                }
+                if(p_vsync_queue->u32RdPtr == p_vsync_queue->u32WrPtr)
+                {
+                    p_vsync_queue->go = 0;
+                }
+            }
+        }
+        if(!dirty)
+        {
+            *(volatile uint32_t *)0xA00000DC = (*(volatile uint32_t *)0xA00000DC) & endian_swap_32(0);
+        }
+        return IRQ_HANDLED;
+    }
+  }
+  else
+  {
     uint32_t int_status = readl(SE_INT_STATUS);
 
-
-    
     DBG_PRINT("[se driver] se int_status = %x\n", int_status);
 
     if(int_status & INT_SYNC/* interrupt souirce is from SYNC command*/)
@@ -134,18 +320,19 @@ irqreturn_t se_irq_handler(int irq, void *dev_id, struct pt_regs *regs)
 
         tmp = dev->hw_counter.low;
         dev->hw_counter.low += (INST_CNT_MASK+1);
-        if(tmp > dev->hw_counter.low )	//check if overflow happen
+        if(tmp > dev->hw_counter.low )  //check if overflow happen
             dev->hw_counter.high++;
 
         DBG_PRINT("[se driver] SE_REG(SE_INST_CNT) = 0x%x\n", readl(SE_REG(SE_INST_CNT)));
         DBG_PRINT("hw_counter.high = 0x%x\n", dev->hw_counter.high);
         DBG_PRINT("hw_counter.low = 0x%x\n", dev->hw_counter.low);
-		//enable interrupt
+        //enable interrupt
         write_l(SE_CLR_WRITE_DATA | INT_SYNC, SE_REG(SE_INT_ENABLE));
         return IRQ_HANDLED;
     }
-    DBG_PRINT("not se interrupt = %x\n", int_status);
-    return IRQ_NONE;
+
+  }
+  return IRQ_NONE;
 }
 /*
  * Open and close
@@ -163,59 +350,56 @@ int se_open(struct inode *inode, struct file *filp)
 
     DBG_PRINT("se se_dev = %x\n", (uint32_t)dev);
 	/* now trim to 0 the length of the device if open was write-only */
-	//if ( (filp->f_flags & O_ACCMODE) == O_WRONLY) {
-		if (down_interruptible(&dev->sem))
-			return -ERESTARTSYS;
+	if (down_interruptible(&dev->sem))
+		return -ERESTARTSYS;
 
-        if(!dev->initialized)
-        {
-            result = request_irq(SE_IRQ, se_irq_handler, SA_INTERRUPT|SA_SHIRQ, "se", dev);
-            if(result)
-		    {
-                DBG_PRINT(KERN_INFO "se: can't get assigned irq%i\n", SE_IRQ);
-		    }
-            dev->initialized = 1;
-        }
+    if(!dev->initialized)
+    {
+        result = request_irq(SE_IRQ, se_irq_handler, SA_INTERRUPT|SA_SHIRQ, "se", dev);
+        if(result)
+	    {
+            DBG_PRINT(KERN_INFO "se: can't get assigned irq%i\n", SE_IRQ);
+	    }
+
+        dev->initialized = 1;
+        dev->p_vsync_queue = 0;
+        dev->isMars = is_mars_cpu() ? 1 : 0;
+        *(volatile uint32_t *)0xA00000DC = 0;
+    }
         
-#if 0
+    if(dev->isMars)
+    {
 		if(!dev->CmdBuf)
-		{
-            int result;
-			uint32_t *pPhysAddr;
+        {
+			uint32_t dwPhysicalAddress = 0;
+            volatile SEREG_INFO  *SeRegInfo = (volatile SEREG_INFO  *)0xB800C000;
+        
+        
+			dev->size = (SE_COMMAND_ENTRIES * sizeof(uint32_t));
+        
+			dev->CmdBuf = kmalloc((SE_COMMAND_ENTRIES * sizeof(uint32_t)), GFP_KERNEL);
 
-            DBG_PRINT("se initialization\n");
-
-			dev->size = SE_COMMAND_ENTRIES*sizeof(uint32_t);
-
-			dev->CmdBuf = kmalloc(dev->size, GFP_KERNEL);
-			pPhysAddr = (uint32_t *)__pa(dev->CmdBuf);
-			DBG_PRINT("CmdBuf virt addr = %x, phy addr = %x\n", (uint32_t)dev->CmdBuf, (uint32_t)pPhysAddr);
-            dev->v_to_p_offset = (int32_t)((uint8_t *)dev->CmdBuf - (uint32_t)pPhysAddr);
-
+            dwPhysicalAddress = (uint32_t)__pa(dev->CmdBuf);
+        
+			DBG_PRINT("Command Buffer Address = %x, Physical Address = %x\n", (uint32_t) dev->CmdBuf, (uint32_t) dwPhysicalAddress);
+        
+            dev->v_to_p_offset = (int32_t) ((uint32_t)dev->CmdBuf - (uint32_t)dwPhysicalAddress);
             dev->wrptr = 0;
-			dev->CmdBase = pPhysAddr;
-			dev->CmdLimit = pPhysAddr + SE_COMMAND_ENTRIES;
-
-  			write_l((uint32_t)dev->CmdBase, SE_REG(SE_CmdBase));
-            write_l((uint32_t)dev->CmdLimit, SE_REG(SE_CmdLimit));
-	      	write_l((uint32_t)dev->CmdBase, SE_REG(SE_CmdRdptr));
-            write_l((uint32_t)dev->CmdBase, SE_REG(SE_CmdWrptr));
-            write_l(0, SE_REG(SE_INST_CNT));
-
-            result = request_irq(SE_IRQ, se_irq_handler, SA_INTERRUPT|SA_SHIRQ, "se", dev);
-            if(result)
-			{
-                DBG_PRINT(KERN_INFO "se: can't get assigned irq%i\n", SE_IRQ);
-			}
-			//enable interrupt
-            write_l(SE_SET_WRITE_DATA | INT_SYNC, SE_REG(SE_INT_ENABLE));
-
-            //start SE
-            write_l(/*readl(SE_REG(SE_CNTL)) |*/ SE_GO | SE_SET_WRITE_DATA, SE_REG(SE_CNTL));
-		}
-#endif
-		up(&dev->sem);
-	//}
+			dev->CmdBase = (void *) dwPhysicalAddress;
+			dev->CmdLimit = (void *) (dwPhysicalAddress + SE_COMMAND_ENTRIES * sizeof(uint32_t));
+        
+            //Stop Streaming Engine
+            SeRegInfo->SeCtrl[SEINFO_COMMAND_QUEUE1].Value = (SeGo | SeEndianSwap | SeClearWriteData);
+            SeRegInfo->SeCtrl[SEINFO_COMMAND_QUEUE1].Value = (SeEndianSwap | SeWriteData);
+        
+			SeRegInfo->SeCmdBase[SEINFO_COMMAND_QUEUE1].Value = (uint32_t) dev->CmdBase;
+			SeRegInfo->SeCmdLimit[SEINFO_COMMAND_QUEUE1].Value = (uint32_t) dev->CmdLimit;
+			SeRegInfo->SeCmdReadPtr[SEINFO_COMMAND_QUEUE1].Value = (uint32_t) dev->CmdBase;
+			SeRegInfo->SeCmdWritePtr[SEINFO_COMMAND_QUEUE1].Value = (uint32_t) dev->CmdBase;
+			SeRegInfo->SeInstCnt[SEINFO_COMMAND_QUEUE1].Value = 0;
+        }
+    }
+	up(&dev->sem);
 	return 0;          /* success */
 }
 
@@ -248,109 +432,6 @@ ssize_t se_read(struct file *filp, char __user *buf, size_t count,
 	return -EFAULT;
 }
 
-/********************************************
- * Function :
- * Description :
- * Input :  struct se_dev : hold driver data
- *          nLen : number of bytes
- *          pdwBuf : command buffer
- * Output : 
- *******************************************/
-void
-WriteCmd(struct se_dev *dev, uint8_t *pBuf, int nLen)
-{
-    int ii;
-    uint8_t *writeptr;
-    uint8_t *pWptr;
-    uint8_t *pWptrLimit;
-
-    dev->sw_counter.low++;
-	if(dev->sw_counter.low == 0)
-    {
-        dev->sw_counter.high++;
-    }
-    if( (dev->sw_counter.low & INST_CNT_MASK) == 0)
-    {   //Insert a SYNC command and enable interrupt for updating the upper 48 bits counter in software.
-        uint32_t dwValue = SYNC;
-		//recursive call
-        WriteCmd(dev, (uint8_t *)&dwValue, sizeof(uint32_t));      //recursive
-    }
-
-    DBG_PRINT("[queue size, wptr, rptr] =");
-    DBG_PRINT("[0x%x, ", dev->size);
-    DBG_PRINT("0x%x, ", readl(SE_REG(SE_CmdWrptr)));
-    DBG_PRINT("0x%x]\n", readl(SE_REG(SE_CmdRdptr)));
-	DBG_PRINT("SE_REG(SE_INST_CNT) %x\n", readl(SE_REG(SE_INST_CNT)));
-	DBG_PRINT("SE_REG(SE_CmdFifoState) %x\n", readl(SE_REG(SE_CmdFifoState)));
-	DBG_PRINT("SE_REG(SE_CNTL) %x\n", readl(SE_REG(SE_CNTL)));
-	DBG_PRINT("SE_REG(SE_INT_STATUS) %x\n", readl(SE_REG(SE_INT_STATUS)));
-    writeptr = (uint8_t *)readl(SE_REG(SE_CmdWrptr));
-#ifndef SIMULATOR
-    while(1)
-    {
-        uint8_t *readptr = (uint8_t *)readl(SE_REG(SE_CmdRdptr));
-        if(readptr <= writeptr)
-        {
-            readptr += dev->size; 
-        }
-        if((writeptr+nLen) < readptr)
-        {
-            break;
-        }
-	    DBG_PRINT("while loop w=%x r=%x\n", (uint32_t)writeptr, (uint32_t)readptr);
-        set_current_state(TASK_INTERRUPTIBLE);
-        schedule_timeout(1);
-    }
-#endif
-
-    pWptrLimit = (uint8_t *)(dev->CmdBuf + dev->size);
-	while(1)
-    {   //handle the condition that command buffer wrapped around inside a 2-/3-word command
-        //causes SE decording error
-        //restore write pointer afater recusive call
-        pWptr = dev->CmdBuf + dev->wrptr;
- 	    //if((nLen > 4) && ((pWptr + sizeof(uint32_t)) == pWptrLimit))
- 	    if((nLen > 4) && (pWptr + nLen) >= pWptrLimit)
-        {
-            uint32_t cmd_word = 0x00000071; //dummy command by writing 0 to SE_Input register
-
-            //recursive call
-            WriteCmd(dev, (uint8_t *)&cmd_word, sizeof(uint32_t));
-        }
-		else
-        {
-            break;
-        }
-    }
-
-    DBG_PRINT("kernel land [");
-    //Start writing command words to the ring buffer.
-    for(ii=0; ii<nLen; ii+=sizeof(uint32_t))
-    {
-        DBG_PRINT("(%x-%x)-", (uint32_t)pWptr, *(uint32_t *)(pBuf + ii));
-
-
-        *(uint32_t *)((uint32_t)pWptr | 0xA0000000) = endian_swap_32(*(uint32_t *)(pBuf + ii));
-
-        pWptr += sizeof(uint32_t);
-        if(pWptr >= pWptrLimit)
-            pWptr = dev->CmdBuf;
-    }
-    DBG_PRINT("]\n");
-
-    dev->wrptr += nLen;
-    if(dev->wrptr >= dev->size)
-        dev->wrptr -= dev->size;
-
-    //convert to physical address
-    pWptr -= dev->v_to_p_offset;
-	write_l( SE_GO | SE_CLR_WRITE_DATA, SE_REG(SE_CNTL));
-    write_l((uint32_t)pWptr, SE_REG(SE_CmdWrptr));    
-    write_l( SE_GO | SE_SET_WRITE_DATA, SE_REG(SE_CNTL));
-
-    return;
-}
-
 ssize_t se_write(struct file *filp, const char __user *buf, size_t count,
                 loff_t *f_pos)
 {
@@ -372,7 +453,7 @@ ssize_t se_write(struct file *filp, const char __user *buf, size_t count,
 		retval = -EFAULT;
 		goto out;
     }
-    WriteCmd(dev, (uint8_t *)data, count);
+    WriteCmd(dev, (uint8_t *)data, count, 1);
 
 	*f_pos += count;
 	retval = count;
@@ -390,69 +471,27 @@ int se_ioctl(struct inode *inode, struct file *filp,
                  unsigned int cmd, unsigned long arg)
 {
 	struct se_dev *dev = filp->private_data;
-	int ii, retval = 0;
+	int retval = 0;
 
 	if (down_interruptible(&dev->sem))
 		return -ERESTARTSYS;
     
     //DBG_PRINT("se ioctl code = %d\n", cmd);
 	switch(cmd) {
-	case SE_IOC_DG_LOCK:
+    case SE_IOC_SET_VSYNC_QUEUE:
         {
-            /* register related information to SB2 to do block to linear address translation */
-            ioc_dg_lock_param param;
+        vsync_queue_param_t vsync_queue_param;
 
-            if (copy_from_user((void *)&param, (const void __user *)arg, sizeof(ioc_dg_lock_param))) {
-                retval = -EFAULT;
-                goto out;
-            }
-
-#ifndef SIMULATOR
-            while(1)
-            {
-				DBG_PRINT("SE_REG(SE_INST_CNT) %x\n", readl(SE_REG(SE_INST_CNT)));
-				DBG_PRINT("dev->hw_counter.high = %x\n", dev->hw_counter.high);
-				DBG_PRINT("dev->hw_counter.low = %x\n", (dev->hw_counter.low + (readl(SE_REG(SE_INST_CNT)) & 0xFFFF)));
-				DBG_PRINT("param->sw_counter.high = %x\n", param.sw_counter.high);
-				DBG_PRINT("param->sw_counter.low = %x\n", param.sw_counter.low);
-		        if((dev->hw_counter.high > param.sw_counter.high) ||
-		           ((dev->hw_counter.high == param.sw_counter.high)
-                   && ((dev->hw_counter.low + (readl(SE_REG(SE_INST_CNT)) & INST_CNT_MASK)) >= param.sw_counter.low)))
-                    break;
-                //Wait for all the pending command associated to this surface is serviced.
-                set_current_state(TASK_INTERRUPTIBLE);
-                schedule_timeout(1);
-            }
-#endif
-            for(ii=0; ii<6; ii++)
-            {
-                if((param.pic_width >> (ii+8)) == 1)
-                {
-                    break;
-                }
-            }
-            //DBG_PRINT("param.pic_width = %d\n", ii);
-	
-            //enable SB2 linear address to block address conversion
-            write_l( PrepareTileStartAddrWriteData(param.tile_start_addr) 
-			        | PreparePicWidthWriteData(ii) 
-			        | PreparePicIndexWriteData(param.pic_index)
-                    , SB2_REG(SB2_TILE_ACCESS_SET));
-         
-            DBG_PRINT("se ioctl code=DG_LOCK\n");
-		    break;
+        if (copy_from_user((void *)&vsync_queue_param, (const void __user *)arg, sizeof(vsync_queue_param_t))) {
+            retval = -EFAULT;
+            DBG_PRINT("se ioctl code=SE_IOC_SET_DCU_INFO failed!!!!!!!!!!!!!!!1\n");
+            goto out;
         }
-    case SE_IOC_DG_UNLOCK:
-        /* register related information to SB2 to do block to linear address translation */
-
-        //reset SB2 linear address to block address conversion
-        write_l( PrepareTileStartAddrWriteData(0) 
-		        | PreparePicWidthWriteData(0) 
-		        | PreparePicIndexWriteData(0)
-                , SB2_REG(SB2_TILE_ACCESS_SET));
-
-        DBG_PRINT("se ioctl code=DG_UNLOCK\n");
-        break;
+        //convert to non cached virtual
+        dev->p_vsync_queue = (void *)((uint32_t)vsync_queue_param.vsync_queue_phy + 0xA0000000); 
+        dev->u32_max_queue_num = vsync_queue_param.u32_max_queue_num;
+        }
+		break;
     case SE_IOC_READ_HW_CMD_COUNTER:
         {
             se_cmd_counter counter;
@@ -465,41 +504,6 @@ int se_ioctl(struct inode *inode, struct file *filp,
             DBG_PRINT("counter.high = 0x%x\n", counter.high);
             DBG_PRINT("counter.low = 0x%x\n", counter.low);
             DBG_PRINT("se ioctl code=SE_IOC_READ_HW_CMD_COUNTER:\n");
-            break;
-        }
-    case SE_IOC_READ_SW_CMD_COUNTER:
-        {
-            DBG_PRINT("se ioctl code=SE_IOC_READ_SW_CMD_COUNTER:\n");
-            if (copy_to_user((void __user *)arg, (void *)&(dev->sw_counter), sizeof(se_cmd_counter))) {
-                retval = -EFAULT;
-                goto out;
-            }
-            break;
-        }
-    case SE_IOC_SET_DCU_INFO:
-        {
-            ioc_dcu_info info;
-
-            DBG_PRINT("se ioctl code=SE_IOC_SET_DCU_INFO\n");
-            if (copy_from_user((void *)&info, (const void __user *)arg, sizeof(ioc_dcu_info))) {
-                retval = -EFAULT;
-                DBG_PRINT("se ioctl code=SE_IOC_SET_DCU_INFO failed!!!!!!!!!!!!!!!1\n");
-                goto out;
-            }
-            write_l( PreparePictSetWriteData(info.index, info.pitch, info.addr),
-                             DCU_REG(DC_PICT_SET));
-            write_l( DC_PICT_SET_OFFSET_pict_set_num(info.index)
-                     | DC_PICT_SET_OFFSET_pict_set_offset_x(0)
-                     | DC_PICT_SET_OFFSET_pict_set_offset_y(0),
-                     DCU_REG(DC_PICT_SET_OFFSET));
-
-
-            DBG_PRINT("se ioctl code=SE_IOC_SET_DCU_INFO %x\n", PreparePictSetWriteData(info.index, info.pitch, info.addr));
-			DBG_PRINT("index=%x, pitch=%x, addr=%x\n", info.index, info.pitch, info.addr);
-//#define TEST_VOUT
-#ifdef TEST_VOUT
-            write_l( (((info.addr) >> (11+((readl(DCU_REG(DC_SYS_MISC)) >> 16) & 0x3))) & 0x1FFF), ((volatile unsigned int *)0xB80050A0));
-#endif
             break;
         }
     default:  /* redundant, as cmd was checked against MAXNR */

@@ -21,6 +21,11 @@ typedef struct ioc_dcu_info_t {
     u_int32_t pitch;
 } ioc_dcu_info;
 
+typedef struct vsync_queue_param {
+    uint32_t u32_max_queue_num;
+    uint32_t vsync_queue_phy;
+} vsync_queue_param_t;
+
 /*
  * Ioctl definitions
  */
@@ -70,6 +75,10 @@ typedef struct ioc_dcu_info_t {
 #define SE_IOC_READ_SW_CMD_COUNTER _IOR(SE_IOC_MAGIC, 18, int)
 
 #define SE_IOC_SET_DCU_INFO _IOW(SE_IOC_MAGIC, 19, int)
+
+#define SE_IOC_READ_HW_CMD_COUNTER_LOW_WORD _IOR(SE_IOC_MAGIC, 20, int)
+
+#define SE_IOC_SET_VSYNC_QUEUE _IOR(SE_IOC_MAGIC, 21, vsync_queue_param_t)
 
 #define SE_IOC_MAXNR 20
 

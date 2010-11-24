@@ -244,7 +244,12 @@ struct cfi_private {
  */
 static inline uint32_t cfi_build_cmd_addr(uint32_t cmd_ofs, int interleave, int type)
 {
-	return (cmd_ofs * type) * interleave;
+	uint32_t addr;
+
+	addr = (cmd_ofs * type) * interleave;
+	if(addr == 0x554) addr = 0x555;
+	
+	return addr;
 }
 
 /*

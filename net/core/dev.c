@@ -1654,7 +1654,29 @@ int netif_receive_skb(struct sk_buff *skb)
 	struct packet_type *ptype, *pt_prev;
 	int ret = NET_RX_DROP;
 	unsigned short type;
+#ifdef NET_DEBUG
+	printk("Entering netif_receive_skb skb=0x%x \n", skb);
+#ifdef NET_DEBUG
 
+	{
+	u8 *p;
+int i;
+p = (u8 *)skb->data ;
+for (i=0; i<skb->len ; i++)
+{
+	if (i%16 == 0)
+	{
+		printk("\n %02x",*p++ ) ;
+	}
+	else
+	{
+		printk(" %02x",*p++ ) ;
+	}
+}
+printk("\n" ) ;
+}
+#endif
+#endif	
 	/* if we've gotten here through NAPI, check netpoll */
 	if (skb->dev->poll && netpoll_rx(skb))
 		return NET_RX_DROP;

@@ -47,10 +47,24 @@
 #include <linux/rmap.h>
 #include <linux/mempolicy.h>
 #include <linux/key.h>
-#ifdef CONFIG_REALTEK_SB2_DBG
+#include <mcp.h>
+#include <linux/reboot.h>	// For machine_restart
+#if CONFIG_REALTEK_TEXT_DEBUG || CONFIG_REALTEK_MEMORY_DEBUG_MODE || CONFIG_REALTEK_USER_DEBUG
 #include <linux/interrupt.h>
 
 #include <platform.h>
+#include <venus.h>
+#if CONFIG_REALTEK_TEXT_DEBUG || CONFIG_REALTEK_MEMORY_DEBUG_MODE
+#define PREFETCH_BUFFER	0x400
+
+extern unsigned int _etext;
+extern unsigned int _edata;
+extern unsigned int audio_addr;
+#endif
+#endif
+
+#ifdef CONFIG_REALTEK_TEXT_DEBUG
+atomic_t text_count;
 #endif
 
 #include <asm/io.h>
@@ -109,14 +123,15 @@ static inline void acpi_early_init(void) { }
 extern void tc_init(void);
 #endif
 
+#ifdef CONFIG_REALTEK_RESERVE_DVR
+#define SYNC_STRUCT_ADDR 0xa2000000
+
+extern int DVR_zone_disable(void);
+extern int DVR_zone_enable(void);
+#endif
+
 enum system_states system_state;
 EXPORT_SYMBOL(system_state);
-
-#ifdef CONFIG_REALTEK_SB2_DBG
-#define SB2_DBG_ID 0x2266
-
-extern platform_info_t platform_info;
-#endif
 
 /*
  * Boot command-line arguments
@@ -137,18 +152,37 @@ static char *execute_command;
 /* Setup configured maximum number of CPUs to activate */
 static unsigned int max_cpus = NR_CPUS;
 
-#ifdef CONFIG_REALTEK_SB2_DBG
+#ifdef CONFIG_PRINTK
+void printk_setup(void);
+void printk_setup_tail(void);
+#endif
+
+#if CONFIG_REALTEK_TEXT_DEBUG || CONFIG_REALTEK_MEMORY_DEBUG_MODE || CONFIG_REALTEK_USER_DEBUG
 irqreturn_t sb2_dbg_isr(int irq, void *dev_id, struct pt_regs *regs)
 {
-	int itr;
-	printk("sb2 dbg number %d...\n", irq);
+	int itr, epc;
+//	printk("sb2 dbg number %d...\n", irq);
 
 	itr = readl((void *)0xb801a4e0);
 	if (itr & 0x410) {
+		int addr = readl((void *)0xb801a4c0), mask=0x3fffffff;
+
+		// prevent the false alarm of prefetch in audio memory region...
+		if (!(addr&0x80000000) && ((addr&mask) >= audio_addr) && ((addr&mask) < audio_addr+PREFETCH_BUFFER)) {
+			outl(0x0000400, SB2_DGB_INT);
+			return IRQ_HANDLED;
+		}
+
+		asm ("mfc0 %0, $14;": "=r"(epc));
 		printk("System got interrupt from SB2...\n");
-		printk("SB2_DBG_INT: %x \n", readl((void *)0xb801a4e0));
-		printk("SB2_DBG_ADDR: %x \n", readl((void *)0xb801a4c0));
-		BUG();
+		printk("SB2_DBG_INT:  0x%08x \n", readl((void *)0xb801a4e0));
+		printk("SB2_DBG_ADDR: 0x%08x \n", readl((void *)0xb801a4c0));
+		printk("Access Address: 0x%x \n", epc);
+		show_regs(regs);
+		dump_stack();
+		
+		local_irq_disable();
+		while (1) ;
 	} else {
 	        return IRQ_NONE;
 	}
@@ -156,13 +190,55 @@ irqreturn_t sb2_dbg_isr(int irq, void *dev_id, struct pt_regs *regs)
 	return IRQ_HANDLED;
 }
 
-void sb2_dbg_init(void)
+static struct irqaction sb2_dbg_action = {
+	.handler        = sb2_dbg_isr,
+	.flags          = SA_INTERRUPT | SA_SHIRQ,
+	.name           = "SB2_DBG",
+};
+
+void __init sb2_dbg_init(void)
 {
-	if (platform_info.cpu_id != realtek_neptune_cpu) {
+	if (is_venus_cpu()) {
 		printk("This is not Neptune platform. The SB2 Debug facility is disabled. \n");
 		return;
 	}
-	request_irq(5, sb2_dbg_isr, SA_SHIRQ | SA_INTERRUPT, "SB2_DBG", (void *)SB2_DBG_ID);
+	
+        setup_irq(VENUS_INT_SB2, &sb2_dbg_action);
+//	request_irq(5, sb2_dbg_isr, SA_SHIRQ | SA_INTERRUPT, "SB2_DBG", (void *)SB2_DBG_ID);
+/*
+	writel(0x2000000, 0xb801a458);
+	writel(0x4000000, 0xb801a478);
+	writel(0x00003ff, 0xb801a498);
+	writel(0x0000081, 0xb801a4e0);
+*/
+#ifdef CONFIG_REALTEK_TEXT_DEBUG
+	printk("<<<<< Enable TEXT protector >>>>>\n");
+	printk("\tsrc: %x \n", (zone_table[ZONE_TEXT]->zone_start_pfn)*4096);
+	printk("\tdst: %x \n", (zone_table[ZONE_TEXT]->zone_start_pfn+zone_table[ZONE_TEXT]->spanned_pages)*4096-1);
+	outl((zone_table[ZONE_TEXT]->zone_start_pfn)*4096, SB2_DGB_START_REG7);
+	outl((zone_table[ZONE_TEXT]->zone_start_pfn+zone_table[ZONE_TEXT]->spanned_pages)*4096-1, SB2_DGB_END_REG7);
+	outl(0x0003fdf, SB2_DGB_CTRL_REG7);
+	// only enable the system interrupt
+	outl(0x0000081, SB2_DGB_INT);
+#endif
+#ifdef CONFIG_REALTEK_MEMORY_DEBUG_MODE
+	printk("<<<<< Enable memory protector >>>>>\n");
+	// tlb handler (avoid trashing by audio & video)
+	outl(0x00000000, SB2_DGB_START_REG5);
+	outl(0x0000007f, SB2_DGB_END_REG5);
+	outl(0x0003e93, SB2_DGB_CTRL_REG5);
+	// kernel data (avoid trashing by audio & video)
+	outl(0x00100000+PREFETCH_BUFFER, SB2_DGB_START_REG6);
+	outl((unsigned int)&_edata-1, SB2_DGB_END_REG6);
+	outl(0x0003e93, SB2_DGB_CTRL_REG6);
+	// kernel text (avoid trashing by ourself) 
+	outl(0x00100000+PREFETCH_BUFFER, SB2_DGB_START_REG7);
+	outl((unsigned int)&_etext-1, SB2_DGB_END_REG7);
+	outl(0x00003d3, SB2_DGB_CTRL_REG7);
+
+	// only enable the system interrupt
+	outl(0x0000081, SB2_DGB_INT);
+#endif
 }
 #endif
 
@@ -336,6 +412,37 @@ static int __init init_setup(char *str)
 }
 __setup("init=", init_setup);
 
+/* Now we only support secure boot on partition /dev/mtdblock/1. If /dev/mtdblock/1 has been modified after installation, Linux kernel will know that and do reboot. */
+char partition_hash_value[24]="";	// This hash value is encrypted by aes.
+static int __init partition_hash(char *hash_str)
+{
+	char *hash_tmp_ptr, *endptr;
+	char strtol_tmp[3];
+	int i;
+
+	if(strncmp(hash_str, "1:", 2))
+		return 0;
+	*(unsigned int*)(partition_hash_value+4)=simple_strtol(hash_str+2, &endptr, 10);
+	if(endptr == hash_str+2)
+		return 0;
+	if(*endptr != ':')
+		return 0;
+	hash_tmp_ptr = endptr+1;
+	if(strlen(hash_tmp_ptr)!=32)
+		return 0;
+	strtol_tmp[2]=0;
+	for(i=0;i<16;i++) {
+		strncpy(strtol_tmp, hash_tmp_ptr+2*i, 2);
+		*(unsigned char*)(partition_hash_value+8+i) = simple_strtol(strtol_tmp, &endptr, 16);
+		if(*endptr)
+			return 0;
+	}
+	partition_hash_value[0]='1';
+	return 1;
+}
+
+__setup("partition_hash=", partition_hash);
+
 extern void setup_arch(char **);
 
 #ifndef CONFIG_SMP
@@ -469,6 +576,12 @@ asmlinkage void __init start_kernel(void)
  * Interrupts are still disabled. Do necessary setups, then
  * enable them
  */
+#ifdef CONFIG_PRINTK
+#ifdef CONFIG_SHARED_PRINTK
+	*(volatile int *)0xb801a000=0;
+#endif
+	printk_setup();
+#endif
 	lock_kernel();
 	page_address_init();
 	printk(KERN_NOTICE);
@@ -509,7 +622,7 @@ asmlinkage void __init start_kernel(void)
 	softirq_init();
 	time_init();
 
-#ifdef CONFIG_REALTEK_SB2_DBG
+#if CONFIG_REALTEK_TEXT_DEBUG || CONFIG_REALTEK_MEMORY_DEBUG_MODE || CONFIG_REALTEK_USER_DEBUG
 	sb2_dbg_init();
 #endif
 	/*
@@ -532,6 +645,12 @@ asmlinkage void __init start_kernel(void)
 #endif
 	vfs_caches_init_early();
 	mem_init();
+#ifdef CONFIG_REALTEK_RESERVE_DVR
+	/* reserve the DVR zone for boot-up audio & video */
+	if (DVR_zone_disable()) {
+		printk("reserve DVR zone...\n");
+	}
+#endif
 	kmem_cache_init();
 	numa_policy_init();
 	if (late_time_init)
@@ -676,8 +795,14 @@ static inline void fixup_cpu_present_map(void)
 #endif
 }
 
+unsigned char hash_buffer[512*1024];
 static int init(void * unused)
 {
+#ifdef CONFIG_REALTEK_RESERVE_DVR
+	int aflag = 0, vflag = 0;
+	char *ptr = (char *)SYNC_STRUCT_ADDR;
+#endif
+
 	lock_kernel();
 	/*
 	 * init can run on any cpu.
@@ -712,6 +837,9 @@ static int init(void * unused)
 
 	do_basic_setup();
 
+#ifdef CONFIG_PRINTK
+	printk_setup_tail();
+#endif
 	/*
 	 * check if there is an early userspace init.  If yes, let it do all
 	 * the work
@@ -737,6 +865,95 @@ static int init(void * unused)
 	(void) sys_dup(0);
 	(void) sys_dup(0);
 	
+#ifdef CONFIG_REALTEK_RESERVE_DVR
+	while (1) {
+		if (!aflag) {
+			// check audio flag...
+			if (ptr[21]) {
+				aflag = 1;
+				printk("*****audio is ready...\n");
+			}
+		}
+		if (!vflag) {
+			// check video flag...
+			if (ptr[20]) {
+				vflag = 1;
+				printk("*****video is ready...\n");
+			}
+		}
+
+		if (aflag && vflag)
+			break;
+
+		msleep(100);
+	}
+	DVR_zone_enable();
+#endif
+
+/* Here we check the hash value of some partition, which is passed from bootloader, to make sure that partition is not modified.
+    The format of that bootloader variable is partition_hash="[partition num]:[partition size]:[hash value]". Exp: go 0x80100000 ... partition_hash="1:1234:12341234123412341234123412341234" */
+#ifdef CONFIG_REALTEK_SECURE_BOOT_PARTITION
+	if(partition_hash_value[0] == '1') {
+		unsigned char hash_array[16];
+		int fd=sys_open("/dev/mtdblock/1", O_RDONLY, 0);
+		int partitionsize, imagesize, hashcount;
+		int firstblock;
+		int i;
+		
+		if(fd<0) {
+			printk(KERN_ALERT "Error! sys_open cannot open /dev/mtdblock/1.\n");
+			machine_restart("Secure boot error!");
+		}
+		partitionsize = sys_lseek(fd, 0, 2);
+		sys_lseek(fd, 0, 0);
+		imagesize=*(unsigned int*)(partition_hash_value+4);
+		firstblock=1;
+		for(hashcount=0; imagesize>hashcount;) {
+			int singlecount;
+			int len;
+
+			if((imagesize-hashcount)>=512*1024)
+				singlecount = 512*1024;
+			else
+				singlecount = imagesize-hashcount;
+			len = sys_read(fd, hash_buffer, singlecount);
+			if(len != singlecount) {
+				printk(KERN_ALERT "Error! sys_read didn't return the number of chars we expected.\n");
+				sys_close(fd);
+				machine_restart("Secure boot error!");
+			}
+			MCP_AES_H_DataHash(hash_buffer, singlecount, hash_array, 512*1024, firstblock);
+			firstblock=0;
+			hashcount+=singlecount;
+		}
+		MCP_AES_ECB_Encryption(NULL, hash_array, hash_array, 16);
+
+		for(i=0;i<4;i++) {
+			if(*(unsigned int*)(hash_array+4*i) != *(unsigned int*)(partition_hash_value+8+4*i)) {
+				printk(KERN_ALERT "Error! Hash value of partition /dev/mtdblock/1 is not matched. That partition data in Nand Flash may be modified or damaged.\n");
+				sys_close(fd);
+				machine_restart("Secure boot error!");
+			}
+		}
+		
+		sys_lseek(fd, hashcount&(0-512*1024), 0);
+		while(partitionsize>hashcount) {
+			int len = sys_read(fd, hash_buffer, 512*1024);
+			for(i=(hashcount&(512*1024-1));i<len;i++) {
+				if(hash_buffer[i] != 0xff) {
+					printk(KERN_ALERT "Error! Hash value of partition /dev/mtdblock/1 is not matched. That partition data in Nand Flash may be modified or damaged.\n");
+					sys_close(fd);
+					machine_restart("Secure boot error!");
+				}
+			}
+			hashcount+=(len-(hashcount&(512*1024-1)));
+		}
+			
+		printk("Secure boot succeeded. The partition /dev/mtdblock/1 is secure.\n");
+		sys_close(fd);
+	}
+#endif
+
 	/*
 	 * We try each of these until one succeeds.
 	 *

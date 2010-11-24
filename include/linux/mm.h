@@ -625,6 +625,10 @@ void install_arg_page(struct vm_area_struct *, struct page *, unsigned long);
 
 int get_user_pages(struct task_struct *tsk, struct mm_struct *mm, unsigned long start,
 		int len, int write, int force, struct page **pages, struct vm_area_struct **vmas);
+#ifdef CONFIG_USB_FILE_STORAGE_DIRECT_IO_MODE
+int get_kernel_pages(struct task_struct *tsk, struct mm_struct *mm, unsigned long start,
+		int len, int write, int force, struct page **pages, struct vm_area_struct **vmas);
+#endif /* CONFIG_USB_FILE_STORAGE_DIRECT_IO_MODE */
 
 int __set_page_dirty_buffers(struct page *page);
 int __set_page_dirty_nobuffers(struct page *page);

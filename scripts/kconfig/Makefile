@@ -11,14 +11,26 @@ gconfig: $(obj)/gconf
 	$< arch/$(ARCH)/Kconfig
 
 menuconfig: $(obj)/mconf
+	if [ '$(CONF)' != '' ]; then \
+	cp $(CONF) .config; \
+	fi
 	$(Q)$(MAKE) $(build)=scripts/lxdialog
 	$< arch/$(ARCH)/Kconfig
+	if [ '$(CONF)' != '' ]; then \
+	cp .config $(CONF); \
+	fi
 
 config: $(obj)/conf
 	$< arch/$(ARCH)/Kconfig
 
 oldconfig: $(obj)/conf
+	if [ '$(CONF)' != '' ]; then \
+	cp $(CONF) .config; \
+	fi
 	$< -o arch/$(ARCH)/Kconfig
+	if [ '$(CONF)' != '' ]; then \
+	cp .config $(CONF); \
+	fi
 
 silentoldconfig: $(obj)/conf
 	$< -s arch/$(ARCH)/Kconfig

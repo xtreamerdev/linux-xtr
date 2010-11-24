@@ -23,6 +23,17 @@ SECTIONS
   /* . = 0xa800000000300000; */
   . = 0xffffffff80300000;
 #endif
+#ifdef CONFIG_SHARED_PRINTK
+  . = 0xffffffffa00000e8;
+  .pbss : {
+    *(.bss.buff)
+    *(.bss.buff.len)
+    *(.bss.logged)
+    *(.bss.log.start)
+    *(.bss.con.start)
+    *(.bss.log.end)
+  }
+#endif
   . = LOADADDR;
   /* read-only */
   _text = .;			/* Text and read-only data */
@@ -131,10 +142,6 @@ SECTIONS
   /* freed after init ends here */
 
   __bss_start = .;		/* BSS */
-  .sbss      : {
-    *(.sbss)
-    *(.scommon)
-  }
   .bss : {
     *(.bss)
     *(COMMON)
@@ -142,6 +149,14 @@ SECTIONS
   __bss_stop = .;
 
   _end = . ;
+
+  . = 0xffffffff90000000;
+  __dmem_start = .;		/* BSS */
+  .sbss      : {
+    *(.sbss)
+    *(.scommon)
+  }
+  __dmem_stop = .;
 
   /* Sections to be discarded */
   /DISCARD/ : {

@@ -453,6 +453,20 @@ config FUSE_FS
 	  If you want to develop a userspace FS, or if you want to use
 	  a filesystem based on FUSE, answer Y or M.
 
+config PTP_FS
+        tristate "Ptp file system"
+        help
+          Most USB based digital camera now adays operate using one of 
+	  two protocols to talk to the compter. Some use the USB Mass 
+	  Storage protocol. In general, these are the best supported. 
+	  When you plug them in, the camera looks just like any other 
+	  block device and can be treated like a hard drive formatted 
+	  as fat (or vfat). 
+
+	  The othe protocol is the "Picture Transfer Protocol. " This 
+	  protocol was developed by the camera manufacturers to allow 
+	  enhanced communication between the camera and the computer.
+
 menu "CD-ROM/DVD Filesystems"
 
 config VCD
@@ -482,6 +496,16 @@ config JOLIET
 	  characters of almost all languages of the world; see
 	  <http://www.unicode.org/> for more information).  Say Y here if you
 	  want to be able to read Joliet CD-ROMs under Linux.
+
+config USE_CDDA_SUBCHANNEL
+	bool "CDDA_Q_CHNL_SUPPORT(VERONA)"
+	depends on VCD
+	select NLS
+	help
+	  A CDDA sector has 2352 bytes audio data and 16 bytes sub-channel data.
+	  When CDDA_Q_CHNL_SUPPORT is supported, read a CDDA sector will get
+          (2352+16) bytes data, otherwise, only 2352 bytes data will be gotten.
+          VERONA project should use this.
 
 config ZISOFS
 	bool "Transparent decompression extension"
@@ -1084,6 +1108,10 @@ config EFS_FS
 
 	  To compile the EFS file system support as a module, choose M here: the
 	  module will be called efs.
+
+
+# Patched by YAFFS
+source "fs/yaffs2/Kconfig"
 
 config JFFS_FS
 	tristate "Journalling Flash File System (JFFS) support"

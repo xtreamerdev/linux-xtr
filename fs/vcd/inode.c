@@ -54,6 +54,7 @@ int VIDEOCD_NO;
 int DVD_disc;
 int EACD_disc;
 int disc_mode;
+int himedia_mode;
 
 static int proc_read_cd_info(char *page, char **start, off_t off, int count, int *eof, void *data){
         int len;
@@ -94,7 +95,11 @@ static int find_cd_info_in_toc( struct super_block *sb )
 		CD_TYPE=EACD_DISC;
 		if(disc_mode)
 		{
+			#ifdef CONFIG_USE_CDDA_SUBCHANNEL
+			strcpy(proc_data_content.cd_type, "ACD2368");
+			#else
 			strcpy(proc_data_content.cd_type, "ACD");
+			#endif
 			audio_track=data_track_number-1;
 			TRACK_NO=data_track_number;
 			CD_TYPE=ACD_DISC;
@@ -124,7 +129,11 @@ static int find_cd_info_in_toc( struct super_block *sb )
 	}
 	else if(CD_TYPE==ACD_DISC)
 	{
+		#ifdef CONFIG_USE_CDDA_SUBCHANNEL
+		strcpy(proc_data_content.cd_type, "ACD2368");
+		#else
 		strcpy(proc_data_content.cd_type, "ACD");
+		#endif
 		audio_track=data_track_number;
 		TRACK_NO=audio_track;
 	}
@@ -149,7 +158,7 @@ static int find_cd_info_in_toc( struct super_block *sb )
 		strcpy(proc_data_content.cd_type, "DATA");
 		CD_TYPE=DATA_DISC;
 	}
-	strcat(proc_data_content.cd_type, " DATE 0718\n");
+	strcat(proc_data_content.cd_type, " DATE 0706\n");
 	sprintf(buffer,"%2d %2d %2d %2d",video_track,audio_track,TRACK_NO,SESSION_NO);
 	strcat(proc_data_content.cd_type, buffer);
 	strcat(proc_data_content.cd_type, "\n");
@@ -587,6 +596,11 @@ static int parse_options(char *options, struct all_options * popt)
 			disc_mode=0;
 			continue;
 		}
+		else if (!strcmp(this_char,"himedia"))
+		{
+			himedia_mode=1;
+			continue;
+		}
 		else
 		{	//No one enters here
 			if ((value = strchr(this_char,'=')) != NULL)
@@ -927,7 +941,8 @@ static int fill_tracks_in_super(struct super_block *sb,int mounting_acd)
 					this_cd->track[i].type        = AUDIO;
 					this_cd->track[i].time        = get_seconds();
 					this_cd->track[i].iso_size    = 0;
-					this_cd->track[i].track_size  = this_cd->track[i].track_size * CD_FRAMESIZE_RAW + ((this_cd->raw_audio==0)?WAV_HEADER_SIZE:0);
+					//this_cd->track[i].track_size  = this_cd->track[i].track_size * CD_FRAMESIZE_RAW + ((this_cd->raw_audio==0)?WAV_HEADER_SIZE:0);
+					this_cd->track[i].track_size  = this_cd->track[i].track_size * CD_FRAMESIZE_RAW_Q + ((this_cd->raw_audio==0)?WAV_HEADER_SIZE:0);
 					this_cd->track[i].size        = this_cd->track[i].track_size;
 					this_cd->track[i].avi         = 0;
 					//Determine file names here, just fill the this_cd structure
@@ -938,7 +953,8 @@ static int fill_tracks_in_super(struct super_block *sb,int mounting_acd)
 						struct cdrom_read_audio cdda;
 						int status,k,j,prevk=0;
 						char* buf;
-						buf=kmalloc(CD_FRAMESIZE_RAW*2,GFP_KERNEL);	//M03
+						//buf=kmalloc(CD_FRAMESIZE_RAW*2,GFP_KERNEL);	//M03
+						buf=kmalloc(CD_FRAMESIZE_RAW_Q*2,GFP_KERNEL);	//M03
 						if(buf==NULL)
 						{
 							printk(FSNAME ": kmalloc failed in root.c !\n");
@@ -948,12 +964,14 @@ static int fill_tracks_in_super(struct super_block *sb,int mounting_acd)
 							kfree(cdfs_info(sb));//M01	//0118 add
 							return(-ENOMEM);
 						}
-						PRINTM("M03 kmalloc addr = 0x %x, size = %6d for buf\n",(unsigned int)buf,sizeof(CD_FRAMESIZE_RAW*2));
+						//PRINTM("M03 kmalloc addr = 0x %x, size = %6d for buf\n",(unsigned int)buf,sizeof(CD_FRAMESIZE_RAW*2));
+						PRINTM("M03 kmalloc addr = 0x %x, size = %6d for buf\n",(unsigned int)buf,sizeof(CD_FRAMESIZE_RAW_Q*2));
 						for (j=0;j<20;j++)
 						{
 							cdda.addr_format = CDROM_LBA;
 							cdda.nframes     = 1;
-							cdda.buf         = buf+CD_FRAMESIZE_RAW;
+							//cdda.buf         = buf+CD_FRAMESIZE_RAW;
+							cdda.buf         = buf+CD_FRAMESIZE_RAW_Q;
 							cdda.addr.lba = this_cd->track[i].start_lba+j;
 							status = cdfs_ioctl(sb,CDROMREADAUDIO,(unsigned long)&cdda);
 							if (status)
@@ -962,23 +980,32 @@ static int fill_tracks_in_super(struct super_block *sb,int mounting_acd)
 								goto out;
 							}
 							/* search the first non-zero byte */
-							for (k=0;k<CD_FRAMESIZE_RAW;k++)
-								if (buf[k+CD_FRAMESIZE_RAW]) break;
-								if (k<=CD_FRAMESIZE_RAW-4) break;
+							//for (k=0;k<CD_FRAMESIZE_RAW;k++)
+							for (k=0;k<CD_FRAMESIZE_RAW_Q;k++)
+								//if (buf[k+CD_FRAMESIZE_RAW]) break;
+								if (buf[k+CD_FRAMESIZE_RAW_Q]) break;
+								//if (k<=CD_FRAMESIZE_RAW-4) break;
+								if (k<=CD_FRAMESIZE_RAW_Q-4) break;
 								prevk=k;
-								if (k<CD_FRAMESIZE_RAW)
-								for (k=0;k<CD_FRAMESIZE_RAW;k++)
-								buf[k]=buf[k+CD_FRAMESIZE_RAW];
+								//if (k<CD_FRAMESIZE_RAW)
+								if (k<CD_FRAMESIZE_RAW_Q)
+								//for (k=0;k<CD_FRAMESIZE_RAW;k++)
+								for (k=0;k<CD_FRAMESIZE_RAW_Q;k++)
+								//buf[k]=buf[k+CD_FRAMESIZE_RAW];
+								buf[k]=buf[k+CD_FRAMESIZE_RAW_Q];
 						}
 						if (j==10) goto out;
-						if ((j!=0)&&(prevk!=CD_FRAMESIZE_RAW))
+						//if ((j!=0)&&(prevk!=CD_FRAMESIZE_RAW))
+						if ((j!=0)&&(prevk!=CD_FRAMESIZE_RAW_Q))
 						{
 							k=prevk;
 							j--;
 						}
 						else
-							k+=CD_FRAMESIZE_RAW;
-						this_cd->track[i].avi_offset = j*CD_FRAMESIZE_RAW+k-CD_FRAMESIZE_RAW;
+							k+=CD_FRAMESIZE_RAW_Q;
+							//k+=CD_FRAMESIZE_RAW;
+						//this_cd->track[i].avi_offset = j*CD_FRAMESIZE_RAW+k-CD_FRAMESIZE_RAW;
+						this_cd->track[i].avi_offset = j*CD_FRAMESIZE_RAW_Q+k-CD_FRAMESIZE_RAW_Q;
 						if ((buf[k]=='R')&&(buf[k+1]=='I')&&(buf[k+2]=='F')&&(buf[k+3]=='F'))
 						{
 							this_cd->track[i].avi = 1;
@@ -1055,15 +1082,27 @@ static int vcd_main(struct super_block *s, void *data, int silent)
 	struct inode		      * inode;
 	struct all_options		opt;
 	struct vcd_sb_info	      * sbi = NULL;
-	
-	printk("<vcd module> mount disc with vcd module ST........\n");
-	
-	DVD_disc=find_cd_or_dvd(s);
-	SESSION_NO=find_session_no(s);
-	if(SESSION_NO!=1)
-		printk("<vcd module> There are %d sessions in this disc.\n",SESSION_NO);
 	EACD_disc=0;
 	disc_mode=0;	//default is browser mode
+	himedia_mode=0;	//default is !himedia
+
+	printk("<vcd module> mount disc with vcd module ST........\n");
+
+	if (!parse_options((char *) data, &opt))
+	{	//inode.c:parse_options()return 1 when OK, return 0 when fail
+		goto out_freesbi;
+	}
+	
+	DVD_disc=find_cd_or_dvd(s);
+	if(himedia_mode)
+	{
+		printk("<vcd module> Hi-Media Loader found.\n");
+		SESSION_NO=1;	//Only supportd one session disk, david20090603
+	}
+	else
+		SESSION_NO=find_session_no(s);
+	if(SESSION_NO!=1)
+		printk("<vcd module> There are %d sessions in this disc.\n",SESSION_NO);
 	if((!DVD_disc)&&(SESSION_NO==2))
 	{
 		if(isEACD(s))
@@ -1079,10 +1118,6 @@ static int vcd_main(struct super_block *s, void *data, int silent)
 	s->s_fs_info = sbi;
 	memset(sbi, 0, sizeof(struct vcd_sb_info));
 	
-	if (!parse_options((char *) data, &opt))
-	{	//inode.c:parse_options()return 1 when OK, return 0 when fail
-		goto out_freesbi;
-	}
 	disc_mode=EACD_disc&&disc_mode;
 
 	/* First of all, get the hardware blocksize for this device.
@@ -1421,11 +1456,15 @@ root_found:
 	//4PRINT("david: Make /proc _ST for VCD\n");
 	find_cd_info_in_toc(s);
 	//5PRINT("david: Make /proc _SP\n");
-	printk("<vcd module> mount disc with vcd module SP OK for VCD/SVCD/Data........0718\n");
+	printk("<vcd module> mount disc with vcd module SP OK for VCD/SVCD/Data........0706\n");
 	switch (CD_TYPE)
 	{
 		case 1: printk("<vcd module> Disc type : VCD\n"); break;
+		#ifdef CONFIG_USE_CDDA_SUBCHANNEL
+		case 2: printk("<vcd module> Disc type : ACD2368\n"); break;
+		#else
 		case 2: printk("<vcd module> Disc type : ACD\n"); break;
+		#endif
 		case 3: printk("<vcd module> Disc type : AVCD\n"); break;
 		case 4: printk("<vcd module> Disc type : SVCD\n"); break;
 		case 5: printk("<vcd module> Disc type : EACD\n"); break;
@@ -1502,12 +1541,20 @@ out_audio_cd:
 	s->s_root   = d_alloc_root(iget(s, 0));
 	
 	PRINT("mount cdfs OK!\n");
+	#ifdef CONFIG_USE_CDDA_SUBCHANNEL
+	PRINT("david: Make /proc _ST for ACD2368\n");
+	#else
 	PRINT("david: Make /proc _ST for ACD\n");
+	#endif
 	find_cd_info_in_toc(s);
 	PRINT("david: Make /proc _SP\n");
 	
-	printk("<vcd module> mount disc with vcd module SP OK for Audio CD........0718\n");
+	printk("<vcd module> mount disc with vcd module SP OK for Audio CD........0706\n");
+	#ifdef CONFIG_USE_CDDA_SUBCHANNEL
+	printk("<vcd module> Disc type : ACD2368\n");
+	#else
 	printk("<vcd module> Disc type : ACD\n");
+	#endif
 
 	return 0;
 	
@@ -2455,6 +2502,13 @@ static int __init init_iso9660_fs(void)
 	err = init_inodecache();
 	if (err)
 		goto out;
+
+#ifdef CONFIG_USE_CDDA_SUBCHANNEL
+	printk("<vcd module> TYPE ACD2368 USE CDDA SUBCHANNEL\n");
+#else
+	printk("<vcd module> TYPE ACD2352 NO USE CDDA SUBCHANNEL\n");
+#endif
+	
 #ifdef CONFIG_ZISOFS
 	err = zisofs_init();
 	if (err)
@@ -2468,7 +2522,8 @@ static int __init init_iso9660_fs(void)
 	// added by Frank Ting 8/27/05
 	if ((kcdfsd_pid = kernel_thread(kcdfsd_thread, NULL, CLONE_FS | CLONE_FILES | CLONE_SIGHAND)) >0 )
 	{
-		printk("<vcd module> insert vcd module OK\n");
+		//printk("<vcd module> insert vcd module OK\n");
+		printk("<vcd module> insert vcd module OK pid=%d\n",kcdfsd_pid);
 		return 0;
 	}
 	else

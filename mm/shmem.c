@@ -1418,6 +1418,9 @@ shmem_file_write(struct file *file, const char __user *buf, size_t count, loff_t
 		if (err)
 			break;
 
+#ifdef CONFIG_REALTEK_PREVENT_DC_ALIAS
+		flush_dcache_page_alias(page);
+#endif
 		left = bytes;
 		if (PageHighMem(page)) {
 			volatile unsigned char dummy;
@@ -1524,7 +1527,11 @@ static void do_shmem_file_read(struct file *filp, loff_t *ppos, read_descriptor_
 			 * before reading the page on the kernel side.
 			 */
 			if (mapping_writably_mapped(mapping))
+#ifdef CONFIG_REALTEK_PREVENT_DC_ALIAS
+				flush_dcache_page_alias(page);
+#else
 				flush_dcache_page(page);
+#endif
 			/*
 			 * Mark the page accessed if we read the beginning.
 			 */
@@ -1796,31 +1803,26 @@ static int shmem_symlink(struct inode *dir, struct dentry *dentry, const char *s
 	return 0;
 }
 
-static int shmem_follow_link_inline(struct dentry *dentry, struct nameidata *nd)
+static void *shmem_follow_link_inline(struct dentry *dentry, struct nameidata *nd)
 {
 	nd_set_link(nd, (char *)SHMEM_I(dentry->d_inode));
-	return 0;
+	return NULL;
 }
 
-static int shmem_follow_link(struct dentry *dentry, struct nameidata *nd)
+static void *shmem_follow_link(struct dentry *dentry, struct nameidata *nd)
 {
 	struct page *page = NULL;
 	int res = shmem_getpage(dentry->d_inode, 0, &page, SGP_READ, NULL);
 	nd_set_link(nd, res ? ERR_PTR(res) : kmap(page));
-	return 0;
+	return page;
 }
 
-static void shmem_put_link(struct dentry *dentry, struct nameidata *nd)
+static void shmem_put_link(struct dentry *dentry, struct nameidata *nd, void *cookie)
 {
 	if (!IS_ERR(nd_get_link(nd))) {
-		struct page *page;
-
-		page = find_get_page(dentry->d_inode->i_mapping, 0);
-		if (!page)
-			BUG();
+		struct page *page = cookie;
 		kunmap(page);
 		mark_page_accessed(page);
-		page_cache_release(page);
 		page_cache_release(page);
 	}
 }

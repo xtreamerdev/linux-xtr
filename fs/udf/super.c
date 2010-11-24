@@ -125,6 +125,7 @@ void udf_add_backup_region (struct super_block *sb, unsigned long start_block, u
 
 #define UDF_BACKUP_FILE1 "DVD_RTAV"
 #define UDF_BACKUP_FILE2 "VR_MOVIE.VRO"
+#define UDF_BACKUP_FILE3 "dvb"
 
 extern struct subsystem realtek_boards_subsys;
 #define UDF_ATTR_RO(_name) \
@@ -142,10 +143,10 @@ static ssize_t udf_backup_blocks_show(struct subsystem *subsys, char *page)
 	struct extendedFileEntry *efe;
 	struct unallocSpaceEntry *use;
 	int dir_size, offset;
-	kernel_lb_addr found_lb;
+	kernel_lb_addr found_lb, found_dvb_lb;
 	long_ad *lad;
 	short_ad *sad;
-	int found = 0;
+	int found = 0, found_dvb=0;
 
 	if(proc_sb) {
 		ptr = ((struct udf_sb_info*)proc_sb->s_fs_info)->backup_head;
@@ -194,9 +195,49 @@ static ssize_t udf_backup_blocks_show(struct subsystem *subsys, char *page)
 					found = 1;
 				}
 			}
+/* This is to save directory "dvb" */
+			if(((struct fileIdentDesc*)(efe->allocDescs+offset))->lengthFileIdent == (strlen(UDF_BACKUP_FILE3)+1)) {
+				if(!strncmp(((struct fileIdentDesc*)(efe->allocDescs+offset))->fileIdent+((struct fileIdentDesc*)(efe->allocDescs+offset))->lengthOfImpUse+1, UDF_BACKUP_FILE3, strlen(UDF_BACKUP_FILE3)) && !(((struct fileIdentDesc*)(efe->allocDescs+offset))->fileCharacteristics&FID_FILE_CHAR_DELETED)) {
+					found_dvb_lb = lelb_to_cpu(((struct fileIdentDesc*)(efe->allocDescs+offset))->icb.extLocation);
+					len+=sprintf(page+len, "%ld 1\n", found_dvb_lb.logicalBlockNum+partition_start);
+					found_dvb=1;
+				}
+			}
 			offset += (((38+((struct fileIdentDesc*)(efe->allocDescs+offset))->lengthFileIdent+((struct fileIdentDesc*)(efe->allocDescs+offset))->lengthOfImpUse)+3)&~3);
 		}
 		udf_release_data(bh);
+
+		if(found_dvb) {
+			bh = udf_tread(proc_sb, found_dvb_lb.logicalBlockNum+partition_start);
+			if (!bh) {
+				printk("No found dvb directory.\n");
+				goto NOFOUND_DVB;
+			}
+			efe = (struct extendedFileEntry *)bh->b_data;
+			lad = (long_ad*)(efe->allocDescs+efe->lengthExtendedAttr);
+			int offset=0;
+			if((le16_to_cpu(efe->icbTag.flags) & ICBTAG_FLAG_AD_MASK) != ICBTAG_FLAG_AD_IN_ICB) {
+				while(lad->extLength>>30 == EXT_RECORDED_ALLOCATED>>30) {
+//					struct allocExtDesc *allocextdesc;
+	
+					offset+=16;
+					len+=sprintf(page+len, "%ld %d\n", (lelb_to_cpu(lad->extLocation)).logicalBlockNum+partition_start, lad->extLength>>proc_sb->s_blocksize_bits);
+					if(offset < efe->lengthAllocDescs)
+						lad = (long_ad*)(efe->allocDescs+efe->lengthExtendedAttr+offset);
+					else
+						break;
+//					bh2 = udf_tread(proc_sb, (lelb_to_cpu(lad->extLocation)).logicalBlockNum+partition_start);
+//					udf_release_data(bh);
+//					bh=bh2;
+//					if (!bh)
+//						goto NOFOUND_DVB;
+//					allocextdesc = (struct allocExtDesc *)bh->b_data;
+//					lad = (long_ad*)(bh->b_data+sizeof(struct allocExtDesc)+allocextdesc->lengthAllocDescs-16);
+				}
+			}
+			udf_release_data(bh);
+		}
+NOFOUND_DVB:
 
 		if(!found)
 			return len;
@@ -836,6 +877,15 @@ udf_vrs(struct super_block *sb, int silent)
 		{
 			nsr03 = sector;
 		}
+                else if (!strncmp(vsd->stdIdent, VSD_STD_ID_NSRD2, VSD_STD_ID_LEN))
+                {       // new NSR identifier
+                        nsr02 = sector;
+                }
+                else if (!strncmp(vsd->stdIdent, VSD_STD_ID_NSRD3, VSD_STD_ID_LEN))
+                {       // new NSR identifier
+                        nsr03 = sector;
+                }
+
 		udf_release_data(bh);
 	}
 
@@ -1145,6 +1195,81 @@ udf_load_pvoldesc(struct super_block *sb, struct buffer_head *bh)
 	}
 }
 
+static int
+udf_load_metadata_file_entries(struct super_block *sb, int part, kernel_lb_addr *fileset)
+{
+	kernel_lb_addr addr;
+
+	/* metadata file entry */
+	addr.logicalBlockNum = UDF_SB_TYPEMETA(sb, part).s_meta_file_loc;
+	addr.partitionReferenceNum = UDF_SB_PARTNUM(sb, part);
+	
+	UDF_SB_TYPEMETA(sb, part).s_metadata_fe = udf_iget(sb, addr);
+	
+	if (UDF_SB_TYPEMETA(sb,part).s_metadata_fe == NULL)
+	{
+		udf_error(sb, __FUNCTION__, "metadata inode efe not found\n");
+		goto error_exit;
+	}
+
+	/* mirror file entry */
+	addr.logicalBlockNum = UDF_SB_TYPEMETA(sb, part).s_mirror_file_loc;
+	addr.partitionReferenceNum = UDF_SB_PARTNUM(sb, part);
+	
+	UDF_SB_TYPEMETA(sb, part).s_mirror_fe = udf_iget(sb, addr);
+	
+	if (UDF_SB_TYPEMETA(sb, part).s_mirror_fe == NULL)
+	{
+		udf_error(sb, __FUNCTION__, "mirror inode efe not found\n");
+		goto error_exit;
+	}
+
+	/* bitmap file entry 
+	 * Note: Load only if the bitmap file location differs from 0xFFFFFFFF (DCN-5102)
+	*/
+	if (UDF_SB_TYPEMETA(sb, part).s_bitmap_file_loc != 0xFFFFFFFF)
+	{
+		addr.logicalBlockNum = UDF_SB_TYPEMETA(sb, part).s_bitmap_file_loc;
+		addr.partitionReferenceNum = UDF_SB_PARTNUM(sb, part);
+		
+		UDF_SB_TYPEMETA(sb, part).s_bitmap_fe = udf_iget(sb, addr);
+		
+		if (UDF_SB_TYPEMETA(sb,part).s_bitmap_fe == NULL)
+		{
+			udf_error(sb, __FUNCTION__, "bitmap inode efe not found\n");
+			goto error_exit;
+		}
+	}
+	return 0;
+
+error_exit:
+	return 1;
+}
+
+static void
+udf_release_metadata(struct super_block *sb)
+{
+	int i;
+	
+	for (i=0; i<UDF_SB_NUMPARTS(sb); i++)
+	{
+		if(UDF_SB_PARTTYPE(sb,i) == UDF_METADATA_MAP25)
+		{
+			if(UDF_SB_TYPEMETA(sb,i).s_metadata_fe)
+				iput(UDF_SB_TYPEMETA(sb,i).s_metadata_fe);
+			UDF_SB_TYPEMETA(sb,i).s_metadata_fe = NULL;
+
+			if(UDF_SB_TYPEMETA(sb,i).s_mirror_fe)
+				iput(UDF_SB_TYPEMETA(sb,i).s_mirror_fe);
+			UDF_SB_TYPEMETA(sb,i).s_mirror_fe = NULL;
+
+			if(UDF_SB_TYPEMETA(sb,i).s_bitmap_fe)
+				iput(UDF_SB_TYPEMETA(sb,i).s_bitmap_fe);
+			UDF_SB_TYPEMETA(sb,i).s_bitmap_fe = NULL;
+		}
+	}
+}
+
 static void 
 udf_load_fileset(struct super_block *sb, struct buffer_head *bh, kernel_lb_addr *root)
 {
@@ -1169,6 +1294,7 @@ static void
 udf_load_partdesc(struct super_block *sb, struct buffer_head *bh)
 {
 	struct partitionDesc *p;
+	int matched_part_desc=0;
 	int i;
 
 	p = (struct partitionDesc *)bh->b_data;
@@ -1179,6 +1305,8 @@ udf_load_partdesc(struct super_block *sb, struct buffer_head *bh)
 			UDF_SB_PARTMAPS(sb)[i].s_partition_num, le16_to_cpu(p->partitionNumber));
 		if (UDF_SB_PARTMAPS(sb)[i].s_partition_num == le16_to_cpu(p->partitionNumber))
 		{
+			matched_part_desc++;
+			udf_debug("Found desc for part %d id(%d)\n",i,UDF_SB_PARTMAPS(sb)[i].s_partition_num);
 			UDF_SB_PARTLEN(sb,i) = le32_to_cpu(p->partitionLength); /* blocks */
 			UDF_SB_PARTROOT(sb,i) = le32_to_cpu(p->partitionStartingLocation);
 			if (le32_to_cpu(p->accessType) == PD_ACCESS_TYPE_READ_ONLY)
@@ -1247,18 +1375,21 @@ udf_load_partdesc(struct super_block *sb, struct buffer_head *bh)
 					}
 				}
 			}
-			break;
 		}
 	}
-	if (i == UDF_SB_NUMPARTS(sb))
+	
+	if (matched_part_desc == 0)
 	{
 		udf_debug("Partition (%d) not found in partition map\n", le16_to_cpu(p->partitionNumber));
 	}
 	else
 	{
+		for (i=0; i<UDF_SB_NUMPARTS(sb); i++)
+		{
 		udf_debug("Partition (%d:%d type %x) starts at physical %d, block length %d\n",
 			le16_to_cpu(p->partitionNumber), i, UDF_SB_PARTTYPE(sb,i),
 			UDF_SB_PARTROOT(sb,i), UDF_SB_PARTLEN(sb,i));
+	}
 	}
 }
 
@@ -1308,7 +1439,7 @@ udf_load_logicalvol(struct super_block *sb, struct buffer_head * bh, kernel_lb_a
 				uint16_t ident;
 				struct sparingTable *st;
 				struct sparablePartitionMap *spm = (struct sparablePartitionMap *)&(lvd->partitionMaps[offset]);
-
+				udf_debug("Parsing Logical vol part %d type %d  id=%s\n",i,type,UDF_ID_SPARABLE);
 				UDF_SB_PARTTYPE(sb,i) = UDF_SPARABLE_MAP15;
 				UDF_SB_TYPESPAR(sb,i).s_packet_len = le16_to_cpu(spm->packetLength);
 				for (j=0; j<spm->numSparingTables; j++)
@@ -1328,6 +1459,29 @@ udf_load_logicalvol(struct super_block *sb, struct buffer_head * bh, kernel_lb_a
 					}
 				}
 				UDF_SB_PARTFUNC(sb,i) = udf_get_pblock_spar15;
+			}
+			else if (!strncmp(upm2->partIdent.ident, UDF_ID_METADATA, strlen(UDF_ID_METADATA)))
+			{
+				udf_debug("Parsing Logical vol part %d type %d  id=%s\n",i,type,UDF_ID_METADATA);
+				struct metadataPartitionMap *mdm = (struct metadataPartitionMap *)&(lvd->partitionMaps[offset]);
+				
+				UDF_SB_PARTTYPE(sb,i) = UDF_METADATA_MAP25;
+				UDF_SB_PARTFUNC(sb,i) = udf_get_pblock_meta25;
+
+				UDF_SB_TYPEMETA(sb,i).s_meta_file_loc = le32_to_cpu(mdm->metadataFileLoc);
+				UDF_SB_TYPEMETA(sb,i).s_mirror_file_loc = le32_to_cpu(mdm->metadataMirrorFileLoc);
+				UDF_SB_TYPEMETA(sb,i).s_bitmap_file_loc = le32_to_cpu(mdm->metadataBitmapFileLoc);
+				UDF_SB_TYPEMETA(sb,i).s_alloc_unit_size = le32_to_cpu(mdm->allocUnitSize);
+				UDF_SB_TYPEMETA(sb,i).s_align_unit_size = le16_to_cpu(mdm->alignUnitSize);
+				UDF_SB_TYPEMETA(sb,i).s_dup_md_flag = mdm->flags & 0x01;
+				
+				udf_debug("Metadata Ident suffix=0x%x\n", (le16_to_cpu(((__le16 *)mdm->partIdent.identSuffix)[0])));
+				udf_debug("Metadata part num=%d\n",le16_to_cpu(mdm->partitionNum));
+				udf_debug("Metadata part alloc unit size=%d\n",le32_to_cpu(mdm->allocUnitSize));
+				udf_debug("Metadata file loc=%d\n",le32_to_cpu(mdm->metadataFileLoc));
+				udf_debug("Mirror file loc=%d\n",le32_to_cpu(mdm->metadataMirrorFileLoc));
+				udf_debug("Bitmap file loc=%d\n",le32_to_cpu(mdm->metadataBitmapFileLoc));
+				udf_debug("Duplicate Flag: %d %d\n", UDF_SB_TYPEMETA(sb,i).s_dup_md_flag, mdm->flags);
 			}
 			else
 			{
@@ -1775,6 +1929,7 @@ static int udf_fill_super(struct super_block *sb, void *options, int silent)
 	// We also use proc_sb in /sys/realtek_boards/udf/udf_backup_blocks.
 	if (uopt.flags & (1 << UDF_FLAG_RECOVERY)) {
 		printk("UDF partition \"%s\" is mounted with recovery option. Store the super block.\n", sb->s_id);
+		sb->s_flags |= MS_RECOVERY;
 		proc_sb = sb;
 	}
 
@@ -1888,6 +2043,17 @@ static int udf_fill_super(struct super_block *sb, void *options, int silent)
 		goto error_out;
 	}
 
+	/* check for metadata partitions and load the associated data if there's any found */
+	for (i = 0; i < UDF_SB_NUMPARTS(sb); i++)
+	{
+		if( (UDF_SB_PARTTYPE(sb, i) == UDF_METADATA_MAP25) &&
+		    udf_load_metadata_file_entries(sb, i, &fileset) )
+		{
+			printk( "UDF-fs: error loading MetaData partition map %d\n", i );
+			goto error_out;
+		}
+	}
+	
 	if ( udf_find_fileset(sb, &fileset, &rootdir) )
 	{
 		printk("UDF-fs: No fileset found\n");
@@ -1929,6 +2095,7 @@ static int udf_fill_super(struct super_block *sb, void *options, int silent)
 	return 0;
 
 error_out:
+	udf_release_metadata(sb);
 	if (UDF_SB_VAT(sb))
 		iput(UDF_SB_VAT(sb));
 	if (UDF_SB_NUMPARTS(sb))
@@ -2010,6 +2177,8 @@ static void
 udf_put_super(struct super_block *sb)
 {
 	int i;
+
+	udf_release_metadata(sb);
 
 	if(sb == proc_sb) {
 		printk("UDF partition \"%s\" using recovery facility is umounted. Clear the stored super block.\n", sb->s_id);

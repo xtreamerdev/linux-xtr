@@ -27,10 +27,16 @@
  *	rtc_set_time - reverse the above translation and set time to RTC.
  *	rtc_set_mmss - similar to rtc_set_time, but only min and sec need
  *			to be set.  Used by RTC sync-up.
+ *	rtc_alarm_get_time - similar to rtc_get_time, but used for getting alarm time.
+ *	rtc_alarm_set_time - similar to rtc_set_time, but used for setting alarm time.
+ *	rtc_set_default_funcs - back rtc functions to null ones
  */
 extern unsigned long (*rtc_get_time)(void);
 extern int (*rtc_set_time)(unsigned long);
 extern int (*rtc_set_mmss)(unsigned long);
+extern unsigned long (*rtc_alarm_get_time)(void);
+extern int (*rtc_alarm_set_time)(unsigned long);
+extern void (*rtc_set_default_funcs)(void);
 
 /*
  * Timer interrupt functions.

@@ -162,6 +162,15 @@ static int read_pages(struct address_space *mapping, struct file *filp,
 
 	if (mapping->a_ops->readpages) {
 		ret = mapping->a_ops->readpages(filp, mapping, pages, nr_pages);
+		/* Clean up the remaining pages */
+		while (!list_empty(pages)) {
+			struct page *victim;
+ 
+			victim = list_entry(pages->prev, struct page, lru);
+			list_del(&victim->lru);
+			page_cache_release(victim);
+		}
+
 		goto out;
 	}
 
@@ -299,6 +308,8 @@ __do_page_cache_readahead(struct address_space *mapping, struct file *filp,
 	 * will then handle the error.
 	 */
 	if (ret)
+		read_pages(mapping, filp, &page_pool, ret);
+/*	
 	{
         int iret;
 //printk(KERN_WARNING " readahead offset %li nr_to_read %li ",offset,nr_to_read);
@@ -308,6 +319,7 @@ __do_page_cache_readahead(struct address_space *mapping, struct file *filp,
             goto out;
 //printk(KERN_WARNING " ** 2 read_pages iret = %i \n",iret);
 	}
+*/	
 	BUG_ON(!list_empty(&page_pool));
 out:
 	return ret;
@@ -410,10 +422,7 @@ static int make_ahead_window(struct address_space *mapping, struct file *filp,
 {
 	int block, ret;
 
-	if (test_bit(AS_LIMIT_SIZE, &mapping->flags))
-		ra->ahead_size = 1;
-	else
-		ra->ahead_size = get_next_ra_size(ra);
+	ra->ahead_size = get_next_ra_size(ra);
 	ra->ahead_start = ra->start + ra->size;
 
 	block = force || (ra->prev_page >= ra->ahead_start);
@@ -452,6 +461,23 @@ page_cache_readahead(struct address_space *mapping, struct file_ra_state *ra,
 	unsigned long max, newsize;
 	int sequential;
 
+#ifdef CONFIG_REALTEK_TEXT_DEBUG
+	/* In order to prevent the read-ahead (pages in read-ahead window might not allocated in text memory zone) */
+	ra->size = max(1, req_size);
+	ra->start = offset;
+	ra->prev_page = ra->start+ra->size-1;
+	blockable_page_cache_readahead(mapping, filp, offset, ra->size, ra, 1);
+	return ra->prev_page + 1;
+#endif
+
+	if (test_bit(AS_LIMIT_SIZE, &mapping->flags)) {
+		ra->size = max(1, req_size);
+		ra->start = offset;
+		ra->prev_page = ra->start+ra->size-1;
+		blockable_page_cache_readahead(mapping, filp, offset, ra->size, ra, 1);
+		return ra->prev_page + 1;
+	}
+
 	/*
 	 * We avoid doing extra work and bogusly perturbing the readahead
 	 * window expansion logic.
@@ -478,10 +504,7 @@ page_cache_readahead(struct address_space *mapping, struct file_ra_state *ra,
 	 * sequential access
 	 */
 	if (sequential && ra->size == 0) {
-		if (test_bit(AS_LIMIT_SIZE, &mapping->flags))
-			ra->size = 1;
-		else
-			ra->size = get_init_ra_size(newsize, max);
+		ra->size = get_init_ra_size(newsize, max);
 		ra->start = offset;
 		if (!blockable_page_cache_readahead(mapping, filp, offset,
 							 ra->size, ra, 1))
@@ -508,8 +531,6 @@ page_cache_readahead(struct address_space *mapping, struct file_ra_state *ra,
 	 */
 	if (!sequential) {
 		ra_off(ra);
-		if (test_bit(AS_LIMIT_SIZE, &mapping->flags))
-			newsize = 1;
 		blockable_page_cache_readahead(mapping, filp, offset,
 				 newsize, ra, 1);
 		goto out;

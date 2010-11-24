@@ -286,6 +286,13 @@ config PRINTK
 	  very difficult to diagnose system problems, saying N here is
 	  strongly discouraged.
 
+config SHARED_PRINTK
+        default n
+        bool "Share the printk() buffer" if EMBEDDED
+        depends on PRINTK
+        help
+          Share the buffer of printk() to user land & audio & video firmware.
+
 config BUG
 	bool "BUG() support" if EMBEDDED
 	default y

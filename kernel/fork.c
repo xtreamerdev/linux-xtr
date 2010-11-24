@@ -817,6 +817,8 @@ static inline void copy_flags(unsigned long clone_flags, struct task_struct *p)
 	new_flags |= PF_FORKNOEXEC;
 	if (!(clone_flags & CLONE_PTRACE))
 		p->ptrace = 0;
+	if (clone_flags & CLONE_HELPER)
+		new_flags |= PF_HELPER;
 	p->flags = new_flags;
 }
 

@@ -2869,7 +2869,7 @@ static void *s_start(struct seq_file *m, loff_t *pos)
 #endif
 		seq_puts(m, "# name            <active_objs> <num_objs> <objsize> <objperslab> <pagesperslab>");
 		seq_puts(m, " : tunables <limit> <batchcount> <sharedfactor>");
-		seq_puts(m, " : slabdata <active_slabs> <num_slabs> <sharedavail>");
+		seq_puts(m, " : slabdata <active_slabs> <num_slabs> <sharedavail> <gfporder>");
 #if STATS
 		seq_puts(m, " : globalstat <listallocs> <maxobjs> <grown> <reaped>"
 				" <error> <maxfreeable> <freelimit> <nodeallocs>");
@@ -2898,7 +2898,58 @@ static void s_stop(struct seq_file *m, void *p)
 {
 	up(&cache_chain_sem);
 }
+#if 0
+void show_slab_info()
+{
+	struct list_head *p;
+	struct list_head *q;
+	kmem_cache_t *cachep = NULL;
+	struct slab	*slabp;
+	unsigned long	active_objs;
+	unsigned long	num_objs;
+	unsigned long	active_slabs;
+	unsigned long	num_slabs;
 
+	down(&cache_chain_sem);
+	p = cache_chain.next;
+	cachep = list_entry(p, kmem_cache_t, next);
+	while (cachep->next.next != &cache_chain) {
+		spin_lock_irq(&cachep->spinlock);
+
+		active_objs = num_objs = active_slabs = num_slabs = 0;
+		list_for_each(q,&cachep->lists.slabs_full) {
+			slabp = list_entry(q, struct slab, list);
+			if (slabp->inuse != cachep->num)
+				printk("slabs_full accounting error");
+			active_objs += cachep->num;
+			active_slabs++;
+		}
+		list_for_each(q,&cachep->lists.slabs_partial) {
+			slabp = list_entry(q, struct slab, list);
+			if (slabp->inuse == cachep->num)
+				printk("slabs_partial inuse accounting error");
+			if (!slabp->inuse)
+				printk("slabs_partial/inuse accounting error");
+			active_objs += slabp->inuse;
+			active_slabs++;
+		}
+		list_for_each(q,&cachep->lists.slabs_free) {
+			slabp = list_entry(q, struct slab, list);
+			if (slabp->inuse)
+				printk("slabs_free/inuse accounting error");
+			num_slabs++;
+		}
+		num_slabs+=active_slabs;
+		num_objs = num_slabs*cachep->num;
+		printk(" %-17s %6lu %6lu %6u \n", cachep->name, active_objs, num_objs, cachep->objsize);
+
+		spin_unlock_irq(&cachep->spinlock);
+
+		cachep = list_entry(cachep->next.next, kmem_cache_t, next);
+	}
+	up(&cache_chain_sem);
+}
+#endif
 static int s_show(struct seq_file *m, void *p)
 {
 	kmem_cache_t *cachep = p;
@@ -2952,8 +3003,8 @@ static int s_show(struct seq_file *m, void *p)
 	seq_printf(m, " : tunables %4u %4u %4u",
 			cachep->limit, cachep->batchcount,
 			cachep->lists.shared->limit/cachep->batchcount);
-	seq_printf(m, " : slabdata %6lu %6lu %6u",
-			active_slabs, num_slabs, cachep->lists.shared->avail);
+	seq_printf(m, " : slabdata %6lu %6lu %6u %6u",
+			active_slabs, num_slabs, cachep->lists.shared->avail, cachep->gfporder);
 #if STATS
 	{	/* list3 stats */
 		unsigned long high = cachep->high_mark;

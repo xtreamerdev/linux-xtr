@@ -117,6 +117,7 @@ struct volStructDesc
 
 /* Standard Identifier (EMCA 167r2 2/9.1.2) */
 #define VSD_STD_ID_NSR02		"NSR02"	/* (3/9.1) */
+#define VSD_STD_ID_NSRD2		"NSRD2"	/* (3/9.1) new identifier */
 
 /* Standard Identifier (ECMA 167r3 2/9.1.2) */
 #define VSD_STD_ID_BEA01		"BEA01"	/* (2/9.2) */
@@ -124,6 +125,7 @@ struct volStructDesc
 #define VSD_STD_ID_CD001		"CD001"	/* (ECMA-119) */
 #define VSD_STD_ID_CDW02		"CDW02"	/* (ECMA-168) */
 #define VSD_STD_ID_NSR03		"NSR03"	/* (3/9.1) */
+#define VSD_STD_ID_NSRD3		"NSRD3"	/* (3/9.1) new identifier */
 #define VSD_STD_ID_TEA01		"TEA01"	/* (2/9.3) */
 
 /* Beginning Extended Area Descriptor (ECMA 167r3 2/9.2) */

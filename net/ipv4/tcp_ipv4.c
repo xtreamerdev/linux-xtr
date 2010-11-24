@@ -1160,6 +1160,9 @@ static void tcp_v4_send_reset(struct sk_buff *skb)
 	struct tcphdr *th = skb->h.th;
 	struct tcphdr rth;
 	struct ip_reply_arg arg;
+#ifdef NET_DEBUG
+       printk(" %s:%s:%u\n", __FUNCTION__, __FILE__, __LINE__);
+#endif
 
 	/* Never send a reset in response to a reset. */
 	if (th->rst)
@@ -1190,7 +1193,10 @@ static void tcp_v4_send_reset(struct sk_buff *skb)
 				      skb->nh.iph->saddr, /*XXX*/
 				      sizeof(struct tcphdr), IPPROTO_TCP, 0);
 	arg.csumoffset = offsetof(struct tcphdr, check) / 2;
-
+#ifdef NET_DEBUG
+        printk(" %s:%s:%u\n", __FUNCTION__, __FILE__, __LINE__);
+#endif
+	       
 	ip_send_reply(tcp_socket->sk, skb, &arg, sizeof rth);
 
 	TCP_INC_STATS_BH(TCP_MIB_OUTSEGS);
@@ -1210,7 +1216,10 @@ static void tcp_v4_send_ack(struct sk_buff *skb, u32 seq, u32 ack,
 		u32 tsopt[3];
 	} rep;
 	struct ip_reply_arg arg;
-
+#ifdef NET_DEBUG
+       printk(" %s:%s:%u\n", __FUNCTION__, __FILE__, __LINE__);
+#endif
+	       
 	memset(&rep.th, 0, sizeof(struct tcphdr));
 	memset(&arg, 0, sizeof arg);
 
@@ -1247,7 +1256,10 @@ static void tcp_v4_send_ack(struct sk_buff *skb, u32 seq, u32 ack,
 static void tcp_v4_timewait_ack(struct sock *sk, struct sk_buff *skb)
 {
 	struct tcp_tw_bucket *tw = (struct tcp_tw_bucket *)sk;
-
+#ifdef NET_DEBUG
+       printk(" %s:%s:%u\n", __FUNCTION__, __FILE__, __LINE__);
+#endif
+	       
 	tcp_v4_send_ack(skb, tw->tw_snd_nxt, tw->tw_rcv_nxt,
 			tw->tw_rcv_wnd >> tw->tw_rcv_wscale, tw->tw_ts_recent);
 
@@ -1256,6 +1268,10 @@ static void tcp_v4_timewait_ack(struct sock *sk, struct sk_buff *skb)
 
 static void tcp_v4_or_send_ack(struct sk_buff *skb, struct open_request *req)
 {
+#ifdef NET_DEBUG
+        printk(" %s:%s:%u\n", __FUNCTION__, __FILE__, __LINE__);
+#endif
+       
 	tcp_v4_send_ack(skb, req->snt_isn + 1, req->rcv_isn + 1, req->rcv_wnd,
 			req->ts_recent);
 }
@@ -1276,7 +1292,10 @@ static struct dst_entry* tcp_v4_route_req(struct sock *sk,
 			    .uli_u = { .ports =
 				       { .sport = inet_sk(sk)->sport,
 					 .dport = req->rmt_port } } };
-
+#ifdef NET_DEBUG
+        printk(" %s:%s:%u\n", __FUNCTION__, __FILE__, __LINE__);
+#endif
+						
 	if (ip_route_output_flow(&rt, &fl, sk, 0)) {
 		IP_INC_STATS_BH(IPSTATS_MIB_OUTNOROUTES);
 		return NULL;
@@ -1299,7 +1318,10 @@ static int tcp_v4_send_synack(struct sock *sk, struct open_request *req,
 {
 	int err = -1;
 	struct sk_buff * skb;
-
+#ifdef NET_DEBUG
+        printk(" %s:%s:%u\n", __FUNCTION__, __FILE__, __LINE__);
+#endif
+	       
 	/* First, grab a route. */
 	if (!dst && (dst = tcp_v4_route_req(sk, req)) == NULL)
 		goto out;
@@ -1671,38 +1693,86 @@ static int tcp_v4_checksum_init(struct sk_buff *skb)
  */
 int tcp_v4_do_rcv(struct sock *sk, struct sk_buff *skb)
 {
+#ifdef NET_DEBUG
+	printk("Entering tcp_v4_do_rcv skb=0x%x \n", skb);
+#endif 	
 	if (sk->sk_state == TCP_ESTABLISHED) { /* Fast path */
+#ifdef NET_DEBUG
+	        printk(" %s:%s:%u\n", __FUNCTION__, __FILE__, __LINE__);
+#endif
+       
 		TCP_CHECK_TIMER(sk);
 		if (tcp_rcv_established(sk, skb, skb->h.th, skb->len))
 			goto reset;
+#ifdef NET_DEBUG
+                printk(" %s:%s:%u\n", __FUNCTION__, __FILE__, __LINE__);
+#endif
+       
 		TCP_CHECK_TIMER(sk);
 		return 0;
 	}
-
+#ifdef NET_DEBUG
+       printk(" %s:%s:%u\n", __FUNCTION__, __FILE__, __LINE__);
+#endif
+	       
 	if (skb->len < (skb->h.th->doff << 2) || tcp_checksum_complete(skb))
 		goto csum_err;
-
+#ifdef NET_DEBUG
+       printk(" %s:%s:%u\n", __FUNCTION__, __FILE__, __LINE__);
+#endif
+	       
 	if (sk->sk_state == TCP_LISTEN) {
 		struct sock *nsk = tcp_v4_hnd_req(sk, skb);
+#ifdef NET_DEBUG
+                printk(" %s:%s:%u\n", __FUNCTION__, __FILE__, __LINE__);
+#endif
+       
 		if (!nsk)
 			goto discard;
-
+#ifdef NET_DEBUG
+	       printk(" %s:%s:%u\n", __FUNCTION__, __FILE__, __LINE__);
+#endif
+		       
 		if (nsk != sk) {
+#ifdef NET_DEBUG
+               printk(" %s:%s:%u\n", __FUNCTION__, __FILE__, __LINE__);
+#endif
+       
 			if (tcp_child_process(sk, nsk, skb))
 				goto reset;
 			return 0;
 		}
+#ifdef NET_DEBUG
+                printk(" %s:%s:%u\n", __FUNCTION__, __FILE__, __LINE__);
+#endif
+       
 	}
 
 	TCP_CHECK_TIMER(sk);
+#ifdef NET_DEBUG
+        printk(" %s:%s:%u\n", __FUNCTION__, __FILE__, __LINE__);
+#endif
+       
 	if (tcp_rcv_state_process(sk, skb, skb->h.th, skb->len))
 		goto reset;
+#ifdef NET_DEBUG
+        printk(" %s:%s:%u\n", __FUNCTION__, __FILE__, __LINE__);
+#endif
+       
 	TCP_CHECK_TIMER(sk);
 	return 0;
 
 reset:
+#ifdef NET_DEBUG
+        printk(" %s:%s:%u\n", __FUNCTION__, __FILE__, __LINE__);
+#endif
+       
 	tcp_v4_send_reset(skb);
 discard:
+#ifdef NET_DEBUG
+       printk(" %s:%s:%u\n", __FUNCTION__, __FILE__, __LINE__);
+#endif
+       
 	kfree_skb(skb);
 	/* Be careful here. If this function gets more complicated and
 	 * gcc suffers from register pressure on the x86, sk (in %ebx)
@@ -1725,7 +1795,10 @@ int tcp_v4_rcv(struct sk_buff *skb)
 	struct tcphdr *th;
 	struct sock *sk;
 	int ret;
-
+#ifdef NET_DENUG
+	printk("Entering tcp_v4_rcv skb=0x%x \n",skb);
+	
+#endif	
 	if (skb->pkt_type != PACKET_HOST)
 		goto discard_it;
 
@@ -1799,6 +1872,10 @@ no_tcp_socket:
 bad_packet:
 		TCP_INC_STATS_BH(TCP_MIB_INERRS);
 	} else {
+#ifdef NET_DEBUG
+                printk(" %s:%s:%u\n", __FUNCTION__, __FILE__, __LINE__);
+#endif
+       
 		tcp_v4_send_reset(skb);
 	}
 

@@ -58,8 +58,12 @@ static inline void clear_user_page(void *addr, unsigned long vaddr,
 	extern void (*flush_data_cache_page)(unsigned long addr);
 
 	clear_page(addr);
+#ifdef CONFIG_REALTEK_PREVENT_DC_ALIAS
+	flush_data_cache_page((unsigned long)addr);
+#else
 	if (pages_do_alias((unsigned long) addr, vaddr))
 		flush_data_cache_page((unsigned long)addr);
+#endif
 }
 
 static inline void copy_user_page(void *vto, void *vfrom, unsigned long vaddr,
@@ -68,15 +72,19 @@ static inline void copy_user_page(void *vto, void *vfrom, unsigned long vaddr,
 	extern void (*flush_data_cache_page)(unsigned long addr);
 
 	copy_page(vto, vfrom);
+#ifdef CONFIG_REALTEK_PREVENT_DC_ALIAS
+	flush_data_cache_page((unsigned long)vto);
+#else
 	if (pages_do_alias((unsigned long)vto, vaddr))
 		flush_data_cache_page((unsigned long)vto);
+#endif
 }
 
 /*
  * These are used to make use of C type-checking..
  */
 #ifdef CONFIG_64BIT_PHYS_ADDR
-  #ifdef CONFIG_CPU_MIPS32_R1
+  #ifdef CONFIG_CPU_MIPS32
     typedef struct { unsigned long pte_low, pte_high; } pte_t;
     #define pte_val(x)    ((x).pte_low | ((unsigned long long)(x).pte_high << 32))
   #else

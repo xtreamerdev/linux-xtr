@@ -768,7 +768,7 @@ struct file *filp_open(const char * filename, int flags, int mode)
 	error = open_namei(filename, namei_flags, mode, &nd);
 	if (!error) {
 		magic = nd.dentry->d_inode->i_sb->s_magic;
-		if ((magic != 0x858458f6) && (magic != 0x01021994) && (magic != 0x1373)) {
+		if ((magic != 0x858458f6) && (magic != 0x858458f8) && (magic != 0x01021994) && (magic != 0x1373)) {
 			if (flags & O_LIMIT_SIZE) {
 				struct address_space *mapping;
 				mapping = nd.dentry->d_inode->i_mapping;

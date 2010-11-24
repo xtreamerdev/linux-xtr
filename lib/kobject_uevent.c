@@ -26,6 +26,11 @@
 #define BUFFER_SIZE	1024	/* buffer for the hotplug env */
 #define NUM_ENVP	32	/* number of env pointers */
 
+#ifdef CONFIG_REALTEK_DISABLE_BOOT_HOTPLUG
+extern dev_t	ROOT_DEV;
+extern int	hotplug_flag;
+#endif
+
 #if defined(CONFIG_KOBJECT_UEVENT) || defined(CONFIG_HOTPLUG)
 static char *action_to_string(enum kobject_action action)
 {
@@ -48,6 +53,13 @@ static char *action_to_string(enum kobject_action action)
 		return "over-current";
 	case KOBJ_TIER:
 		return "over-tier";
+	case KOBJ_UNKNOWN:
+		return "unknown-device";
+        case KOBJ_LINKUP:
+		return "linkup";
+        case KOBJ_LINKDOWN:
+                return "linkdown";
+			
 	default:
 		return NULL;
 	}
@@ -209,6 +221,10 @@ void kobject_hotplug(struct kobject *kobj, enum kobject_action action)
 	static struct kset_hotplug_ops null_hotplug_ops;
 	struct kset_hotplug_ops *hotplug_ops = &null_hotplug_ops;
 
+#ifdef CONFIG_REALTEK_DISABLE_BOOT_HOTPLUG
+	if ((!hotplug_flag) && (MAJOR(ROOT_DEV) == 0))
+		return;
+#endif
 	/* If this kobj does not belong to a kset,
 	   try to find a parent that does. */
 	if (!top_kobj->kset && top_kobj->parent) {

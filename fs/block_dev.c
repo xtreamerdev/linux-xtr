@@ -398,6 +398,9 @@ long nr_blockdev_pages(void)
 		struct block_device *bdev;
 		bdev = list_entry(p, struct block_device, bd_list);
 		ret += bdev->bd_inode->i_mapping->nrpages;
+#if 0
+		printk("block dev %d %d: %d \n", MAJOR(bdev->bd_dev), MINOR(bdev->bd_dev), bdev->bd_inode->i_mapping->nrpages);
+#endif
 	}
 	spin_unlock(&bdev_lock);
 	return ret;

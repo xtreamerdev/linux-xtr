@@ -88,18 +88,21 @@ struct se_qset {
 };
 
 struct se_dev {
-      int initialized;
-      void *CmdBuf;  /* Pointer to first quantum set */
+    int initialized;
+    void *CmdBuf;  /* Pointer to first quantum set */
 	void *CmdBase;
 	void *CmdLimit;
-      int wrptr;
-      int v_to_p_offset;
-      int size;
-      se_cmd_counter sw_counter;
-      se_cmd_counter hw_counter;
-      struct semaphore sem;     /* mutual exclusion semaphore     */
-      struct semaphore empty_sem;     /* mutual exclusion semaphore     */
-      struct cdev cdev;   /* Char device structure          */
+    int wrptr;
+    int v_to_p_offset;
+    int size;
+    se_cmd_counter sw_counter;
+    se_cmd_counter hw_counter;
+    struct semaphore sem;     /* mutual exclusion semaphore     */
+    struct semaphore empty_sem;     /* mutual exclusion semaphore     */
+    struct cdev cdev;   /* Char device structure          */
+    void *p_vsync_queue;
+    uint32_t u32_max_queue_num;
+    int isMars;
 };
 
 /*

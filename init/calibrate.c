@@ -42,10 +42,22 @@ static unsigned long default_lpj()
 		case realtek_pvr_demo_board:
 		case realtek_pvrbox_demo_board:
 		case realtek_avhdd2_demo_board:
+		case realtek_1071_avhdd_mk_demo_board:
+		case realtek_1261_avhdd_hdd25_demo_board:
 		case realtek_neptuneB_qa_board:
 		case realtek_neptune_demo_board:
 		case realtek_neptuneB_demo_board:
+		case realtek_1282_neptuneB_qa_board:
+		case realtek_1282_neptuneB_demo_board:
+		case realtek_1262_neptuneB_pc_install_demo_board:
+		case realtek_1262_neptuneB_mk_board:
+		case realtek_1262_neptuneB_avhdd_ewha10_mk_board:
+		case realtek_1283_mars_qa_board:
+		case C01_avhdd_board:
+		case C01_1262_avhdd_board:
 		case C02_avhdd_board:
+		case C02_1262_Neptune_avhdd_board:
+		case C03_pvr_8m_board:
 		case C03_pvr_board:
 		case C03_pvr2_board:
 		case C04_pvr_board:
@@ -53,9 +65,22 @@ static unsigned long default_lpj()
 		case C05_pvrbox_board:
 		case C05_pvrbox2_board:
 		case C06_pvr_board:
+		case C07_avhdd_board:
+		case C07_pvrbox_board:
+		case C07_pvrbox2_board:
 		case C08_pvr_board:
 		case C09_pvrbox_board:
 		case C09_pvrbox2_board:
+		case C0A_pvr_board:
+		case C0B_dvr_board:
+		case C0C_avhdd_board:
+		case C0D_pvr_board:
+		case C0E_dvr_board:
+		case C0F_1061_avhdd_hdd35_board:
+		case C0F_1061_avhdd_board:
+		case C0F_1262_avhdd_hdd35_board:
+		case C0F_1262_avhdd_hdd25_board:
+		case C10_1071_avhdd_board:
 			return 995328;
 		default:
 			printk("Warning! Unknown board id.\n");

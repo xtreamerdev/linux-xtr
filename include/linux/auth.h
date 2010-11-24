@@ -18,8 +18,8 @@
 
 #define DEF_MAP_ADDR		0x40000000
 #define MAX_MAP_ADDR		0x60000000
-#define DEF_MEM_SIZE		0x04000000	// 64  MB
-#define DEF_MAP_SIZE		0x0c000000	// 192 MB
+#define DEF_MEM_SIZE		0x10000000	// 256 MB
+#define DEF_MAP_SIZE		0x30000000	// 768 MB
 
 #define VPN2_MASK		0xffffe000
 
@@ -52,6 +52,7 @@ extern unsigned long           occupy_interval;
 
 extern unsigned long           dvr_asid;
 extern const char              *my_swap_file;
+extern struct semaphore        remap_sem;
 
 typedef	char AUTH_STR[20];
 
@@ -59,6 +60,10 @@ void			my_tlb_init(void);
 void			my_tlb_exit(void);
 unsigned long		tlb_mmap(unsigned long addr);
 unsigned long		tlb_munmap(unsigned long addr);
+#ifdef CONFIG_REALTEK_PLI_DEBUG_MODE
+unsigned long		pli_map_memory(unsigned long phy_addr, int size);
+unsigned long		pli_unmap_memory(unsigned long vir_addr);
+#endif
 
 int auth_open (struct inode *inode, struct file *filp);
 int auth_release (struct inode *inode, struct file *filp);
@@ -69,6 +74,9 @@ ssize_t auth_write (struct file *filp, const char *buf, size_t count,
 
 int     auth_ioctl (struct inode *inode, struct file *filp,
                      unsigned int cmd, unsigned long arg);
+
+void *dvr_malloc(size_t size);
+void dvr_free(const void *arg);
 
 /*
  * Ioctl definitions
@@ -111,5 +119,10 @@ int     auth_ioctl (struct inode *inode, struct file *filp,
 #define AUTH_IOCSTHREADNAME		_IOW(AUTH_IOC_MAGIC, 16, COMM_STR)
 #define AUTH_IOCTLOGEVENT		_IO(AUTH_IOC_MAGIC, 17)
 #endif
+
+#define AUTH_IOCTINITHWSEM		_IO(AUTH_IOC_MAGIC, 18)
+#define AUTH_IOCTGETHWSEM		_IO(AUTH_IOC_MAGIC, 19)
+#define AUTH_IOCTPUTHWSEM		_IO(AUTH_IOC_MAGIC, 20)
+
 #endif // AUTH_H
 

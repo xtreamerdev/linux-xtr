@@ -25,6 +25,7 @@
 #include <linux/types.h>
 #include <linux/pci.h>
 #include <linux/kernel.h>
+#include <linux/delay.h>
 
 #include "pci-mars.h"
 
@@ -40,17 +41,17 @@ static int mars_read_config(struct pci_bus *bus, unsigned int devfn, int reg,
 	busno = bus->number;
 	dev = PCI_SLOT(devfn);
 	func = PCI_FUNC(devfn);
-
-	//address = (busno << 16) | (dev << 11) | (func << 8) |
-	//          (reg & 0xfc) | 0x80000000;
-
+	
 	address = (busno << 16) | (dev << 11) | (func << 8) |
 	          (reg & 0xfc) ;
 
 	writel(0x03, DVR_CFG_ST);	// clear flag bits
 
+#if 0
+	printk("busno = %x, dev = %x, func = %X, reg = %x, address = %x\n", busno, dev, func, reg, address);
+#endif
+
 	/* start the configuration cycle */
-	
 	writel(address, DVR_CFG_ADDR);
 	writel(1, DVR_CFG_CT);
 	while (readl(DVR_CFG_CT));
@@ -59,14 +60,20 @@ static int mars_read_config(struct pci_bus *bus, unsigned int devfn, int reg,
 		return PCIBIOS_DEVICE_NOT_FOUND;
 	}
 	tmp = readl(DVR_CFG_RDATA);
+#if 0 //cylee marked for debug
+	printk("R, reg = %x, size = %d, val = %x, ", reg, size, tmp);
+#endif
 
-	switch (size) {
-	case 1:
-		tmp &= 0xff;
-	case 2:
-		tmp &= 0xffff;
-	}
+	if (size == 1)
+		tmp = (tmp >> ((reg & 3) << 3)) & 0xff;
+	else if (size == 2)
+		tmp = (tmp >> ((reg & 3) << 3)) & 0xffff;
+	
 	*val = tmp;
+
+#if 0 //cylee marked for debug
+	printk("real val = %x\n", tmp);
+#endif
 
 	return PCIBIOS_SUCCESSFUL;
 }
@@ -76,6 +83,7 @@ static int mars_write_config(struct pci_bus *bus, unsigned int devfn, int reg,
 {
 	uint32_t address, tmp, mask;
 	int dev, busno, func;
+	int i = 0;
 
 	busno = bus->number;
 	dev = PCI_SLOT(devfn);
@@ -90,7 +98,9 @@ static int mars_write_config(struct pci_bus *bus, unsigned int devfn, int reg,
 	case 4: mask = 0xf;	
 		break;	
 	}
+	//setup byte_enable_field in DVR_CFG_EN(0x1801_7010)
 	mask = (mask << (reg & 0x3)) << 4; 
+	//write DVR_CFG_EN with write and byte_enable 
 	writel(mask | 0x3, DVR_CFG_EN);
 	
 	//address = (busno << 16) | (dev << 11) | (func << 8) |
@@ -98,7 +108,9 @@ static int mars_write_config(struct pci_bus *bus, unsigned int devfn, int reg,
 	
 	address = (busno << 16) | (dev << 11) | (func << 8) |
 	       	(reg & 0xfc);
-
+#if 0 //cylee marked for debug
+	printk("W, bus# = %d, dev = %d, reg = %x, size = %d, val = %x, ", busno, dev,reg, size, val);
+#endif
 	writel(0x03, DVR_CFG_ST);		// clear flag bits
 	
 	/* start the configuration cycle */
@@ -114,6 +126,9 @@ static int mars_write_config(struct pci_bus *bus, unsigned int devfn, int reg,
 		printk("PCI: write %x timeout\n", address);
 		return PCIBIOS_DEVICE_NOT_FOUND;
 	}
+#if 0 //cylee marked for debug
+	printk("real writing = %x\n",val<<(8*(reg & 0x3)));
+#endif
 
 	return PCIBIOS_SUCCESSFUL;
 }

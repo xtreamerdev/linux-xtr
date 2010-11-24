@@ -620,6 +620,9 @@ static inline void tcp_mark_urg(struct tcp_sock *tp, int flags,
 static inline void tcp_push(struct sock *sk, struct tcp_sock *tp, int flags,
 			    int mss_now, int nonagle)
 {
+#ifdef NET_DEBUG
+	printk("Entering tcp_push \n");
+#endif	
 	if (sk->sk_send_head) {
 		struct sk_buff *skb = sk->sk_write_queue.prev;
 		if (!(flags & MSG_MORE) || forced_push(tp))
@@ -638,7 +641,10 @@ static ssize_t do_tcp_sendpages(struct sock *sk, struct page **pages, int poffse
 	int err;
 	ssize_t copied;
 	long timeo = sock_sndtimeo(sk, flags & MSG_DONTWAIT);
-
+#ifdef NET_DEBUG
+        printk("Entering do_tcp_sendpages \n");
+#endif
+		
 	/* Wait for a connection to finish. */
 	if ((1 << sk->sk_state) & ~(TCPF_ESTABLISHED | TCPF_CLOSE_WAIT))
 		if ((err = sk_stream_wait_connect(sk, &timeo)) != 0)
@@ -751,7 +757,10 @@ ssize_t tcp_sendpage(struct socket *sock, struct page *page, int offset,
 {
 	ssize_t res;
 	struct sock *sk = sock->sk;
-
+#ifdef NET_DEBUG
+        printk("Entering tcp_sendpages \n");
+#endif
+	
 #define TCP_ZC_CSUM_FLAGS (NETIF_F_IP_CSUM | NETIF_F_NO_CSUM | NETIF_F_HW_CSUM)
 
 	if (!(sk->sk_route_caps & NETIF_F_SG) ||
@@ -795,7 +804,10 @@ int tcp_sendmsg(struct kiocb *iocb, struct sock *sk, struct msghdr *msg,
 	int mss_now;
 	int err, copied;
 	long timeo;
-
+#ifdef NET_DEBUG
+	        printk("tcp_sendmsg \n");
+#endif
+		
 	lock_sock(sk);
 	TCP_CHECK_TIMER(sk);
 
@@ -1014,6 +1026,9 @@ static int tcp_recv_urg(struct sock *sk, long timeo,
 			int *addr_len)
 {
 	struct tcp_sock *tp = tcp_sk(sk);
+#ifdef NET_DEBUG
+	printk("Entering tcp_recv_urg\n");
+#endif
 
 	/* No URG data to read. */
 	if (sock_flag(sk, SOCK_URGINLINE) || !tp->urg_data ||
@@ -1119,7 +1134,10 @@ static void tcp_prequeue_process(struct sock *sk)
 {
 	struct sk_buff *skb;
 	struct tcp_sock *tp = tcp_sk(sk);
-
+#ifdef NET_DEBUG
+        printk("Entering tcp_prequeue_process\n");
+#endif
+		
 	NET_ADD_STATS_USER(LINUX_MIB_TCPPREQUEUED, skb_queue_len(&tp->ucopy.prequeue));
 
 	/* RX process wants to run with disabled BHs, though it is not
@@ -1137,7 +1155,10 @@ static inline struct sk_buff *tcp_recv_skb(struct sock *sk, u32 seq, u32 *off)
 {
 	struct sk_buff *skb;
 	u32 offset;
-
+#ifdef NET_DEBUG
+        printk("Entering tcp_recv_skb\n");
+#endif
+		
 	skb_queue_walk(&sk->sk_receive_queue, skb) {
 		offset = seq - TCP_SKB_CB(skb)->seq;
 		if (skb->h.th->syn)
@@ -1169,7 +1190,10 @@ int tcp_read_sock(struct sock *sk, read_descriptor_t *desc,
 	u32 seq = tp->copied_seq;
 	u32 offset;
 	int copied = 0;
-
+#ifdef NET_DEBUG
+        printk("Entering tcp_read_sock\n");
+#endif
+		
 	if (sk->sk_state == TCP_LISTEN)
 		return -ENOTCONN;
 	while ((skb = tcp_recv_skb(sk, seq, &offset)) != NULL) {
@@ -1233,7 +1257,10 @@ int tcp_recvmsg(struct kiocb *iocb, struct sock *sk, struct msghdr *msg,
 	int target;		/* Read at least this many bytes */
 	long timeo;
 	struct task_struct *user_recv = NULL;
-
+#ifdef NET_DEBUG
+        printk("Entering tcp_recvmsg\n");
+#endif
+		
 	lock_sock(sk);
 
 	TCP_CHECK_TIMER(sk);
@@ -1557,7 +1584,10 @@ static int tcp_close_state(struct sock *sk)
 {
 	int next = (int)new_state[sk->sk_state];
 	int ns = next & TCP_STATE_MASK;
-
+#ifdef NET_DEBUG
+        printk("Entering tcp_close_state\n");
+#endif
+		
 	tcp_set_state(sk, ns);
 
 	return next & TCP_ACTION_FIN;
@@ -1574,6 +1604,10 @@ void tcp_shutdown(struct sock *sk, int how)
 	 *	and then put it into the queue to be sent.
 	 *		Tim MacKenzie(tym@dibbler.cs.monash.edu.au) 4 Dec '92.
 	 */
+#ifdef NET_DEBUG
+        printk("Entering tcp_shutdown\n");
+#endif
+	
 	if (!(how & SEND_SHUTDOWN))
 		return;
 
@@ -1595,6 +1629,10 @@ void tcp_shutdown(struct sock *sk, int how)
  */
 void tcp_destroy_sock(struct sock *sk)
 {
+#ifdef NET_DEBUG
+        printk("Entering tcp_destroy_sock\n");
+#endif
+	
 	BUG_TRAP(sk->sk_state == TCP_CLOSE);
 	BUG_TRAP(sock_flag(sk, SOCK_DEAD));
 
@@ -1625,7 +1663,10 @@ void tcp_close(struct sock *sk, long timeout)
 {
 	struct sk_buff *skb;
 	int data_was_unread = 0;
-
+#ifdef NET_DEBUG
+        printk("Entering tcp_close\n");
+#endif
+		
 	lock_sock(sk);
 	sk->sk_shutdown = SHUTDOWN_MASK;
 
@@ -1787,7 +1828,10 @@ int tcp_disconnect(struct sock *sk, int flags)
 	struct tcp_sock *tp = tcp_sk(sk);
 	int err = 0;
 	int old_state = sk->sk_state;
-
+#ifdef NET_DEBUG
+        printk("Entering tcp_disconnect\n");
+#endif
+		
 	if (old_state != TCP_CLOSE)
 		tcp_set_state(sk, TCP_CLOSE);
 
@@ -1849,7 +1893,10 @@ static int wait_for_connect(struct sock *sk, long timeo)
 	struct tcp_sock *tp = tcp_sk(sk);
 	DEFINE_WAIT(wait);
 	int err;
-
+#ifdef NET_DEBUG
+        printk("Entering wait_for_connect\n");
+#endif
+		
 	/*
 	 * True wake-one mechanism for incoming connections: only
 	 * one process gets woken up, not the 'whole herd'.
@@ -1898,7 +1945,10 @@ struct sock *tcp_accept(struct sock *sk, int flags, int *err)
 	struct open_request *req;
 	struct sock *newsk;
 	int error;
-
+#ifdef NET_DEBUG
+        printk("Entering tcp_accept\n");
+#endif
+		
 	lock_sock(sk);
 
 	/* We need to make sure that this socket is listening,
@@ -1948,7 +1998,10 @@ int tcp_setsockopt(struct sock *sk, int level, int optname, char __user *optval,
 	struct tcp_sock *tp = tcp_sk(sk);
 	int val;
 	int err = 0;
-
+#ifdef NET_DEBUG
+        printk("Entering tcp_setsockopt optval=0x%s\n", optval);
+#endif
+		
 	if (level != SOL_TCP)
 		return tp->af_specific->setsockopt(sk, level, optname,
 						   optval, optlen);

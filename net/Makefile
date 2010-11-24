@@ -46,3 +46,8 @@ obj-$(CONFIG_IP_SCTP)		+= sctp/
 ifeq ($(CONFIG_NET),y)
 obj-$(CONFIG_SYSCTL)		+= sysctl_net.o
 endif
+
+ifeq ($(CONFIG_NET_DEBUG),y)
+EXTRA_CFLAGS += -DNET_DEBUG
+endif
+

@@ -46,8 +46,11 @@
  * fix-mapped?
  */
 enum fixed_addresses {
+	FIX_CMAP_BEGIN, 
+	FIX_CMAP_END = FIX_CMAP_BEGIN + 2,
 #ifdef CONFIG_HIGHMEM
-	FIX_KMAP_BEGIN,	/* reserved pte's for temporary kernel mappings */
+	/* reserved pte's for temporary kernel mappings */
+	FIX_KMAP_BEGIN = FIX_CMAP_END + 1,
 	FIX_KMAP_END = FIX_KMAP_BEGIN+(KM_TYPE_NR*NR_CPUS)-1,
 #endif
 	__end_of_fixed_addresses

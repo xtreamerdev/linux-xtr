@@ -775,7 +775,7 @@ unsigned long zap_page_range(struct vm_area_struct *vma, unsigned long address,
 	return end;
 }
 
-static struct page *
+struct page *
 my_follow_page(struct mm_struct *mm, unsigned long address)
 {
         pgd_t *pgd;
@@ -1046,7 +1046,15 @@ int get_user_pages(struct task_struct *tsk, struct mm_struct *mm,
 					i = -EFAULT;
 					goto out;
 				}
+#ifdef CONFIG_REALTEK_PREVENT_DC_ALIAS
+				if (cpu_has_dc_aliases && PageAnon(pages[i]) && 
+						pages_do_alias((unsigned long)page_address(pages[i]), start))
+					flush_dcache_page_alias(pages[i]);
+				else
+					flush_dcache_page(pages[i]);
+#else
 				flush_dcache_page(pages[i]);
+#endif
 				if (!PageReserved(pages[i]))
 					page_cache_get(pages[i]);
 			}
@@ -1063,6 +1071,42 @@ out:
 }
 
 EXPORT_SYMBOL(get_user_pages);
+
+#ifdef CONFIG_USB_FILE_STORAGE_DIRECT_IO_MODE
+int get_kernel_pages(struct task_struct *tsk, struct mm_struct *mm,
+		unsigned long start, int len, int write, int force,
+		struct page **pages, struct vm_area_struct **vmas)
+{
+	int i;
+	unsigned int flags;
+
+	/* 
+	 * Require read or write permissions.
+	 * If 'force' is set, we only require the "MAY" flags.
+	 */
+	flags = write ? (VM_WRITE | VM_MAYWRITE) : (VM_READ | VM_MAYREAD);
+	flags &= force ? (VM_MAYREAD | VM_MAYWRITE) : (VM_READ | VM_WRITE);
+	i = 0;
+
+	do {
+		if (pages) {
+			if(start & UNCAC_BASE)
+				pages[i] = virt_to_page(CAC_ADDR(start));
+			else
+				pages[i] = virt_to_page(start);
+			get_page(pages[i]);
+			SetPageDVR(pages[i]);
+		}
+		i++;
+		start += PAGE_SIZE;
+		len--;
+	} while(len);
+
+	return i;
+}
+
+EXPORT_SYMBOL(get_kernel_pages);
+#endif /* CONFIG_USB_FILE_STORAGE_DIRECT_IO_MODE */
 
 static int zeromap_pte_range(struct mm_struct *mm, pmd_t *pmd,
 			unsigned long addr, unsigned long end, pgprot_t prot)
@@ -1738,6 +1782,14 @@ again:
 
 	mark_page_accessed(page);
 	lock_page(page);
+
+	if (!PageSwapCache(page)) {
+		/* page remapping has occured */
+		unlock_page(page);
+		page_cache_release(page);
+		goto again;
+	}
+
 	if (PageAgain(page)) {
 		unlock_page(page);
 		page_cache_release(page);
@@ -1777,6 +1829,8 @@ again:
 	unlock_page(page);
 
 	flush_icache_page(vma, page);
+	if (!(vma->vm_flags & VM_EXEC))
+		flush_data_cache_page(page_address(page));
 	set_pte_at(mm, address, page_table, pte);
 	page_add_anon_rmap(page, vma, address);
 
@@ -1959,6 +2013,8 @@ retry:
 			inc_mm_counter(mm, rss);
 
 		flush_icache_page(vma, new_page);
+		if (!(vma->vm_flags & VM_EXEC))
+			flush_data_cache_page(page_address(new_page));
 		entry = mk_pte(new_page, vma->vm_page_prot);
 		if (write_access)
 			entry = maybe_mkwrite(pte_mkdirty(entry), vma);

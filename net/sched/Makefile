@@ -40,3 +40,8 @@ obj-$(CONFIG_NET_EMATCH_CMP)	+= em_cmp.o
 obj-$(CONFIG_NET_EMATCH_NBYTE)	+= em_nbyte.o
 obj-$(CONFIG_NET_EMATCH_U32)	+= em_u32.o
 obj-$(CONFIG_NET_EMATCH_META)	+= em_meta.o
+
+ifeq ($(CONFIG_NET_DEBUG),y)
+EXTRA_CFLAGS += -DNET_DEBUG
+endif
+

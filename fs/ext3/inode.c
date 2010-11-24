@@ -3880,8 +3880,12 @@ ssize_t ext3_file_sendfile(struct file *in_file, loff_t *ppos,
 	int nptr, alloc_b=0;
 	unsigned long copied=0, togo, expect, ret;
 
+        if (actor != file_send_actor)
+            return generic_file_sendfile(in_file, ppos, count, actor, target);
+        
 	out_file = (struct file *) target;
-	if (out_file->f_op->sendpage != ext3_rtl_sendpage) {
+	if (out_file->f_op == NULL ||
+            out_file->f_op->sendpage != ext3_rtl_sendpage) {
 		return generic_file_sendfile(in_file, ppos, count, actor, target);
 	}
 

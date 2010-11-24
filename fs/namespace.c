@@ -228,6 +228,7 @@ static int show_vfsmnt(struct seq_file *m, void *v)
 		{ MS_MANDLOCK, ",mand" },
 		{ MS_NOATIME, ",noatime" },
 		{ MS_NODIRATIME, ",nodiratime" },
+		{ MS_RECOVERY, ",recovery" },
 		{ 0, NULL }
 	};
 	static struct proc_fs_info mnt_info[] = {

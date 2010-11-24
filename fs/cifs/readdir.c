@@ -223,6 +223,7 @@ static void fill_in_inode(struct inode *tmp_inode, int new_buf_type,
 		atomic_set(&cifsInfo->inUse, 1);
 	}
 
+	spin_lock(&tmp_inode->i_lock);
 	if (is_size_safe_to_change(cifsInfo)) {
 		/* can not safely change the file size here if the 
 		client is writing to it due to potential races */
@@ -232,6 +233,7 @@ static void fill_in_inode(struct inode *tmp_inode, int new_buf_type,
 	/* for this calculation, even though the reported blocksize is larger */
 		tmp_inode->i_blocks = (512 - 1 + allocation_size) >> 9;
 	}
+	spin_unlock(&tmp_inode->i_lock);
 
 	if (allocation_size < end_of_file)
 		cFYI(1, ("May be sparse file, allocation less than file size"));
@@ -352,6 +354,7 @@ static void unix_fill_in_inode(struct inode *tmp_inode,
 	tmp_inode->i_gid = le64_to_cpu(pfindData->Gid);
 	tmp_inode->i_nlink = le64_to_cpu(pfindData->Nlinks);
 
+	spin_lock(&tmp_inode->i_lock);
 	if (is_size_safe_to_change(cifsInfo)) {
 		/* can not safely change the file size here if the 
 		client is writing to it due to potential races */
@@ -361,6 +364,7 @@ static void unix_fill_in_inode(struct inode *tmp_inode,
 	/* for this calculation, not the real blocksize */
 		tmp_inode->i_blocks = (512 - 1 + num_of_bytes) >> 9;
 	}
+	spin_unlock(&tmp_inode->i_lock);
 
 	if (S_ISREG(tmp_inode->i_mode)) {
 		cFYI(1, ("File inode"));

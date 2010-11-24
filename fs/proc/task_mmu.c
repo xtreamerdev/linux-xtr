@@ -4,27 +4,110 @@
 #include <linux/seq_file.h>
 #include <asm/elf.h>
 #include <asm/uaccess.h>
+#include <asm/mman.h>
 #include "internal.h"
+
+#ifdef CONFIG_REALTEK_SHOW_MALLOC_SIZE
+static unsigned long
+my_get_unmapped_area(struct mm_struct *mm, unsigned long addr,
+		unsigned long len, unsigned long pgoff, unsigned long flags)
+{
+	struct vm_area_struct * vmm;
+	unsigned long task_size;
+	
+	task_size = TASK_SIZE;
+	addr = TASK_UNMAPPED_BASE;
+	addr = PAGE_ALIGN(addr);
+	
+	for (vmm = find_vma(mm, addr); ; vmm = vmm->vm_next) {
+		/* At this point:  (!vmm || addr < vmm->vm_end). */
+		if (task_size - len < addr)
+			return -ENOMEM;
+		if (!vmm || addr + len <= vmm->vm_start)
+			return addr;
+		addr = vmm->vm_end;
+	}
+}
+
+static struct vm_area_struct *
+find_vma_prepare(struct mm_struct *mm, unsigned long addr,
+		struct vm_area_struct **pprev)
+{
+	struct vm_area_struct * vma;
+	struct rb_node ** __rb_link, * __rb_parent, * rb_prev;
+
+	__rb_link = &mm->mm_rb.rb_node;
+	rb_prev = __rb_parent = NULL;
+	vma = NULL;
+
+	while (*__rb_link) {
+		struct vm_area_struct *vma_tmp;
+
+		__rb_parent = *__rb_link;
+		vma_tmp = rb_entry(__rb_parent, struct vm_area_struct, vm_rb);
+
+		if (vma_tmp->vm_end > addr) {
+			vma = vma_tmp;
+			if (vma_tmp->vm_start <= addr)
+				return vma;
+			__rb_link = &__rb_parent->rb_left;
+		} else {
+			rb_prev = __rb_parent;
+			__rb_link = &__rb_parent->rb_right;
+		}
+	}
+
+	*pprev = NULL;
+	if (rb_prev)
+		*pprev = rb_entry(rb_prev, struct vm_area_struct, vm_rb);
+	return vma;
+}
+#endif
 
 char *task_mem(struct mm_struct *mm, char *buffer)
 {
 	unsigned long data, text, lib;
+#ifdef CONFIG_REALTEK_SHOW_MALLOC_SIZE
+	struct vm_area_struct * vma, * prev;
+	unsigned long addr, size;
 
+	size = mm->brk-mm->start_brk;
+	addr = my_get_unmapped_area(mm, 0, 256*1024, 0, MAP_PRIVATE|MAP_ANONYMOUS);
+//	printk("addr: %x \n", addr);
+	if (addr > 0) {
+		vma = find_vma_prepare(mm, addr, &prev);
+		if ((prev) && !(prev->vm_flags & VM_EXEC))
+			size += prev->vm_end-prev->vm_start;
+//		printk("malloc size: %x \n", size);
+	}
+#endif
 	data = mm->total_vm - mm->shared_vm - mm->stack_vm;
 	text = (PAGE_ALIGN(mm->end_code) - (mm->start_code & PAGE_MASK)) >> 10;
 	lib = (mm->exec_vm << (PAGE_SHIFT-10)) - text;
 	buffer += sprintf(buffer,
+		"sbrk:\t%x \n"
+		"ebrk:\t%x \n"
+#ifdef CONFIG_REALTEK_SHOW_MALLOC_SIZE
+		"malloc:\t%8lu kb\n"
+#endif
 		"VmSize:\t%8lu kB\n"
 		"VmLck:\t%8lu kB\n"
 		"VmRSS:\t%8lu kB\n"
+		"VmARSS:\t%8lu kB\n"
 		"VmData:\t%8lu kB\n"
 		"VmStk:\t%8lu kB\n"
 		"VmExe:\t%8lu kB\n"
 		"VmLib:\t%8lu kB\n"
 		"VmPTE:\t%8lu kB\n",
+		mm->start_brk,
+		mm->brk,
+#ifdef CONFIG_REALTEK_SHOW_MALLOC_SIZE
+		size >> (PAGE_SHIFT-2),
+#endif
 		(mm->total_vm - mm->reserved_vm) << (PAGE_SHIFT-10),
 		mm->locked_vm << (PAGE_SHIFT-10),
 		get_mm_counter(mm, rss) << (PAGE_SHIFT-10),
+		get_mm_counter(mm, anon_rss) << (PAGE_SHIFT-10),
 		data << (PAGE_SHIFT-10),
 		mm->stack_vm << (PAGE_SHIFT-10), text, lib,
 		(PTRS_PER_PTE*sizeof(pte_t)*mm->nr_ptes) >> 10);

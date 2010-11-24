@@ -53,13 +53,81 @@
 #include <linux/init.h>
 #include <linux/rmap.h>
 #include <linux/rcupdate.h>
-#include <linux/pageremap.h>
 
 #include <asm/tlbflush.h>
 
 //#define RMAP_DEBUG /* can be enabled only for debugging */
 
 kmem_cache_t *anon_vma_cachep;
+
+struct page_va_list {
+	struct mm_struct *mm;
+	unsigned long addr;
+	struct list_head list;
+};
+
+/*
+ * * This function is invoked to record an address space and a mapped address
+ * * to which a target page belongs, when it is unmapped forcibly.
+ * */
+static int
+record_unmapped_address(struct list_head *force, struct mm_struct *mm,
+		unsigned long address)
+{
+	struct page_va_list *vlist;
+
+	vlist = kmalloc(sizeof(struct page_va_list), GFP_KERNEL);
+	if (vlist == NULL)
+		return -ENOMEM;
+	spin_lock(&mmlist_lock);
+	if (!atomic_read(&mm->mm_users))
+		vlist->mm = NULL;
+	else {
+		vlist->mm = mm;
+		atomic_inc(&mm->mm_users);
+	}
+	spin_unlock(&mmlist_lock);
+
+	if (vlist->mm == NULL)
+		kfree(vlist);
+	else {
+		vlist->addr = address;
+		list_add(&vlist->list, force);
+	}
+	return 0;
+}
+
+/*
+ * * This function touches an address recorded in the vlist to map
+ * * a page into an address space again.
+ * */
+int
+touch_unmapped_address(struct list_head *vlist)
+{
+	struct page_va_list *v1, *v2;
+	struct vm_area_struct *vma;
+	int ret = 0;
+	int error;
+
+	list_for_each_entry_safe(v1, v2, vlist, list) {
+		list_del(&v1->list);
+		down_read(&v1->mm->mmap_sem);
+		if (atomic_read(&v1->mm->mm_users) == 1)
+			goto out;
+		vma = find_vma(v1->mm, v1->addr);
+		if (vma == NULL)
+			goto out;
+		error = get_user_pages(current, v1->mm, v1->addr, 1,
+				0, 0, NULL, NULL);
+		if (error < 0)
+			ret = error;
+out:
+		up_read(&v1->mm->mmap_sem);
+		mmput(v1->mm);
+		kfree(v1);
+	}
+	return ret;
+}
 
 static inline void validate_anon_vma(struct vm_area_struct *find_vma)
 {
@@ -518,7 +586,6 @@ static int try_to_unmap_one(struct page *page, struct vm_area_struct *vma, struc
 	pte_t *pte;
 	pte_t pteval;
 	int ret = SWAP_AGAIN;
-	struct page_va_list *vlist;
 
 	if (!get_mm_counter(mm, rss))
 		goto out;
@@ -530,36 +597,18 @@ static int try_to_unmap_one(struct page *page, struct vm_area_struct *vma, struc
 	if (IS_ERR(pte))
 		goto out;
 
+	if (force && record_unmapped_address(force, mm, address))
+		goto out_unmap;
+
 	/*
 	 * If the page is mlock()d, we cannot swap it out.
 	 * If it's recently referenced (perhaps page_referenced
 	 * skipped over this mm) then we should reactivate it.
 	 */
-	if ((vma->vm_flags & (VM_LOCKED|VM_RESERVED)) ||
-                        ((force == NULL) && ptep_clear_flush_young(vma, address, pte))) {
-                if (force == NULL || vma->vm_flags & VM_RESERVED) {
-                        ret = SWAP_FAIL;
-                        goto out_unmap;
-                }
-                vlist = kmalloc(sizeof(struct page_va_list), GFP_KERNEL);
-                atomic_inc(&mm->mm_count);
-//              vlist->mm = mmgrab(mm);
-                spin_lock(&mmlist_lock);
-                if (!atomic_read(&mm->mm_users)) {
-                        vlist->mm = NULL;
-                } else {
-                        atomic_inc(&mm->mm_users);
-                        vlist->mm = mm;
-                }
-                spin_unlock(&mmlist_lock);
-                if (vlist->mm == NULL) {
-//                      mmput(mm);
-                        kfree(vlist);
-                } else {
-                        vlist->addr = address;
-                        list_add(&vlist->list, force);
-                }
-                printk("try_to_unmap_one: need to unmap again...\n");
+	if (((vma->vm_flags & (VM_LOCKED|VM_RESERVED)) ||
+			ptep_clear_flush_young(vma, address, pte)) && force == NULL) {
+		ret = SWAP_FAIL;
+		goto out_unmap;
 	}
 
 	/*

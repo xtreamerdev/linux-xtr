@@ -67,8 +67,11 @@ rpc_timeout_upcall_queue(void *data)
 	struct inode *inode = &rpci->vfs_inode;
 
 	down(&inode->i_sem);
+	if (rpci->ops == NULL)
+			goto out;
 	if (rpci->nreaders == 0 && !list_empty(&rpci->pipe))
 		__rpc_purge_upcall(inode, -ETIMEDOUT);
+out:
 	up(&inode->i_sem);
 }
 
@@ -100,8 +103,6 @@ rpc_close_pipes(struct inode *inode)
 {
 	struct rpc_inode *rpci = RPC_I(inode);
 
-	cancel_delayed_work(&rpci->queue_timeout);
-	flush_scheduled_work();
 	down(&inode->i_sem);
 	if (rpci->ops != NULL) {
 		rpci->nreaders = 0;
@@ -112,6 +113,8 @@ rpc_close_pipes(struct inode *inode)
 		rpci->ops = NULL;
 	}
 	up(&inode->i_sem);
+	cancel_delayed_work(&rpci->queue_timeout);
+	flush_scheduled_work();
 }
 
 static inline void
@@ -157,7 +160,7 @@ rpc_pipe_open(struct inode *inode, struct file *filp)
 static int
 rpc_pipe_release(struct inode *inode, struct file *filp)
 {
-	struct rpc_inode *rpci = RPC_I(filp->f_dentry->d_inode);
+	struct rpc_inode *rpci = RPC_I(inode);
 	struct rpc_pipe_msg *msg;
 
 	down(&inode->i_sem);

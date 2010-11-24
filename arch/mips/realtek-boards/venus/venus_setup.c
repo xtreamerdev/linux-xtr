@@ -91,6 +91,26 @@ const char *get_system_type(void)
 	return "Realtek Venus";
 }
 
+#if 0
+void __init reset_ethernet(void) {
+
+	printk("Set Ethernet RCR to 0x0.\n");
+	writel(0x0, VENUS_ETH_RCR); //Set RX mode to 0.
+
+	printk("Reset Ethernet Phy.\n");
+	writel(0x84008000, VENUS_ETH_MIIAR); //Reset ethernet Phy.
+	mb();
+	while((readl(VENUS_ETH_MIIAR)&0x10000000));
+
+	printk("Reset Ethernet Mac.\n");
+	writeb(0x01, VENUS_ETH_CR); //Reset ethernet Mac.
+	mb();
+	while((readb(VENUS_ETH_CR)&0x01));
+
+	return;
+}
+#endif /* 0 */
+
 void __init plat_setup(void)
 {
 //	unsigned int i;
@@ -137,6 +157,8 @@ void __init plat_setup(void)
 	board_time_init = mips_time_init;
 	board_timer_setup = mips_timer_setup;
 
+	/* Reset ethernet at init stage. */
+	//reset_ethernet();
 
 	return;
 }

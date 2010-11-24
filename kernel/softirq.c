@@ -41,9 +41,17 @@ irq_cpustat_t irq_stat[NR_CPUS] ____cacheline_aligned;
 EXPORT_SYMBOL(irq_stat);
 #endif
 
+#ifdef CONFIG_REALTEK_SBSS_IN_DMEM_ADVANCED
+static struct softirq_action softirq_vec[32] __attribute__ ((section(".sbss"))) __cacheline_aligned_in_smp;
+#else
 static struct softirq_action softirq_vec[32] __cacheline_aligned_in_smp;
+#endif
 
+#ifdef CONFIG_REALTEK_SBSS_IN_DMEM
+static DEFINE_PER_CPU(struct task_struct *, ksoftirqd) __attribute__ ((section(".sbss")));
+#else
 static DEFINE_PER_CPU(struct task_struct *, ksoftirqd);
+#endif
 
 /*
  * we cannot loop indefinitely here to avoid userspace starvation,
@@ -166,7 +174,18 @@ void irq_exit(void)
 	account_system_vtime(current);
 	sub_preempt_count(IRQ_EXIT_OFFSET);
 	if (!in_interrupt() && local_softirq_pending())
+#ifdef	CONFIG_REALTEK_SCHED_LOG
+	{
+		// Use interrupt 8 to represent bottom-half...
+		if (sched_log_flag & 0x1)
+			log_intr_enter(8);
 		invoke_softirq();
+		if (sched_log_flag & 0x1)
+			log_intr_exit(8);
+	}
+#else
+		invoke_softirq();
+#endif
 	preempt_enable_no_resched();
 }
 
@@ -217,8 +236,13 @@ struct tasklet_head
 
 /* Some compilers disobey section attribute on statics when not
    initialized -- RR */
+#ifdef CONFIG_REALTEK_SBSS_IN_DMEM
+static DEFINE_PER_CPU(struct tasklet_head, tasklet_vec) __attribute__ ((section(".sbss"))) = { NULL };
+static DEFINE_PER_CPU(struct tasklet_head, tasklet_hi_vec) __attribute__ ((section(".sbss"))) = { NULL };
+#else
 static DEFINE_PER_CPU(struct tasklet_head, tasklet_vec) = { NULL };
 static DEFINE_PER_CPU(struct tasklet_head, tasklet_hi_vec) = { NULL };
+#endif
 
 void fastcall __tasklet_schedule(struct tasklet_struct *t)
 {

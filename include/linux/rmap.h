@@ -91,6 +91,7 @@ static inline void page_dup_rmap(struct page *page)
  */
 int page_referenced(struct page *, int is_locked, int ignore_token);
 int try_to_unmap(struct page *, struct list_head *);
+int touch_unmapped_address(struct list_head *);
 
 /*
  * Used by swapoff to help locate where page is expected in vma.

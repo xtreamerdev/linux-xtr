@@ -127,7 +127,7 @@ struct shrinker {
 /*
  * From 0 .. 100.  Higher means more swappy.
  */
-int vm_swappiness = 60;
+int vm_swappiness = 90;
 static long total_memory;
 
 static LIST_HEAD(shrinker_list);
@@ -906,7 +906,7 @@ shrink_caches(struct zone **zones, struct scan_control *sc)
 			continue;
 
 		zone->temp_priority = sc->priority;
-		if (zone->prev_priority > sc->priority)
+		if (!(sc->gfp_mask & __GFP_HUGEFREE) && (zone->prev_priority > sc->priority))
 			zone->prev_priority = sc->priority;
 
 		if (zone->all_unreclaimable && sc->priority != DEF_PRIORITY)
@@ -1002,12 +1002,16 @@ out:
 		if (!cpuset_zone_allowed(zone))
 			continue;
 
+		if (gfp_mask & __GFP_HUGEFREE)
+			continue;
+
 		zone->prev_priority = zone->temp_priority;
 	}
 	if (gfp_mask & __GFP_HUGEFREE) {
 		printk("try_to_free_pages: free %d \n", total_reclaimed);
 		ret = 1;
-	}
+	} else if (total_reclaimed > 0)
+		ret = 1;
 	if (freed != NULL)
 		*freed = total_reclaimed;
 	return ret;
@@ -1047,6 +1051,10 @@ static int balance_pgdat(pg_data_t *pgdat, int nr_pages, int order)
 	int total_scanned, total_reclaimed;
 	struct reclaim_state *reclaim_state = current->reclaim_state;
 	struct scan_control sc;
+
+	/* we reclaim 32KB at max*/
+	if (order >= 3)
+		order = 3;
 
 loop_again:
 	total_scanned = 0;
@@ -1120,8 +1128,8 @@ scan:
 				continue;
 
 			if (nr_pages == 0) {	/* Not software suspend */
-				if (!zone_watermark_ok(zone, order,
-						zone->pages_high, end_zone, 0, 0))
+				if ((!(zone->flags & ZN_EXHAUSTABLE)) && (!zone_watermark_ok(zone, order,
+						zone->pages_high, end_zone, 0, 0)))
 					all_zones_ok = 0;
 			}
 			zone->temp_priority = priority;
@@ -1307,8 +1315,12 @@ static int shrink_all_memory(int nr_pages)
 		struct zone **zones;
 		int freed;
 //		freed = balance_pgdat(pgdat, nr_to_free, 0);
+#ifdef CONFIG_REALTEK_TEXT_DEBUG
+		zones = pgdat->node_zonelists[__GFP_TEXT].zones;
+#else
 		zones = pgdat->node_zonelists[__GFP_DVR].zones;
-		try_to_free_pages(zones, __GFP_IO | __GFP_FS | __GFP_EXHAUST | __GFP_HUGEFREE, 0, &freed);
+#endif
+		try_to_free_pages(zones, __GFP_IO | __GFP_FS | __GFP_HUGEFREE, 0, &freed);
 		ret += freed;
 		nr_to_free -= freed;
 		if (nr_to_free <= 0)
@@ -1439,7 +1451,7 @@ int shrink_page_cache(struct address_space *mapping)
 	sc.nr_reclaimed = 0;
 	sc.nr_to_reclaim = total;
 	sc.priority = 0;
-	sc.gfp_mask = GFP_DVRNOFS;
+	sc.gfp_mask = GFP_DVRUSER;
 	sc.may_writepage = 1;
 	sc.swap_cluster_max = SWAP_CLUSTER_MAX;
 	free = shrink_list(&page_list, &sc);

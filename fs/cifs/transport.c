@@ -444,7 +444,6 @@ SendReceive2(const unsigned int xid, struct cifsSesInfo *ses,
 	/* Ensure that we do not send more than 50 overlapping requests 
 	   to the same server. We may make this configurable later or
 	   use ses->maxReq */
-
 	rc = wait_for_free_request(ses, long_op);
 	if (rc) {
 		cifs_small_buf_release(in_buf);
@@ -491,11 +490,11 @@ SendReceive2(const unsigned int xid, struct cifsSesInfo *ses,
 	else if (long_op == 2) /* writes past end of file can take loong time */
 		timeout = 180 * HZ;
 	else if (long_op == 1)
-		timeout = 45 * HZ; /* should be greater than 
+		timeout = 45 * HZ; 
+/*		       should be greater than 
 			servers oplock break timeout (about 43 seconds) */
 	else
-		timeout = 5 * HZ; //jason modify for short timeout time to 5 seconds
-//		timeout = 15 * HZ;
+		timeout = 15 * HZ;
 
 	/* wait for 15 seconds or until woken up due to response arriving or 
 	   due to last connection to this server being unmounted */
@@ -506,8 +505,7 @@ SendReceive2(const unsigned int xid, struct cifsSesInfo *ses,
 	}   
 
 	/* No user interrupts in wait - wreaks havoc with performance */
-//	wait_for_response(ses, midQ, timeout, 10 * HZ);
-	wait_for_response(ses, midQ, timeout, 4 * HZ);
+	wait_for_response(ses, midQ, timeout, 10 * HZ);
 
 	spin_lock(&GlobalMid_Lock);
 	if (midQ->resp_buf) {
@@ -676,11 +674,11 @@ SendReceive(const unsigned int xid, struct cifsSesInfo *ses,
 	else if (long_op == 2) /* writes past end of file can take loong time */
 		timeout = 180 * HZ;
 	else if (long_op == 1)
-		timeout = 45 * HZ; /* should be greater than 
+		timeout = 45 * HZ; 
+/*		       should be greater than 
 			servers oplock break timeout (about 43 seconds) */
 	else
-		timeout = 5 * HZ; //jason modify for short timeout time to 5 seconds
-//		timeout = 15 * HZ;
+		timeout = 15 * HZ;
 	/* wait for 15 seconds or until woken up due to response arriving or 
 	   due to last connection to this server being unmounted */
 	if (signal_pending(current)) {
@@ -690,8 +688,7 @@ SendReceive(const unsigned int xid, struct cifsSesInfo *ses,
 	}   
 
 	/* No user interrupts in wait - wreaks havoc with performance */
-//	wait_for_response(ses, midQ, timeout, 10 * HZ);
-	wait_for_response(ses, midQ, timeout, 4 * HZ);
+	wait_for_response(ses, midQ, timeout, 10 * HZ);
 
 	spin_lock(&GlobalMid_Lock);
 	if (midQ->resp_buf) {
@@ -935,8 +932,7 @@ SendReceiveBlockingLock(const unsigned int xid, struct cifsTconInfo *tcon,
 		}
 
 		/* Wait 5 seconds for the response. */
-//		if (wait_for_response(ses, midQ, 5 * HZ, 5 * HZ)==0) {
-		if (wait_for_response(ses, midQ, 3 * HZ, 2 * HZ)==0) {
+		if (wait_for_response(ses, midQ, 5 * HZ, 5 * HZ)==0) {
 			/* We got the response - restart system call. */
 			rstart = 1;
 		}

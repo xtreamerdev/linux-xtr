@@ -294,7 +294,6 @@ config REALTEK_VENUS
 	select REALTEK_VENUS_SERIAL_PORT
 	select DMA_NONCOHERENT
 	select GENERIC_ISA_DMA
-	select HW_HAS_PCI
 	select REALTEK_BOARDS_GEN
 	select SYS_SUPPORTS_32BIT_KERNEL
 #	select SYS_SUPPORTS_64BIT_KERNEL
@@ -937,17 +936,19 @@ choice
 config CPU_MIPS32_R1
 	bool "MIPS32 Release 1"
 	select CPU_SUPPORTS_32BIT_KERNEL
-	select CPU_HAS_PREFETCH
 	help
 	  Choose this option to build a kernel for release 1 or later of the
 	  MIPS32 architecture.  Most modern embedded systems with a 32-bit
 	  MIPS processor are based on a MIPS32 processor.  If you know the
 	  specific type of processor in your system, choose those that one
 	  otherwise CPU_MIPS32_R1 is a safe bet for any MIPS32 system.
+	  Release 2 of the MIPS32 architecture is available since several
+	  years so chances are you even have a MIPS32 Release 2 processor
+	  in which case you should choose CPU_MIPS32_R2 instead for better
+	  performance.
 
 config CPU_MIPS32_R2
 	bool "MIPS32 Release 2"
-	select CPU_HAS_PREFETCH
 	select CPU_SUPPORTS_32BIT_KERNEL
 	help
 	  Choose this option to build a kernel for release 2 or later of the
@@ -1078,6 +1079,28 @@ endchoice
 
 endmenu
 
+#
+# These two indicate any levelof the MIPS32 and MIPS64 architecture
+#
+config CPU_MIPS32
+	bool
+	default y if CPU_MIPS32_R1 || CPU_MIPS32_R2
+
+config CPU_MIPS64
+	bool
+	default y if CPU_MIPS64_R1 || CPU_MIPS64_R2
+
+#
+# These two indicate the revision of the architecture, either 32 bot 64 bit.
+#
+config CPU_MIPSR1
+	bool
+	default y if CPU_MIPS32_R1 || CPU_MIPS64_R1
+
+config CPU_MIPSR2
+	bool
+	default y if CPU_MIPS32_R2 || CPU_MIPS64_R2
+
 config SYS_SUPPORTS_32BIT_KERNEL
 	bool
 config SYS_SUPPORTS_64BIT_KERNEL
@@ -1202,7 +1225,7 @@ config SB1_PASS_2_1_WORKAROUNDS
 
 config 64BIT_PHYS_ADDR
 	bool "Support for 64-bit physical address space"
-	depends on (CPU_R4X00 || CPU_R5000 || CPU_RM7000 || CPU_RM9000 || CPU_R10000 || CPU_SB1 || CPU_MIPS32_R1 || CPU_MIPS64_R1) && MIPS32
+	depends on (CPU_R4X00 || CPU_R5000 || CPU_RM7000 || CPU_RM9000 || CPU_R10000 || CPU_SB1 || CPU_MIPS32 || CPU_MIPS64) && MIPS32
 
 config CPU_ADVANCED
 	bool "Override CPU Options"
@@ -1225,7 +1248,7 @@ config CPU_HAS_LLSC
 
 config CPU_HAS_LLDSCD
 	bool "lld/scd Instructions available" if CPU_ADVANCED
-	default y if !CPU_ADVANCED && !CPU_R3000 && !CPU_VR41XX && !CPU_TX39XX && !CPU_MIPS32_R1
+	default y if !CPU_ADVANCED && !CPU_R3000 && !CPU_VR41XX && !CPU_TX39XX && !CPU_MIPS32
 	help
 	  Say Y here if your CPU has the lld and scd instructions, the 64-bit
 	  equivalents of ll and sc.  Say Y here for better performance, N if
@@ -1346,6 +1369,15 @@ config PM
 config PM_SLEEP_POLLING
 	bool "	Use polling to avoid Venus's bug of edge-trigger-intr in power saving"
 	depends PM
+
+config PM_SLEEP_REBOOT
+	bool "	User may use \"reboot\" to replace normal resuming procedure."
+	depends PM
+	help
+	  While do the command "echo reboot > /sys/power/state", system will
+	  try to enter an ultra-low power consuming state. Resume shold be 
+	  replaced by "reboot" because some steps will make resuming
+	  impossible. For example, DRAM power may be cut off totally.
 
 menu "Bus options (PCI, PCMCIA, EISA, ISA, TC)"
 

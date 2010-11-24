@@ -218,7 +218,11 @@ extern void free_swap_and_cache(swp_entry_t);
 extern sector_t map_swap_page(struct swap_info_struct *, pgoff_t);
 extern struct swap_info_struct *get_swap_info_struct(unsigned);
 extern int can_share_swap_page(struct page *);
-extern int remove_exclusive_swap_page(struct page *);
+extern int __remove_exclusive_swap_page(struct page *, int);
+static inline int remove_exclusive_swap_page(struct page *p)
+{
+	return __remove_exclusive_swap_page(p, 0);
+}
 struct backing_dev_info;
 
 extern struct swap_list_t swap_list;
@@ -272,9 +276,14 @@ static inline void put_swap_token(struct mm_struct *mm)
 #define delete_from_swap_cache(p)		/*NOTHING*/
 #define swap_token_default_timeout		0
 
-static inline int remove_exclusive_swap_page(struct page *p)
+static inline int __remove_exclusive_swap_page(struct page *p)
 {
 	return 0;
+}
+
+static inline int remove_exclusive_swap_page(struct page *p)
+{
+	return __remove_exclusive_swap_page(p, 0);
 }
 
 static inline swp_entry_t get_swap_page(void)

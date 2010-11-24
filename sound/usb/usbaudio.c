@@ -97,8 +97,10 @@ MODULE_PARM_DESC(async_unlink, "Use async unlink mode.");
 
 #define MAX_PACKS	10
 #define MAX_PACKS_HS	(MAX_PACKS * 8)	/* in high speed mode */
-#define MAX_URBS	5	/* max. 20ms long packets */
-#define SYNC_URBS	2	/* always two urbs for sync */
+//#define MAX_URBS	5	/* max. 20ms long packets */	
+#define MAX_URBS	8	/* max. 20ms long packets */	
+//#define SYNC_URBS	2	/* always two urbs for sync */	
+#define SYNC_URBS	4	/* always two urbs for sync */	
 #define MIN_PACKS_URB	1	/* minimum 1 packet per urb */
 
 typedef struct snd_usb_substream snd_usb_substream_t;
@@ -153,6 +155,7 @@ struct snd_usb_substream {
 	unsigned int format;     /* USB data format */
 	unsigned int datapipe;   /* the data i/o pipe */
 	unsigned int syncpipe;   /* 1 - async out or adaptive in */
+	unsigned int datainterval;      /* log_2 of data packet interval */	
 	unsigned int syncinterval;  /* P for adaptive mode, 0 otherwise */
 	unsigned int freqn;      /* nominal sampling rate in fs/fps in Q16.16 format */
 	unsigned int freqm;      /* momentary sampling rate in fs/fps in Q16.16 format */
@@ -164,6 +167,7 @@ struct snd_usb_substream {
 	unsigned int curframesize;	/* current packet size in frames (for capture) */
 	unsigned int fill_max: 1;	/* fill max packet size always */
 	unsigned int fmt_type;		/* USB audio format type (1-3) */
+	unsigned int packs_per_ms;      /* packets per millisecond (for playback) */ 
 
 	unsigned int running: 1;	/* running status */
 
@@ -325,6 +329,7 @@ static int prepare_capture_urb(snd_usb_substream_t *subs,
 	urb->dev = ctx->subs->dev; /* we need to set this at each time */
 	urb->number_of_packets = 0;
 	spin_lock_irqsave(&subs->lock, flags);
+
 	for (i = 0; i < ctx->packets; i++) {
 		urb->iso_frame_desc[i].offset = offs;
 		urb->iso_frame_desc[i].length = subs->curpacksize;
@@ -404,6 +409,7 @@ static int retire_capture_urb(snd_usb_substream_t *subs,
 		} else
 			spin_unlock_irqrestore(&subs->lock, flags);
 	}
+
 	return 0;
 }
 
@@ -770,6 +776,7 @@ static int start_urbs(snd_usb_substream_t *subs, snd_pcm_runtime_t *runtime)
 	unsigned int i;
 	int err;
 
+	printk("%s runtime->buffer_size: %d\n", __func__, runtime->buffer_size);
 	if (subs->stream->chip->shutdown)
 		return -EBADFD;
 
@@ -929,6 +936,7 @@ static int init_substream_urbs(snd_usb_substream_t *subs, unsigned int period_by
 	unsigned int maxsize, n, i;
 	int is_playback = subs->direction == SNDRV_PCM_STREAM_PLAYBACK;
 	unsigned int npacks[MAX_URBS], urb_packs, total_packs;
+	unsigned int packs_per_ms; 
 
 	/* calculate the frequency in 16.16 format */
 	if (snd_usb_get_speed(subs->dev) == USB_SPEED_FULL)
@@ -936,16 +944,20 @@ static int init_substream_urbs(snd_usb_substream_t *subs, unsigned int period_by
 	else
 		subs->freqn = get_usb_high_speed_rate(rate);
 	subs->freqm = subs->freqn;
-	subs->freqmax = subs->freqn + (subs->freqn >> 2); /* max. allowed frequency */
 	subs->phase = 0;
 
 	/* calculate the max. size of packet */
-	maxsize = ((subs->freqmax + 0xffff) * (frame_bits >> 3)) >> 16;
-	if (subs->maxpacksize && maxsize > subs->maxpacksize) {
-		//snd_printd(KERN_DEBUG "maxsize %d is greater than defined size %d\n",
-		//	   maxsize, subs->maxpacksize);
-		maxsize = subs->maxpacksize;
-	}
+        if (subs->maxpacksize) {
+                /* whatever fits into a max. size packet */
+                maxsize = subs->maxpacksize;
+                subs->freqmax = (maxsize / (frame_bits >> 3))
+                                << (16 - subs->datainterval);
+        } else {
+                /* no max. packet size: just take 25% higher than nominal */
+                subs->freqmax = subs->freqn + (subs->freqn >> 2);
+                maxsize = ((subs->freqmax + 0xffff) * (frame_bits >> 3))
+                                >> (16 - subs->datainterval);
+        }
 
 	if (subs->fill_max)
 		subs->curpacksize = subs->maxpacksize;
@@ -953,10 +965,19 @@ static int init_substream_urbs(snd_usb_substream_t *subs, unsigned int period_by
 		subs->curpacksize = maxsize;
 
 	if (snd_usb_get_speed(subs->dev) == USB_SPEED_FULL)
-		urb_packs = nrpacks;
+		packs_per_ms = 8 >> subs->datainterval;	
 	else
-		urb_packs = nrpacks * 8;
+		packs_per_ms = 1;	
 
+	subs->packs_per_ms = packs_per_ms;	
+        if (is_playback) {
+                urb_packs = nrpacks;
+                urb_packs = max(urb_packs, (unsigned int)MIN_PACKS_URB);
+                urb_packs = min(urb_packs, (unsigned int)MAX_PACKS);
+        } else
+                urb_packs = 32;	//	allocate larger packs per urb
+
+	urb_packs *= packs_per_ms;	
 	/* allocate a temporary buffer for playback */
 	if (is_playback) {
 		subs->tmpbuf = kmalloc(maxsize * urb_packs, GFP_KERNEL);
@@ -965,7 +986,46 @@ static int init_substream_urbs(snd_usb_substream_t *subs, unsigned int period_by
 			return -ENOMEM;
 		}
 	}
+	else {
+                total_packs = MAX_URBS * urb_packs;
+        }
+	// total_packs = 8 * 1 = 8
+	// usb_packs = 1, packs_per_ms = 1
 
+        subs->nurbs = (total_packs + urb_packs - 1) / urb_packs;
+	// subs->nurbs = (8+1-1) / 1 = 8
+        if (subs->nurbs > MAX_URBS) {
+	        /* too much... */
+                subs->nurbs = MAX_URBS;
+                total_packs = MAX_URBS * urb_packs;
+        }
+        n = total_packs;
+	// n = 8
+        for (i = 0; i < subs->nurbs; i++) {
+                npacks[i] = n > urb_packs ? urb_packs : n;
+                n -= urb_packs;
+        }
+        if (subs->nurbs <= 1) {
+                /* too little - we need at least two packets
+                 * to ensure contiguous playback/capture
+                 */
+                subs->nurbs = 2;
+                npacks[0] = (total_packs + 1) / 2;
+                npacks[1] = total_packs - npacks[0];
+        } else if (npacks[subs->nurbs-1] < MIN_PACKS_URB * packs_per_ms) {
+                /* the last packet is too small.. */
+                if (subs->nurbs > 2) {
+                        /* merge to the first one */
+                        npacks[0] += npacks[subs->nurbs - 1];
+                        subs->nurbs--;
+                } else {
+                        /* divide to two */
+                        subs->nurbs = 2;
+                        npacks[0] = (total_packs + 1) / 2;
+                        npacks[1] = total_packs - npacks[0];
+                }
+        }
+#if 0
 	/* decide how many packets to be used */
 	total_packs = (period_bytes + maxsize - 1) / maxsize;
 	if (total_packs < 2 * MIN_PACKS_URB)
@@ -1001,7 +1061,7 @@ static int init_substream_urbs(snd_usb_substream_t *subs, unsigned int period_by
 			npacks[1] = total_packs - npacks[0];
 		}
 	}
-
+#endif
 	/* allocate and initialize data urbs */
 	for (i = 0; i < subs->nurbs; i++) {
 		snd_urb_ctx_t *u = &subs->dataurb[i];
@@ -1013,7 +1073,9 @@ static int init_substream_urbs(snd_usb_substream_t *subs, unsigned int period_by
 			u->packets++; /* for transfer delimiter */
 		if (! is_playback) {
 			/* allocate a capture buffer per urb */
+			printk("maxsize: %d, u->packets: %d\n", maxsize, u->packets);
 			u->buf = kmalloc(maxsize * u->packets, GFP_KERNEL);
+
 			if (! u->buf) {
 				release_substream_urbs(subs, 0);
 				return -ENOMEM;
@@ -1235,6 +1297,15 @@ static int set_format(snd_usb_substream_t *subs, struct audioformat *fmt)
 		subs->datapipe = usb_sndisocpipe(dev, ep);
 	else
 		subs->datapipe = usb_rcvisocpipe(dev, ep);
+	
+	/* get data interval */
+        if (snd_usb_get_speed(subs->dev) == USB_SPEED_HIGH &&
+            get_endpoint(alts, 0)->bInterval >= 1 &&
+            get_endpoint(alts, 0)->bInterval <= 4)
+                subs->datainterval = get_endpoint(alts, 0)->bInterval - 1;
+        else
+                subs->datainterval = 0;
+
 	subs->syncpipe = subs->syncinterval = 0;
 	subs->maxpacksize = fmt->maxpacksize;
 	subs->fill_max = 0;
@@ -2505,9 +2576,12 @@ static int parse_audio_endpoints(snd_usb_audio_t *chip, int iface_no)
 		if (!csep && altsd->bNumEndpoints >= 2)
 			csep = snd_usb_find_desc(alts->endpoint[1].extra, alts->endpoint[1].extralen, NULL, USB_DT_CS_ENDPOINT);
 		if (!csep || csep[0] < 7 || csep[2] != EP_GENERAL) {
-			snd_printk(KERN_ERR "%d:%u:%d : no or invalid class specific endpoint descriptor\n",
+//			snd_printk(KERN_ERR "%d:%u:%d : no or invalid class specific endpoint descriptor\n",
+			snd_printk(KERN_WARNING "%d:%u:%d : no or invalid"
+                                   " class specific endpoint descriptor\n",
 				   dev->devnum, iface_no, altno);
-			continue;
+//			continue;
+			csep = NULL;
 		}
 
 		fp = kmalloc(sizeof(*fp), GFP_KERNEL);
@@ -2524,7 +2598,8 @@ static int parse_audio_endpoints(snd_usb_audio_t *chip, int iface_no)
 		fp->ep_attr = get_endpoint(alts, 0)->bmAttributes;
 		/* FIXME: decode wMaxPacketSize of high bandwith endpoints */
 		fp->maxpacksize = le16_to_cpu(get_endpoint(alts, 0)->wMaxPacketSize);
-		fp->attributes = csep[3];
+//		fp->attributes = csep[3];
+		fp->attributes = csep ? csep[3] : 0;
 
 		/* some quirks for attributes here */
 

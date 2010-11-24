@@ -17,6 +17,7 @@ struct parsed_partitions {
 		// by cfyeh 2007/11/13 +
 		int is_part_extended;
 		// by cfyeh 2007/11/13 -
+		int part_serial; /*  2009/06/15 cfyeh : partiton serial */
 	} parts[MAX_PART];
 	int next;
 	int limit;

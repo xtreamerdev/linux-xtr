@@ -35,7 +35,14 @@ static inline void *kmap(struct page *page)
 /* when CONFIG_HIGHMEM is not set these will be plain clear/copy_page */
 static inline void clear_user_highpage(struct page *page, unsigned long vaddr)
 {
+#ifdef CONFIG_REALTEK_PREVENT_DC_ALIAS
+	void *addr;
+
+	flush_dcache_page_alias(page);
+	addr = kmap_atomic(page, KM_USER0);
+#else
 	void *addr = kmap_atomic(page, KM_USER0);
+#endif
 	clear_user_page(addr, vaddr, page);
 	kunmap_atomic(addr, KM_USER0);
 	/* Make sure this page is cleared on other CPU's too before using it */
@@ -81,6 +88,9 @@ static inline void copy_user_highpage(struct page *to, struct page *from, unsign
 {
 	char *vfrom, *vto;
 
+#ifdef CONFIG_REALTEK_PREVENT_DC_ALIAS
+	flush_dcache_page_alias(from);
+#endif
 	vfrom = kmap_atomic(from, KM_USER0);
 	vto = kmap_atomic(to, KM_USER1);
 	copy_user_page(vto, vfrom, vaddr, to);

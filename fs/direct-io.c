@@ -161,6 +161,9 @@ static int dio_refill_pages(struct dio *dio)
 	int nr_pages;
 
 	nr_pages = min(dio->total_pages - dio->curr_page, DIO_PAGES);
+#ifdef CONFIG_USB_FILE_STORAGE_DIRECT_IO_MODE
+	if(current->mm) { // user mode pages
+#endif /* CONFIG_USB_FILE_STORAGE_DIRECT_IO_MODE */
 	down_read(&current->mm->mmap_sem);
 	ret = get_user_pages(
 		current,			/* Task for fault acounting */
@@ -172,6 +175,18 @@ static int dio_refill_pages(struct dio *dio)
 		&dio->pages[0],
 		NULL);				/* vmas */
 	up_read(&current->mm->mmap_sem);
+#ifdef CONFIG_USB_FILE_STORAGE_DIRECT_IO_MODE
+	} else // kernel mode pages
+	ret = get_kernel_pages(
+		current,			/* Task for fault acounting */
+		current->mm,			/* whose pages? */
+		dio->curr_user_address,		/* Where from? */
+		nr_pages,			/* How many pages? */
+		dio->rw == READ,		/* Write to memory? */
+		0,				/* force (?) */
+		&dio->pages[0],
+		NULL);				/* vmas */
+#endif /* CONFIG_USB_FILE_STORAGE_DIRECT_IO_MODE */
 
 	if (ret < 0 && dio->blocks_available && (dio->rw == WRITE)) {
 		/*

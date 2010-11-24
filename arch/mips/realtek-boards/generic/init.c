@@ -196,7 +196,7 @@ int parse_variable(const char *variable_name, char *store_ptr, int max_len, cons
 {
 	char *ptr;
 
-	ptr = prom_getenv(variable_name);
+	ptr = prom_getenv((char *)variable_name);
 	if(ptr) {
 		if(strlen(ptr) < max_len) {
 			strcpy(store_ptr, ptr);
@@ -209,17 +209,18 @@ int parse_variable(const char *variable_name, char *store_ptr, int max_len, cons
 }
 
 /* 
-	Exp: parse_series_variable("system_parameters_", platform_info.hdmikey, 571, 4, 1)
-		system_parameters_1, system_parameters_2, and ... will be read, joined, and put in platform_info.hdmikey
+	Exp: parse_series_variable("system_parameters_", platform_info.AES_CCMP, 571, 4, 1, 0)
+		system_parameters_1, system_parameters_2, and ... will be read, joined, and put in platform_info.AES_CCMP
 	variable_name: The prefix of variable name
 	store_ptr: The location to store the result
 	max_len: The maximum length of the result
 	level: How many variables will be read
 	contiguous: If "contiguous = 1", system_parameters_2 won't be parsed if system_parameters_1 doesn't exist. If "contiguous = 0", " " will be appended between variables.
+	txt2bin: If "txt2bin = 1", text will be converted into binary like this: "43" ==> 'C'. If "txt2bin = 1", "contiguous" must be 1.
  */
-int parse_series_variable(const char *variable_name, char *store_ptr, int max_len, int level, int contiguous)
+int parse_series_variable(const char *variable_name, char *store_ptr, int max_len, int level, int contiguous, int txt2bin)
 {
-	int i, len=0;
+	int i, len=0, sublen, wholestr_ptr=0;
 	char *ptr;
 	char ext_variable_name[32];
 
@@ -229,7 +230,11 @@ int parse_series_variable(const char *variable_name, char *store_ptr, int max_le
 		return -1;
 	}
 	if(level<1 || level > 9) {
-		prom_printf("%s,%d: Parameter error!\n", __FUNCTION__, __LINE__);
+		prom_printf("%s,%d: Parameter \"level\" error!\n", __FUNCTION__, __LINE__);
+		return -1;
+	}
+	if(txt2bin && !contiguous) {
+		prom_printf("%s,%d: Parameter \"txt2bin\" error!\n", __FUNCTION__, __LINE__);
 		return -1;
 	}
 
@@ -237,13 +242,48 @@ int parse_series_variable(const char *variable_name, char *store_ptr, int max_le
 		sprintf(ext_variable_name, "%s%d", variable_name, i);
 		ptr = prom_getenv(ext_variable_name);
 		if(ptr) {
-			len+=strlen(ptr);
-			if((len < max_len-1) || (((i == 1) || contiguous) && (len < max_len))) {
-				if(!contiguous && i>1) {
-					strcat(store_ptr, " ");
-					len += 1;
+			sublen = strlen(ptr);
+			if(txt2bin) {
+				if(sublen%2) {
+					prom_printf("Error! If \"txt2bin = 1\", there must be even number of chars in a sub-string.\n");
+					return -1;
 				}
-				strcat(store_ptr, ptr);
+				len+=sublen/2;
+			} else {
+				len+=sublen;
+				if(i>1 && !contiguous)
+					len+=1;
+			}
+			if(len < max_len) {
+				if(txt2bin) {
+					char halfword;
+					unsigned char wholeword=0;
+					int substr_ptr;
+					
+					for(substr_ptr=0;substr_ptr<sublen;substr_ptr++) {
+						halfword = *(ptr+substr_ptr);
+						if(halfword>='0' && halfword<='9')
+							halfword -= '0';
+						else if(halfword>='a' && halfword<='f')
+							halfword -= ('a'-10);
+						else if(halfword>='A' && halfword<='F')
+							halfword -= ('A'-10);
+						else {
+							prom_printf("%s,%d: Error! Not legal number char!\n", __FUNCTION__, __LINE__);
+							return -1;
+						}
+						if(substr_ptr%2) {
+							wholeword += halfword;
+							*(store_ptr+wholestr_ptr) = (char) wholeword;
+							wholestr_ptr++;
+						} else
+							wholeword = halfword<<4;
+					}
+				} else {
+					if(!contiguous && i>1)
+						strcat(store_ptr, " ");
+					strcat(store_ptr, ptr);
+				}
 			} else {
 				prom_printf("%s,%d: Overflow. Skip the other data!\n", __FUNCTION__, __LINE__);
 				break;
@@ -252,7 +292,10 @@ int parse_series_variable(const char *variable_name, char *store_ptr, int max_le
 			break;
 	}
 
-	return 0;
+	if(txt2bin)
+		return wholestr_ptr;
+	else
+		return strlen(store_ptr);
 }
 
 void __init prom_init(void)
@@ -288,7 +331,11 @@ void __init prom_init(void)
 	outl(c & ~0x80, 0xb20c);
 */
 
+#ifdef CONFIG_REALTEK_PREVENT_DC_ALIAS
+	prom_printf("\nRealtek LINUX (DC ALIAS) started...\n");
+#else
 	prom_printf("\nRealtek LINUX started...\n");
+#endif
 	prom_printf("Venus setting:\n\tROSs have %d bytes RAM.\n", CONFIG_REALTEK_RTOS_MEMORY_SIZE);
 // Turn off the interrupts of both com1 and com2 because that 1. when sending data through them from PC, System will crash; 2. when running linux and audio firmware at the same time, an unknown interrupt will be triggered on com1.
 	outl(inl(VENUS_MIS_U0LCR)&~0x80, VENUS_MIS_U0LCR);
@@ -313,6 +360,7 @@ void __init prom_init(void)
 	prom_printf("\tSystem CPU uses internal timer interrupt.\n");
 #endif
 
+	platform_info.update_mode = 0;
 	sprintf(platform_info.kernel_source_code_info, "%s\n%s", LINUX_SOURCE_CODE_SVN, UTS_VERSION);
 // It seems that we donot have bootup now.
 //	parse_variable("uprev", platform_info.bootup_version, 4, "");
@@ -359,27 +407,72 @@ void __init prom_init(void)
 
 		chip_id = inl(VENUS_SB2_CHIP_ID)&0xffff;
 		chip_info = (inl(VENUS_SB2_CHIP_INFO)&0xffff0000)>>16;
-		if(platform_info.cpu_id == realtek_venus_cpu) {
-			if(chip_id != 0x1281)
-				state = 1;
-			else if(chip_info == 0xA0)
-				;
-			else if(chip_info == 0xA1)
-				platform_info.cpu_id = realtek_venus2_cpu;
-			else
-				state = 1;
-		} else if(platform_info.cpu_id == realtek_neptune_cpu) {
-			if(chip_id != 0x1282)
-				state = 1;
-			else if(chip_info == 0xA0)
-				;
-			else
-				state = 1;
-		} else
-			state = 1;
-		if(state)
-			prom_printf("\tWe donot understand the SB2_CHIP_ID or SB2_CHIP_INFO right now. Linux is too old?\n");
-		prom_printf("\tThe information of this board: Company ID:0x%X    CPU ID: 0x%X    Board ID: 0x%X\n", platform_info.company_id, platform_info.cpu_id, platform_info.board_id);
+		switch(chip_id) {
+			case 0x1281:
+				if((platform_info.cpu_id&0xf) != realtek_venus_cpu)
+					state = 1;
+				if(chip_info == 0xA0)
+					platform_info.cpu_id = realtek_venus_cpu;
+				else if(chip_info == 0xA1)
+					platform_info.cpu_id = realtek_venus2_cpu;
+				else if(chip_info == 0xA2)
+					platform_info.cpu_id = realtek_venus3_cpu;
+				else {					
+					if(!state)
+						state = 2;
+					platform_info.cpu_id = realtek_venus_cpu;
+				}
+				break;
+			case 0x1282:
+				if((platform_info.cpu_id&0xf) != realtek_neptune_cpu)
+					state = 1;
+				if(chip_info == 0xA0)
+					platform_info.cpu_id = realtek_neptune_cpu;
+				else if(chip_info == 0xA1)
+					platform_info.cpu_id = realtek_neptuneB_cpu;
+				else {
+					if(!state)
+						state = 2;
+					platform_info.cpu_id = realtek_neptune_cpu;
+				}
+				break;
+			case 0x1283:
+/* From Mars on, revision number would be A0, B0, C0, ... */
+				if((platform_info.cpu_id&0xf) != realtek_mars_cpu)
+					state = 1;
+				if(chip_info == 0xA0)
+					platform_info.cpu_id = realtek_mars_cpu;
+				else if(chip_info == 0xB0)
+					platform_info.cpu_id = realtek_marsB_cpu;
+				else {
+					if(!state)
+						state = 2;
+					platform_info.cpu_id = realtek_mars_cpu;
+				}
+				break;
+			case 0x1284:
+/* From Mars on, revision number would be A0, B0, C0, ... */
+				if((platform_info.cpu_id&0xf) != realtek_jupiter_cpu)
+					state = 1;
+				if(chip_info == 0xA0)
+					platform_info.cpu_id = realtek_jupiter_cpu;
+				else {
+					if(!state)
+						state = 2;
+					platform_info.cpu_id = realtek_jupiter_cpu;
+				}
+				break;
+			default:
+				state = 3;
+		}
+		if(state == 1)
+			prom_printf("\033[0m\033[31;5mError! Bootloader has a wrong CPU ID?\033[0m\n");
+		else if(state == 2)
+			prom_printf("\033[0m\033[31;5mError! Unknown SB2_CHIP_INFO. Linux is too old?\033[0m\n");
+		else if(state == 3)
+			prom_printf("\033[0m\033[31;5mError! Unknown SB2_CHIP_ID. Linux is too old?\033[0m\n");
+		else
+			prom_printf("\tThe information of this board: Company ID:0x%X    CPU ID: 0x%X    Board ID: 0x%X\n", platform_info.company_id, platform_info.cpu_id, platform_info.board_id);
 	} else {
 		prom_printf("\t\"Bootloader version\" is unidentified. Reset it to default.\n");
 		platform_info.board_id = realtek_qa_board;
@@ -391,10 +484,16 @@ void __init prom_init(void)
 	prom_printf("\tEthernet Mac address: %s\n", platform_info.ethaddr);
 	if(!parse_variable("usb_param", platform_info.usb_param, 20, ""))
 		prom_printf("\tUSB parameters: %s\n", platform_info.usb_param);
+	if(!parse_variable("usb1_param", platform_info.usb1_param, 20, ""))
+		prom_printf("\tUSB1 parameters: %s\n", platform_info.usb1_param);
+	if(!parse_variable("usb2_param", platform_info.usb2_param, 20, ""))
+		prom_printf("\tUSB2 parameters: %s\n", platform_info.usb2_param);
 	
-	parse_series_variable("hdmikey_", platform_info.hdmikey, HDMI_KEY_LEN, 6, 1);
-	parse_series_variable("system_parameters_", platform_info.system_parameters, SYSTEM_PARAMETERS_LEN, 4, 0);
-	parse_series_variable("signature_", platform_info.signature, 129, 2, 1);
+	platform_info.AES_CCMP_len = parse_series_variable("AES_CCMP_", platform_info.AES_CCMP, AES_CCMP_LEN, 6, 1, 1);
+	parse_series_variable("system_parameters_", platform_info.system_parameters, SYSTEM_PARAMETERS_LEN, 4, 0, 0);
+	parse_series_variable("signature_", platform_info.signature, 129, 2, 1, 0);
+	platform_info.modelconfig_len=parse_series_variable("modelconfig_", platform_info.modelconfig,MODEL_CONFIG_LEN,1,1,1);
+	prom_printf("\tModel Config length=%d\n",platform_info.modelconfig_len);
 
 /*
 // These lines are for debugging when you encounter "irq 3: nobody cared!"

@@ -43,11 +43,15 @@ FEXPORT(fast_ret_from_irq)
         .set    at
 #endif
 
-#ifdef CONFIG_REALTEK_USE_SHADOW_REGISTERS
+#if defined(CONFIG_REALTEK_USE_SHADOW_REGISTERS) || defined(CONFIG_REALTEK_USE_DMEM)
 FEXPORT(ret_from_irq)
         LONG_L  t0, PT_STATUS(sp)               # returning to kernel mode?
         andi    t0, t0, KU_USER
+#ifdef CONFIG_REALTEK_USE_DMEM
+        beqz    t0, my_resume_kernel
+#else
         beqz    t0, resume_kernel
+#endif
 
 my_resume_userspace:
         local_irq_disable               # make sure we dont miss an
@@ -56,10 +60,18 @@ my_resume_userspace:
         LONG_L  a2, TI_FLAGS($28)       # current->work
         andi    t0, a2, _TIF_WORK_MASK  # (ignoring syscall_trace)
         bnez    t0, my_work_pending
+#ifdef CONFIG_REALTEK_USE_DMEM
+        j       restore_all
+#else
         j       my_restore_all
+#endif
 
 my_work_pending:
+#ifdef CONFIG_REALTEK_USE_DMEM
+        DMEM_SAVE_ON_DEMAND
+#else
         MY_SAVE_ON_DEMAND
+#endif
         andi    t0, a2, _TIF_NEED_RESCHED # a2 is preloaded with TI_FLAGS
         beqz    t0, my_work_notifysig
 my_work_resched:
@@ -83,9 +95,26 @@ my_work_notifysig:                      # deal with pending signals and
         j       restore_all
 #endif
 
+#ifdef CONFIG_REALTEK_USE_DMEM
+my_resume_kernel:
+	local_irq_disable
+	lw	t0, TI_PRE_COUNT($28)
+	bnez	t0, restore_all
+        DMEM_SAVE_ON_DEMAND
+my_need_resched:
+	LONG_L	t0, TI_FLAGS($28)
+	andi	t1, t0, _TIF_NEED_RESCHED
+	beqz	t1, restore_all
+	LONG_L	t0, PT_STATUS(sp)		# Interrupts off?
+	andi	t0, 1
+	beqz	t0, restore_all
+	jal	preempt_schedule_irq
+	b	my_need_resched
+#endif
+
 FEXPORT(ret_from_exception)
 	preempt_stop
-#ifndef CONFIG_REALTEK_USE_SHADOW_REGISTERS
+#if !defined(CONFIG_REALTEK_USE_SHADOW_REGISTERS) && !defined(CONFIG_REALTEK_USE_DMEM)
 FEXPORT(ret_from_irq)
 #endif
 	LONG_L	t0, PT_STATUS(sp)		# returning to kernel mode?

@@ -150,6 +150,48 @@ const char *__bdevname(dev_t dev, char *buffer)
 
 EXPORT_SYMBOL(__bdevname);
 
+// cfyeh +++ : for signature for hdd
+inline void check_rt_signature(struct gendisk *hd, struct block_device *bdev)
+{
+	Sector sect;
+	// no byte swap
+	//unsigned char *data;
+	//unsigned char signature[]={0xBA, 0xBE, 0xFA, 0xCE, 0xDE, 0xAD, 0xBE, 0xEF};
+	// have byte swap
+	unsigned int *data;
+	unsigned int signature[]={0xBABEFACE, 0xDEADBEEF};
+	int i = 0;
+
+	hd->signature = 0;
+
+	if(!strstr(hd->bus_type, "sata"))
+		return;
+
+	data = read_dev_sector(bdev, 62, &sect);
+	if (!data)
+		return;
+
+	for(i = 0; i < (sizeof(signature)/sizeof(signature[0])); i++)
+		printk("data[%d] 0x%x signature[%d] 0x%x\n", i, data[i], i, signature[i]);
+
+	for(i = 0; i < (sizeof(signature)/sizeof(signature[0])); i++)
+	{
+//		printk("data[%d] 0x%x signature[%d] 0x%x\n", i, data[i], i, signature[i]);
+		if(data[i] != signature[i])
+		{
+			hd->signature = 0;
+			break;
+		}
+		else
+			hd->signature = 1;
+	}
+
+//	printk(" hd->signature %d\n", hd->signature);
+	put_dev_sector(sect);
+	return;
+}
+// cfyeh --- : for signature for hdd
+
 static struct parsed_partitions *
 check_partition(struct gendisk *hd, struct block_device *bdev)
 {
@@ -178,10 +220,17 @@ check_partition(struct gendisk *hd, struct block_device *bdev)
 		memset(&state->parts, 0, sizeof(state->parts));
 		res = check_part[i++](state, bdev);
 	}
+
+	// cfyeh +++ : for signature for hdd
+	check_rt_signature(hd, bdev);
+	// cfyeh --- : for signature for hdd
+
 	if (res > 0)
 		return state;
-	if (!res)
+	if (!res) {
+		hd->part_num = 0;
 		printk(" unknown partition table\n");
+	}
 	else if (warn_no_part)
 		printk(" unable to read partition table\n");
 	kfree(state);
@@ -319,6 +368,41 @@ void add_partition(struct gendisk *disk, int part, sector_t start, sector_t len)
 	devfs_mk_symlink(symlink, part_disc);
 }
 
+/*  2009/06/15 cfyeh : partiton serial */
+void add_partition_for_part_serial(struct gendisk *disk, int part, sector_t start, sector_t len, int part_serial)
+{
+	struct hd_struct *p;
+	char part_disc[64], symlink[16];
+	
+	p = kmalloc(sizeof(*p), GFP_KERNEL);
+	if (!p)
+		return;
+	
+	memset(p, 0, sizeof(*p));
+	p->start_sect = start;
+	p->nr_sects = len;
+	p->partno = part;
+	p->part_serial = part_serial; /*  2009/06/15 cfyeh : partiton serial */
+
+	devfs_mk_bdev(MKDEV(disk->major, disk->first_minor + part),
+			S_IFBLK|S_IRUSR|S_IWUSR,
+			"%s/part%d", disk->devfs_name, part);
+
+	if (isdigit(disk->kobj.name[strlen(disk->kobj.name)-1]))
+		snprintf(p->kobj.name,KOBJ_NAME_LEN,"%sp%d",disk->kobj.name,part);
+	else
+		snprintf(p->kobj.name,KOBJ_NAME_LEN,"%s%d",disk->kobj.name,part);
+	p->kobj.parent = &disk->kobj;
+	p->kobj.ktype = &ktype_part;
+	kobject_register(&p->kobj);
+	disk->part[part-1] = p;
+
+	sprintf(symlink, "%s%d", disk->disk_name, part);
+	sprintf(part_disc, "%s/part%d", disk->devfs_name, part);
+	devfs_mk_symlink(symlink, part_disc);
+}
+/*  2009/06/15 cfyeh : partiton serial */
+
 static void disk_sysfs_symlinks(struct gendisk *disk)
 {
 	struct device *target = get_device(disk->driverfs_dev);
@@ -394,11 +478,18 @@ int rescan_partitions(struct gendisk *disk, struct block_device *bdev)
 		if (!size)
 			continue;
 		num++;
+		state->parts[p].part_serial = num; /*  2009/06/15 cfyeh : partiton serial */
 
 		// add to know which partition is a extended partition
 		// by cfyeh 2007/11/13 +
 		if(state->parts[p].is_part_extended == 1)
+		{
 			disk->part_extended = p;
+/*  2009/06/15 cfyeh : partiton extended serial */
+			disk->part_extended_serial = num;
+/*  2009/06/15 cfyeh : partiton extended serial */
+
+		}
 		// by cfyeh 2007/11/13 -
 	}
 	disk->part_num = num;
@@ -409,7 +500,14 @@ int rescan_partitions(struct gendisk *disk, struct block_device *bdev)
 		sector_t from = state->parts[p].from;
 		if (!size)
 			continue;
+/*  2009/06/15 cfyeh : partiton serial */
+#if 0
 		add_partition(disk, p, from, size);
+#else
+		add_partition_for_part_serial(disk, p, from, size, state->parts[p].part_serial);
+#endif
+/*  2009/06/15 cfyeh : partiton serial */
+
 #ifdef CONFIG_BLK_DEV_MD
 		if (state->parts[p].flags)
 			md_autodetect_dev(bdev->bd_dev+p);

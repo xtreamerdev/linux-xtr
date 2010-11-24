@@ -42,7 +42,6 @@
 #include <linux/mpage.h>
 
 static int fsync_buffers_list(spinlock_t *lock, struct list_head *list);
-static void invalidate_bh_lrus(void);
 
 #define BH_ENTRY(list) list_entry((list), struct buffer_head, b_assoc_buffers)
 
@@ -526,7 +525,7 @@ static void free_more_memory(void)
 	yield();
 
 	for_each_pgdat(pgdat) {
-		zones = pgdat->node_zonelists[GFP_NOFS&GFP_ZONEMASK].zones;
+		zones = pgdat->node_zonelists[(GFP_NOFS|__GFP_DVR)&GFP_ZONEMASK].zones;
 		if (*zones)
 			try_to_free_pages(zones, GFP_NOFS, 0, NULL);
 	}
@@ -1135,6 +1134,7 @@ grow_dev_page(struct block_device *bdev, sector_t block,
 	struct page *page;
 	struct buffer_head *bh;
 
+//	page = find_or_create_page(inode->i_mapping, index, GFP_NOFS | __GFP_DVR);
 	page = find_or_create_page(inode->i_mapping, index, GFP_NOFS);
 	if (!page)
 		return NULL;
@@ -1536,7 +1536,7 @@ static void invalidate_bh_lru(void *arg)
 	put_cpu_var(bh_lrus);
 }
 	
-static void invalidate_bh_lrus(void)
+void invalidate_bh_lrus(void)
 {
 	on_each_cpu(invalidate_bh_lru, NULL, 1, 1);
 }

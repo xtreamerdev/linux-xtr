@@ -36,6 +36,9 @@ extern void (*flush_cache_range)(struct vm_area_struct *vma,
 	unsigned long start, unsigned long end);
 extern void (*flush_cache_page)(struct vm_area_struct *vma, unsigned long page, unsigned long pfn);
 extern void __flush_dcache_page(struct page *page);
+#ifdef CONFIG_REALTEK_PREVENT_DC_ALIAS
+extern void flush_dcache_page_alias(struct page *page);
+#endif
 
 static inline void flush_dcache_page(struct page *page)
 {
@@ -58,8 +61,12 @@ static inline void copy_to_user_page(struct vm_area_struct *vma,
 	struct page *page, unsigned long vaddr, void *dst, const void *src,
 	unsigned long len)
 {
+#ifdef CONFIG_REALTEK_PREVENT_DC_ALIAS
+	flush_dcache_page_alias(page);
+#else
 	if (cpu_has_dc_aliases)
 		flush_cache_page(vma, vaddr, page_to_pfn(page));
+#endif
 	memcpy(dst, src, len);
 	flush_icache_page(vma, page);
 }
@@ -68,8 +75,12 @@ static inline void copy_from_user_page(struct vm_area_struct *vma,
 	struct page *page, unsigned long vaddr, void *dst, const void *src,
 	unsigned long len)
 {
+#ifdef CONFIG_REALTEK_PREVENT_DC_ALIAS
+	flush_dcache_page_alias(page);
+#else
 	if (cpu_has_dc_aliases)
 		flush_cache_page(vma, vaddr, page_to_pfn(page));
+#endif
 	memcpy(dst, src, len);
 }
 

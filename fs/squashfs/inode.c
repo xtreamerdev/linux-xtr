@@ -44,6 +44,13 @@
 
 #include "squashfs.h"
 
+#ifdef CONFIG_REALTEK_TEXT_DEBUG
+#include <asm/r4kcache.h>
+#include <venus.h>
+
+extern atomic_t text_count;
+#endif
+
 static void squashfs_put_super(struct super_block *);
 static int squashfs_statfs(struct super_block *, struct kstatfs *);
 static int squashfs_symlink_readpage(struct file *file, struct page *page);
@@ -1478,6 +1485,30 @@ failure:
 }
 
 
+#ifdef CONFIG_REALTEK_TEXT_DEBUG
+static struct page *
+grab_text_cache_page_nowait(struct address_space *mapping, unsigned long index)
+{
+	struct page *page = find_get_page(mapping, index);
+	unsigned int gfp_mask;
+
+	if (page) {
+		if (!TestSetPageLocked(page))
+			return page;
+		page_cache_release(page);
+		return NULL;
+	}
+	gfp_mask = mapping_gfp_mask(mapping) & ~__GFP_FS;
+	page = alloc_pages(GFP_TEXTUSER | __GFP_COLD, 0);
+	if (page && add_to_page_cache_lru(page, mapping, index, gfp_mask)) {
+		page_cache_release(page);
+		page = NULL;
+	}
+	return page;
+}
+#endif
+
+
 static int squashfs_readpage(struct file *file, struct page *page)
 {
 	struct inode *inode = page->mapping->host;
@@ -1495,6 +1526,10 @@ static int squashfs_readpage(struct file *file, struct page *page)
 	int mask = (1 << (sblk->block_log - PAGE_CACHE_SHIFT)) - 1;
 	int start_index = page->index & ~mask;
 	int end_index = start_index | mask;
+#ifdef CONFIG_REALTEK_TEXT_DEBUG
+	unsigned long dc_lsize = current_cpu_data.dcache.linesz;
+	unsigned long size, addr, flag;
+#endif
 
 	TRACE("Entered squashfs_readpage, page index %lx, start block %llx\n",
 					page->index,
@@ -1557,25 +1592,78 @@ static int squashfs_readpage(struct file *file, struct page *page)
 
 		if (i == page->index)  {
 			pageaddr = kmap_atomic(page, KM_USER0);
+#ifdef CONFIG_REALTEK_TEXT_DEBUG
+//			printk("111pageaddr: %x \n", pageaddr);
+//			if (pageaddr < (void *)0x87e00000)
+//				dump_stack();
+			atomic_inc(&text_count);
+			outl(0x0003edf, SB2_DGB_CTRL_REG7);
+			__asm__ __volatile__ ("sync");
+#endif
 			memcpy(pageaddr, data_ptr + byte_offset,
 					available_bytes);
 			memset(pageaddr + available_bytes, 0,
 					PAGE_CACHE_SIZE - available_bytes);
+#ifdef CONFIG_REALTEK_TEXT_DEBUG
+			size = PAGE_CACHE_SIZE;
+			addr = (unsigned long)pageaddr;
+			while (size > 0) {
+				flush_dcache_line(addr);
+				addr += dc_lsize;
+				size -= dc_lsize;
+			}
+			local_irq_save(flag);
+			if (atomic_add_return(-1, &text_count) == 0) {
+				__asm__ __volatile__("sync");
+				outl(0x0003fdf, SB2_DGB_CTRL_REG7);
+			}
+			local_irq_restore(flag);
+#endif
 			kunmap_atomic(pageaddr, KM_USER0);
 			flush_dcache_page(page);
 			SetPageUptodate(page);
 			unlock_page(page);
+#ifdef CONFIG_REALTEK_TEXT_DEBUG
+		} else if ((push_page =
+				grab_text_cache_page_nowait(mapping, i))) {
+#else
 		} else if ((push_page =
 				grab_cache_page_nowait(mapping, i))) {
+#endif
+			if (PageUptodate(push_page))
+				goto skip_page;
+
  			pageaddr = kmap_atomic(push_page, KM_USER0);
+#ifdef CONFIG_REALTEK_TEXT_DEBUG
+//			printk("222pageaddr: %x \n", pageaddr);
+			atomic_inc(&text_count);
+			outl(0x0003edf, SB2_DGB_CTRL_REG7);
+			__asm__ __volatile__ ("sync");
+#endif
 
 			memcpy(pageaddr, data_ptr + byte_offset,
 					available_bytes);
 			memset(pageaddr + available_bytes, 0,
 					PAGE_CACHE_SIZE - available_bytes);
+#ifdef CONFIG_REALTEK_TEXT_DEBUG
+			size = PAGE_CACHE_SIZE;
+			addr = (unsigned long)pageaddr;
+			while (size > 0) {
+				flush_dcache_line(addr);
+				addr += dc_lsize;
+				size -= dc_lsize;
+			}
+			local_irq_save(flag);
+			if (atomic_add_return(-1, &text_count) == 0) {
+				__asm__ __volatile__("sync");
+				outl(0x0003fdf, SB2_DGB_CTRL_REG7);
+			}
+			local_irq_restore(flag);
+#endif
 			kunmap_atomic(pageaddr, KM_USER0);
 			flush_dcache_page(push_page);
 			SetPageUptodate(push_page);
+skip_page:
 			unlock_page(push_page);
 			page_cache_release(push_page);
 		}
@@ -1593,7 +1681,28 @@ static int squashfs_readpage(struct file *file, struct page *page)
 
 skip_read:
 	pageaddr = kmap_atomic(page, KM_USER0);
+#ifdef CONFIG_REALTEK_TEXT_DEBUG
+//	printk("333pageaddr: %x \n", pageaddr);
+	atomic_inc(&text_count);
+	outl(0x0003edf, SB2_DGB_CTRL_REG7);
+	__asm__ __volatile__ ("sync");
+#endif
 	memset(pageaddr + bytes, 0, PAGE_CACHE_SIZE - bytes);
+#ifdef CONFIG_REALTEK_TEXT_DEBUG
+	size = PAGE_CACHE_SIZE;
+	addr = (unsigned long)pageaddr;
+	while (size > 0) {
+		flush_dcache_line(addr);
+		addr += dc_lsize;
+		size -= dc_lsize;
+	}
+	local_irq_save(flag);
+	if (atomic_add_return(-1, &text_count) == 0) {
+		__asm__ __volatile__("sync");
+		outl(0x0003fdf, SB2_DGB_CTRL_REG7);
+	}
+	local_irq_restore(flag);
+#endif
 	kunmap_atomic(pageaddr, KM_USER0);
 	flush_dcache_page(page);
 	SetPageUptodate(page);

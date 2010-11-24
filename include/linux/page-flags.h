@@ -77,9 +77,12 @@
 #define PG_nosave_free		19	/* Free, should not be written */
 #define PG_uncached		20	/* Page has been mapped as uncached */
 
-#define PG_dvr			23	/* mark dvr page used in direct I/O */
-#define PG_again		24
-#define PG_flush		25
+#define PG_head 		21	/* mark page used in out page list */
+#define PG_ramfs		22	/* mark page used in out page list */
+#define PG_dvrfs		23	/* mark page used in out page list */
+#define PG_dvr			24	/* mark dvr page used in direct I/O */
+#define PG_again		25
+#define PG_flush		26
 
 /*
  * Global page accounting.  One instance per CPU.  Only unsigned longs are
@@ -318,6 +321,18 @@ extern void __mod_page_state(unsigned offset, unsigned long delta);
 #define PageUncached(page)	test_bit(PG_uncached, &(page)->flags)
 #define SetPageUncached(page)	set_bit(PG_uncached, &(page)->flags)
 #define ClearPageUncached(page)	clear_bit(PG_uncached, &(page)->flags)
+
+#define PageHead(page)		test_bit(PG_head, &(page)->flags)
+#define SetPageHead(page)	set_bit(PG_head, &(page)->flags)
+#define ClearPageHead(page)	clear_bit(PG_head, &(page)->flags)
+
+#define PageRamfs(page)		test_bit(PG_ramfs, &(page)->flags)
+#define SetPageRamfs(page)	set_bit(PG_ramfs, &(page)->flags)
+#define ClearPageRamfs(page)	clear_bit(PG_ramfs, &(page)->flags)
+
+#define PageDvrfs(page)		test_bit(PG_dvrfs, &(page)->flags)
+#define SetPageDvrfs(page)	set_bit(PG_dvrfs, &(page)->flags)
+#define ClearPageDvrfs(page)	clear_bit(PG_dvrfs, &(page)->flags)
 
 #define PageDVR(page)		test_bit(PG_dvr, &(page)->flags)
 #define SetPageDVR(page)	set_bit(PG_dvr, &(page)->flags)

@@ -66,7 +66,7 @@ extern struct task_struct * dnotifyThread; /* remove sparse warning */
 struct task_struct * dnotifyThread = NULL;
 static struct super_operations cifs_super_ops; 
 //unsigned int CIFSMaxBufSize = CIFS_MAX_MSGSIZE;
-unsigned int CIFSMaxBufSize = (60*1024);
+unsigned int CIFSMaxBufSize = (32*1024);
 module_param(CIFSMaxBufSize, int, 0);
 MODULE_PARM_DESC(CIFSMaxBufSize,"Network buffer size (not including header). Default: 16384 Range: 8192 to 130048");
 unsigned int cifs_min_rcv = CIFS_MIN_RCV_POOL;
@@ -137,7 +137,7 @@ out_no_root:
 	cERROR(1, ("cifs_read_super: get root inode failed"));
 	if (inode)
 		iput(inode);
-
+	cifs_umount(sb, cifs_sb);
 out_mount_failed:
 	if(cifs_sb) {
 		if(cifs_sb->local_nls)
@@ -664,29 +664,9 @@ struct inode_operations cifs_symlink_inode_ops = {
 	.removexattr = cifs_removexattr,
 #endif 
 };
-ssize_t js_read(struct file *file, char __user *read_data,
-	size_t read_size, loff_t *poffset)
-{
-    if(file->f_flags & O_DIRECT)
-        return cifs_user_read(file,read_data,read_size,poffset);
-    else
-        return do_sync_read(file,read_data,read_size,poffset);
-}
-ssize_t js_write(struct file *file, const char __user *write_data,
-	size_t write_size, loff_t *poffset)
-{
-    if(file->f_flags & O_DIRECT)
-        return cifs_user_write(file,write_data,write_size,poffset);
-    else
-        return do_sync_write(file,write_data,write_size,poffset);
-}
-
 const struct file_operations cifs_file_ops = {
-//  js modify to replace org function to js_read or js_write    
-//	.read = do_sync_read,
-//	.write = do_sync_write,
-	.read = js_read,
-	.write = js_write,
+	.read = do_sync_read,
+	.write = do_sync_write,
 	.aio_read = generic_file_aio_read,
 	.aio_write = cifs_file_aio_write,
 	.open = cifs_open,
@@ -927,8 +907,8 @@ cifs_init_mids(void)
 				sizeof (struct oplock_q_entry), 0,
 				SLAB_HWCACHE_ALIGN, NULL, NULL);
 	if (cifs_oplock_cachep == NULL) {
-		kmem_cache_destroy(cifs_mid_cachep);
 		mempool_destroy(cifs_mid_poolp);
+		kmem_cache_destroy(cifs_mid_cachep);
 		return -ENOMEM;
 	}
 

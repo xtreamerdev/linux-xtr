@@ -37,6 +37,7 @@
 
 /* some random number */
 #define RAMFS_MAGIC	0x858458f6
+#define DVRFS_MAGIC	0x858458f8
 
 static struct super_operations ramfs_ops;
 static struct address_space_operations ramfs_aops;
@@ -202,10 +203,40 @@ static int ramfs_fill_super(struct super_block * sb, void * data, int silent)
 	return 0;
 }
 
+static int dvrfs_fill_super(struct super_block * sb, void * data, int silent)
+{
+	struct inode * inode;
+	struct dentry * root;
+
+	sb->s_maxbytes = MAX_LFS_FILESIZE;
+	sb->s_blocksize = PAGE_CACHE_SIZE;
+	sb->s_blocksize_bits = PAGE_CACHE_SHIFT;
+	sb->s_magic = DVRFS_MAGIC;
+	sb->s_op = &ramfs_ops;
+	sb->s_time_gran = 1;
+	inode = ramfs_get_inode(sb, S_IFDIR | 0755, 0);
+	if (!inode)
+		return -ENOMEM;
+
+	root = d_alloc_root(inode);
+	if (!root) {
+		iput(inode);
+		return -ENOMEM;
+	}
+	sb->s_root = root;
+	return 0;
+}
+
 struct super_block *ramfs_get_sb(struct file_system_type *fs_type,
 	int flags, const char *dev_name, void *data)
 {
 	return get_sb_nodev(fs_type, flags, data, ramfs_fill_super);
+}
+
+struct super_block *dvrfs_get_sb(struct file_system_type *fs_type,
+	int flags, const char *dev_name, void *data)
+{
+	return get_sb_nodev(fs_type, flags, data, dvrfs_fill_super);
 }
 
 static struct super_block *rootfs_get_sb(struct file_system_type *fs_type,
@@ -219,6 +250,11 @@ static struct file_system_type ramfs_fs_type = {
 	.get_sb		= ramfs_get_sb,
 	.kill_sb	= kill_litter_super,
 };
+static struct file_system_type dvrfs_fs_type = {
+	.name		= "dvrfs",
+	.get_sb		= dvrfs_get_sb,
+	.kill_sb	= kill_litter_super,
+};
 static struct file_system_type rootfs_fs_type = {
 	.name		= "rootfs",
 	.get_sb		= rootfs_get_sb,
@@ -230,13 +266,25 @@ static int __init init_ramfs_fs(void)
 	return register_filesystem(&ramfs_fs_type);
 }
 
+static int __init init_dvrfs_fs(void)
+{
+	return register_filesystem(&dvrfs_fs_type);
+}
+
 static void __exit exit_ramfs_fs(void)
 {
 	unregister_filesystem(&ramfs_fs_type);
 }
 
+static void __exit exit_dvrfs_fs(void)
+{
+	unregister_filesystem(&dvrfs_fs_type);
+}
+
 module_init(init_ramfs_fs)
 module_exit(exit_ramfs_fs)
+module_init(init_dvrfs_fs)
+module_exit(exit_dvrfs_fs)
 
 int __init init_rootfs(void)
 {

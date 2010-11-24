@@ -58,6 +58,7 @@ struct exec_domain;
 #define CLONE_UNTRACED		0x00800000	/* set if the tracing process can't force CLONE_PTRACE on this clone */
 #define CLONE_CHILD_SETTID	0x01000000	/* set the TID in the child */
 #define CLONE_STOPPED		0x02000000	/* Start in stopped state */
+#define CLONE_HELPER		0x04000000	/* set if it is created by khelper */
 
 /*
  * List of flags we want to share for kernel threads,
@@ -791,6 +792,7 @@ do { if (atomic_dec_and_test(&(tsk)->usage)) __put_task_struct(tsk); } while(0)
 #define PF_SYNCWRITE	0x00200000	/* I am doing a sync write */
 #define PF_BORROWED_MM	0x00400000	/* I am a kthread doing use_mm */
 #define PF_RANDOMIZE	0x00800000	/* randomize virtual address space */
+#define PF_HELPER	0x01000000	/* I am created by khelper */
 
 /*
  * Only the _current_ task can read/write to tsk->flags, but other

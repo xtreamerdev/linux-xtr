@@ -15,14 +15,18 @@
 #include <linux/errno.h>
 #include <linux/time.h>
 #include <venus.h>
+#include <mars.h>
 #include <asm/io.h>
 #include <platform.h>
 #include <linux/parser.h>
 #include <linux/kernel.h>
 #include <prom.h>
+#include <linux/delay.h>
 
 #define LOGO_INFO_ADDR1	0xbfc6ff00
 #define LOGO_INFO_ADDR2	0xbfc3ff00
+#define BOOT_PARAM_ADDR_NEPTUNE	0xbfc01010
+#define BOOT_PARAM_ADDR_MARS	0xbfcff800
 #define LOGO_INFO_SIZE	128
 
 typedef struct {
@@ -31,33 +35,1706 @@ typedef struct {
 	int	color[4];
 } logo_info_struct;
 
+typedef struct {
+	unsigned int flash_type;
+	unsigned int region;
+	unsigned int mac_hi;
+	unsigned int mac_lo;
+	unsigned char *logo_img_saddr;
+	unsigned int logo_img_len;
+	unsigned int logo_type;
+	unsigned int logo_offset;
+	unsigned int logo_reg_5370;
+	unsigned int logo_reg_5374;
+	unsigned int logo_reg_5378;
+	unsigned int logo_reg_537c;
+	unsigned int rescue_img_size;
+	unsigned char *rescue_img_part0_saddr;
+	unsigned int rescue_img_part0_len;
+	unsigned char *rescue_img_part1_saddr;
+	unsigned int rescue_img_part1_len;
+	unsigned char *env_param_saddr;
+} boot_extern_param;
+
 static logo_info_struct logo_info;
 
 extern unsigned long dvr_task;	/* dvr application's PID */
 extern unsigned long (*rtc_get_time)(void);
-extern int venus_cpu_suspend(int board_id, int gpio, unsigned int options);
+extern int venus_cpu_suspend(int board_id, int voltage_gpio, unsigned int options, unsigned int hwinfo, unsigned int powerkey_irrp, unsigned int ejectkey_irrp, int powerkey_gpio, int ejectkey_gpio, int vfd_type);
+extern int mars_cpu_suspend(int board_id, int voltage_gpio, unsigned int options, unsigned int hwinfo, unsigned int powerkey_irrp, unsigned int ejectkey_irrp, int powerkey_gpio, int ejectkey_gpio, int vfd_type);
 
 int Suspend_ret;	/* The return value of venus_cpu_suspend. If Linux is woken up by RTC alarm, it is 2; if woken up by eject event, it is 1; for the other situation, it is 0. */
+int suspend_options = 0;/* 0: normal suspend. 1: cut off DRAM. */
 
 extern platform_info_t platform_info;
 
-void setup_boot_image(void)
+#ifndef CONFIG_REALTEK_HDMI_NONE
+#define ARRAY_COUNT(x)  (sizeof(x) / sizeof((x)[0]))
+
+static void BusyWaiting(unsigned int count)
 {
-	unsigned int value;
+	unsigned int i;
 
-	if (platform_info.board_id == realtek_pvr_demo_board)
-		return;
+	for(i = 0; i < count; i++) ;
+}
 
-	// change to "composite" mode for SCART
-	value = *(volatile unsigned int *)0xb801b108;
-	*(volatile unsigned int *)0xb801b108 = (value & 0xffbfffff) ;
-	
-	// change to AV mode for SCART
-	if (platform_info.board_id == realtek_1261_demo_board) {
-		value = *(volatile unsigned int *)0xb801b10c;
-		*(volatile unsigned int *)0xb801b10c = (value & 0xfffffff3) ;
+void I2C_Write1(unsigned int addr, unsigned int *array)
+{
+	int n;
+	unsigned int *interrupt;
+	*(volatile unsigned int *)0xb801b36c = 0x0;//disable i2c
+	*(volatile unsigned int *)0xb801b304 = addr&0x0ff;
+	*(volatile unsigned int *)0xb801b36c = 0x1;//enable i2c
+	interrupt = (void *)0xb801b334;
+	for (n = 1; n <= array[0]; n++)
+	{
+		while((*interrupt&0x00000010) != 0x10)		//wait for Tx empty
+			BusyWaiting(100000);
+		BusyWaiting(7000);
+		*(volatile unsigned int *)0xb801b310=array[n] & 0x0ff;
+
 	}
+}
 
+#ifdef CONFIG_REALTEK_HDMI_NXP
+void SET_NXP_HDMI_480P()
+{
+	unsigned int	I2CBUF[5];
+	unsigned int	i = 0;
+	unsigned int	i2c_addr = 0xe0;	
+	unsigned int P480[]={
+		0xff, 0x0,
+		0x1, 0x0,
+		0xa, 0x0,
+		0xb, 0x0,
+		0xc, 0x1,
+		0xf, 0x0,
+		0x10, 0x80,
+		0x11, 0x0,
+		0x12, 0x1,
+		0x15, 0x0,
+		0x16, 0x1,
+		0x17, 0x0,
+		0x18, 0xff,
+		0x19, 0xff,
+		0x1a, 0xff,
+		0x1b, 0x0,
+		0x1c, 0x0,
+		0x1d, 0x0,
+		0x1e, 0xff,
+		0x1f, 0x0,
+		0x20, 0x23,
+		0x21, 0x50,
+		0x22, 0x14,
+		0x23, 0x8f,
+		0x24, 0xc,
+		0x25, 0x0,
+		0x80, 0x5,
+		0x81, 0x0,
+		0x82, 0x0,
+		0x83, 0x6,
+		0x84, 0x0,
+		0x85, 0x6,
+		0x86, 0x0,
+		0x87, 0x2,
+		0x88, 0x0,
+		0x89, 0x6,
+		0x8a, 0x92,
+		0x8b, 0x7,
+		0x8c, 0x50,
+		0x8d, 0x2,
+		0x8e, 0x0,
+		0x8f, 0x2,
+		0x90, 0xce,
+		0x91, 0x0,
+		0x92, 0x0,
+		0x93, 0x2,
+		0x94, 0x0,
+		0x95, 0x0,
+		0x96, 0x0,
+		0x97, 0x3,
+		0x98, 0x8c,
+		0x99, 0x0,
+		0x9a, 0x0,
+		0x9b, 0x0,
+		0x9c, 0x0,
+		0x9d, 0x0,
+		0x9e, 0x0,
+		0xa0, 0x1,
+		0xa1, 0x0,
+		0xa2, 0x8d,
+		0xa3, 0x0,
+		0xa4, 0x2b,
+		0xa5, 0x0,
+		0xa6, 0x0,
+		0xa7, 0x0,
+		0xa8, 0x0,
+		0xa9, 0x0,
+		0xaa, 0x0,
+		0xab, 0x0,
+		0xac, 0x0,
+		0xad, 0x0,
+		0xae, 0x0,
+		0xaf, 0x0,
+		0xb0, 0x0,
+		0xb1, 0x0,
+		0xb2, 0x0,
+		0xb3, 0x0,
+		0xb4, 0x0,
+		0xb5, 0x0,
+		0xb6, 0x0,
+		0xb7, 0x0,
+		0xb8, 0x0,
+		0xb9, 0x0,
+		0xba, 0x0,
+		0xbb, 0x0,
+		0xbc, 0x0,
+		0xbd, 0x0,
+		0xbe, 0x0,
+		0xbf, 0x0,
+		0xc0, 0x0,
+		0xc1, 0x0,
+		0xc2, 0x0,
+		0xc3, 0x0,
+		0xc4, 0x0,
+		0xc5, 0x0,
+		0xc6, 0x0,
+		0xc7, 0x0,
+		0xc8, 0x0,
+		0xca, 0x40,
+		0xcb, 0x0,
+		0xcc, 0x0,
+		0xcd, 0x0,
+		0xce, 0x0,
+		0xcf, 0x0,
+		0xd0, 0x11,
+		0xd1, 0x7a,
+		0xe4, 0x0,
+		0xe5, 0x48,
+		0xe8, 0x80,
+		0xe9, 0x75,
+		0xea, 0x30,
+		0xeb, 0x0,
+		0xec, 0x0,
+		0xee, 0x3,
+		0xef, 0x1b,
+		0xf0, 0x0,
+		0xf1, 0x2,
+		0xf2, 0x2,
+		0xf5, 0x0,
+		0xf8, 0x0,
+		0xf9, 0x60,
+		0xfc, 0x0,
+		0xfd, 0x2,
+		0xfe, 0xa1,
+		0xff, 0x1,
+		0x0, 0x0,
+		0x1, 0x0,
+		0x2, 0x0,
+		0x3, 0x0,
+		0x4, 0x0,
+		0x5, 0x0,
+		0x6, 0x0,
+		0x7, 0x0,
+		0x8, 0x0,
+		0x9, 0x0,
+		0xa, 0x0,
+		0xb, 0x0,
+		0xc, 0x0,
+		0xd, 0x0,
+		0x1b, 0x0,
+		0x1c, 0x0,
+		0x1d, 0x0,
+		0x1e, 0x0,
+		0x1f, 0x0,
+		0x20, 0x0,
+		0x21, 0x0,
+		0x22, 0x0,
+		0x23, 0x0,
+		0x24, 0x0,
+		0x25, 0x0,
+		0x26, 0x0,
+		0x27, 0x0,
+		0x28, 0x0,
+		0x29, 0x0,
+		0x2a, 0x0,
+		0x2b, 0x0,
+		0x2c, 0x0,
+		0x2d, 0x0,
+		0x2e, 0x0,
+		0x2f, 0x0,
+		0x30, 0x0,
+		0x31, 0x0,
+		0x32, 0x0,
+		0x33, 0x0,
+		0x34, 0x0,
+		0x35, 0x0,
+		0x36, 0x0,
+		0x37, 0x0,
+		0x38, 0x0,
+		0x39, 0x0,
+		0x3a, 0x0,
+		0x3b, 0x0,
+		0x3c, 0x0,
+		0x3d, 0x0,
+		0x3e, 0x0,
+		0x3f, 0x0,
+		0x40, 0x0,
+		0x41, 0x0,
+		0x42, 0x0,
+		0x43, 0x0,
+		0x44, 0x0,
+		0x45, 0x0,
+		0x46, 0x0,
+		0x47, 0x0,
+		0x48, 0x0,
+		0xa0, 0x0,
+		0xa1, 0x0,
+		0xa2, 0x0,
+		0xa3, 0x0,
+		0xa4, 0x0,
+		0xa5, 0x0,
+		0xa6, 0x0,
+		0xa7, 0x0,
+		0xa8, 0x0,
+		0xbd, 0x0,
+		0xbe, 0x0,
+		0xbf, 0x0,
+		0xc0, 0x0,
+		0xc1, 0x0,
+		0xc2, 0x0,
+		0xc3, 0x0,
+		0xc4, 0x0,
+		0xc5, 0x0,
+		0xc6, 0x0,
+		0xc7, 0x0,
+		0xc8, 0x0,
+		0xca, 0x0,
+		0xff, 0x2,
+		0x0, 0x1e,
+		0x1, 0x2,
+		0x2, 0x0,
+		0x3, 0x84,
+		0x4, 0x0,
+		0x5, 0x1,
+		0x6, 0x92,
+		0x7, 0x14,
+		0x8, 0x0,
+		0x9, 0xa,
+		0xa, 0x0,
+		0xb, 0xa1,
+		0xc, 0x0,
+		0xd, 0x1,
+		0xe, 0x2,
+		0x10, 0x0,
+		0x11, 0x0,
+		0xff, 0x9,
+		0xfa, 0x0,
+		0xfb, 0xa0,
+		0xfc, 0x80,
+		0xfd, 0x60,
+		0xfe, 0x0,
+		0xff, 0x10,
+		0x20, 0x81,
+		0x21, 0x0,
+		0x22, 0x0,
+		0x23, 0x0,
+		0x24, 0x0,
+		0x25, 0x0,
+		0x26, 0x0,
+		0x27, 0x0,
+		0x28, 0x0,
+		0x29, 0x0,
+		0x2a, 0x0,
+		0x2b, 0x0,
+		0x2c, 0x0,
+		0x2d, 0x0,
+		0x2e, 0x0,
+		0x2f, 0x0,
+		0x30, 0x0,
+		0x31, 0x0,
+		0x32, 0x0,
+		0x33, 0x0,
+		0x34, 0x0,
+		0x35, 0x0,
+		0x36, 0x0,
+		0x37, 0x0,
+		0x38, 0x0,
+		0x39, 0x0,
+		0x3a, 0x0,
+		0x3b, 0x0,
+		0x3c, 0x0,
+		0x3d, 0x0,
+		0x3e, 0x0,
+		0x40, 0x82,
+		0x41, 0x2,
+		0x42, 0xd,
+		0x43, 0xe4,
+		0x44, 0x20,
+		0x45, 0x68,
+		0x46, 0x0,
+		0x47, 0x3,
+		0x48, 0x0,
+		0x49, 0x0,
+		0x4a, 0x0,
+		0x4b, 0x0,
+		0x4c, 0x0,
+		0x4d, 0x0,
+		0x4e, 0x0,
+		0x4f, 0x0,
+		0x50, 0x0,
+		0x51, 0x0,
+		0x52, 0x0,
+		0x53, 0x0,
+		0x54, 0x0,
+		0x55, 0x0,
+		0x56, 0x0,
+		0x57, 0x0,
+		0x58, 0x0,
+		0x59, 0x0,
+		0x5a, 0x0,
+		0x5b, 0x0,
+		0x5c, 0x0,
+		0x5d, 0x0,
+		0x5e, 0x0,
+		0x60, 0x83,
+		0x61, 0x0,
+		0x62, 0x0,
+		0x63, 0x0,
+		0x64, 0x0,
+		0x65, 0x0,
+		0x66, 0x0,
+		0x67, 0x0,
+		0x68, 0x0,
+		0x69, 0x0,
+		0x6a, 0x0,
+		0x6b, 0x0,
+		0x6c, 0x0,
+		0x6d, 0x0,
+		0x6e, 0x0,
+		0x6f, 0x0,
+		0x70, 0x0,
+		0x71, 0x0,
+		0x72, 0x0,
+		0x73, 0x0,
+		0x74, 0x0,
+		0x75, 0x0,
+		0x76, 0x0,
+		0x77, 0x0,
+		0x78, 0x0,
+		0x79, 0x0,
+		0x7a, 0x0,
+		0x7b, 0x0,
+		0x7c, 0x0,
+		0x7d, 0x0,
+		0x7e, 0x0,
+		0x80, 0x84,
+		0x81, 0x1,
+		0x82, 0xa,
+		0x83, 0x70,
+		0x84, 0x1,
+		0x85, 0x0,
+		0x86, 0x0,
+		0x87, 0x0,
+		0x88, 0x0,
+		0x89, 0x0,
+		0x8a, 0x0,
+		0x8b, 0x0,
+		0x8c, 0x0,
+		0x8d, 0x0,
+		0x8e, 0x0,
+		0x8f, 0x0,
+		0x90, 0x0,
+		0x91, 0x0,
+		0x92, 0x0,
+		0x93, 0x0,
+		0x94, 0x0,
+		0x95, 0x0,
+		0x96, 0x0,
+		0x97, 0x0,
+		0x98, 0x0,
+		0x99, 0x0,
+		0x9a, 0x0,
+		0x9b, 0x0,
+		0x9c, 0x0,
+		0x9d, 0x0,
+		0x9e, 0x0,
+		0xa0, 0x85,
+		0xa1, 0x0,
+		0xa2, 0x0,
+		0xa3, 0x0,
+		0xa4, 0x0,
+		0xa5, 0x0,
+		0xa6, 0x0,
+		0xa7, 0x0,
+		0xa8, 0x0,
+		0xa9, 0x0,
+		0xaa, 0x0,
+		0xab, 0x0,
+		0xac, 0x0,
+		0xad, 0x0,
+		0xae, 0x0,
+		0xaf, 0x0,
+		0xb0, 0x0,
+		0xb1, 0x0,
+		0xb2, 0x0,
+		0xb3, 0x0,
+		0xb4, 0x0,
+		0xb5, 0x0,
+		0xb6, 0x0,
+		0xb7, 0x0,
+		0xb8, 0x0,
+		0xb9, 0x0,
+		0xba, 0x0,
+		0xbb, 0x0,
+		0xbc, 0x0,
+		0xbd, 0x0,
+		0xbe, 0x0,
+		0xff, 0x11,
+		0x0, 0x1, // audio mute
+		0x1, 0x0,
+		0x2, 0x0,
+		0x3, 0x0,
+		0x4, 0x80,
+		0x5, 0x78,
+		0x6, 0x69,
+		0x7, 0x0,
+		0x8, 0x0,
+		0x9, 0x18,
+		0xa, 0x0,
+		0xb, 0x0,
+		0xc, 0x33,
+		0xd, 0x4,
+		0xe, 0x1,
+		0xf, 0x14,
+		0x14, 0x0,
+		0x15, 0x0,
+		0x16, 0x2,
+		0x17, 0x0,
+		0x18, 0x0,
+		0x19, 0x0,
+		0x1a, 0x0,
+		0x1b, 0x0,
+		0x1c, 0x0,
+		0x1d, 0x0,
+		0x1e, 0x0,
+		0x1f, 0x0,
+		0x20, 0x5,
+		0x21, 0x0,
+		0x22, 0x0,
+		0x23, 0x0,
+		0x24, 0x0,
+		0x25, 0x0,
+		0x26, 0x0,
+		0x27, 0x0,
+		0x28, 0x0,
+		0x29, 0x0,
+		0x2a, 0x0,
+		0x2b, 0x0,
+		0x2c, 0x0,
+		0x2d, 0x0,
+		0x2e, 0x0,
+		0x2f, 0x0,
+		0x30, 0x0,
+		0x31, 0x0,
+		0x32, 0x0,
+		0x33, 0x0,
+		0x34, 0x0,
+		0x35, 0x0,
+		0x36, 0x0,
+		0x37, 0x0,
+		0x38, 0x0,
+		0x39, 0x0,
+		0x3a, 0x0,
+		0x3b, 0x0,
+		0x3c, 0x0,
+		0x3d, 0x0,
+		0x3e, 0x0,
+		0x40, 0x6,
+		0x41, 0x0,
+		0x42, 0x0,
+		0x43, 0x0,
+		0x44, 0x0,
+		0x45, 0x0,
+		0x46, 0x0,
+		0x47, 0x0,
+		0x48, 0x0,
+		0x49, 0x0,
+		0x4a, 0x0,
+		0x4b, 0x0,
+		0x4c, 0x0,
+		0x4d, 0x0,
+		0x4e, 0x0,
+		0x4f, 0x0,
+		0x50, 0x0,
+		0x51, 0x0,
+		0x52, 0x0,
+		0x53, 0x0,
+		0x54, 0x0,
+		0x55, 0x0,
+		0x56, 0x0,
+		0x57, 0x0,
+		0x58, 0x0,
+		0x59, 0x0,
+		0x5a, 0x0,
+		0x5b, 0x0,
+		0x5c, 0x0,
+		0x5d, 0x0,
+		0x5e, 0x0,
+		0x60, 0x4,
+		0x61, 0x0,
+		0x62, 0x0,
+		0x63, 0x0,
+		0x64, 0x0,
+		0x65, 0x0,
+		0x66, 0x0,
+		0x67, 0x0,
+		0x68, 0x0,
+		0x69, 0x0,
+		0x6a, 0x0,
+		0x6b, 0x0,
+		0x6c, 0x0,
+		0x6d, 0x0,
+		0x6e, 0x0,
+		0x6f, 0x0,
+		0x70, 0x0,
+		0x71, 0x0,
+		0x72, 0x0,
+		0x73, 0x0,
+		0x74, 0x0,
+		0x75, 0x0,
+		0x76, 0x0,
+		0x77, 0x0,
+		0x78, 0x0,
+		0x79, 0x0,
+		0x7a, 0x0,
+		0x7b, 0x0,
+		0x7c, 0x0,
+		0x7d, 0x0,
+		0x7e, 0x0,
+		0xff, 0x12,
+		0x31, 0x50,
+		0x32, 0x9,
+		0x33, 0xae,
+		0x34, 0x0,
+		0x36, 0x0,
+		0x37, 0x0,
+		0x38, 0x0,
+		0x39, 0x0,
+		0x40, 0x0,
+		0x42, 0x12,
+		0x43, 0x34,
+		0x49, 0x0,
+		0x4b, 0x5e,
+		0x4c, 0x77,
+		0x4d, 0x50,
+		0x4e, 0x9,
+		0x4f, 0xae,
+		0x50, 0x0,
+		0x60, 0x0,
+		0x61, 0x0,
+		0x63, 0x0,
+		0x64, 0x0,
+		0x65, 0x0,
+		0x66, 0x0,
+		0x67, 0x0,
+		0x68, 0x0,
+		0x69, 0x0,
+		0x6a, 0x0,
+		0x6b, 0x0,
+		0x6c, 0x0,
+		0x6d, 0x0,
+		0x6e, 0x0,
+		0x6f, 0x0,
+		0x70, 0x0,
+		0x71, 0x0,
+		0x90, 0x0,
+		0x91, 0x0,
+		0x97, 0x9,
+		0x98, 0x0,
+		0x99, 0x0,
+		0x9a, 0x64,
+		0xb8, 0x16
+	};
+
+	i2c_addr = i2c_addr >> 1;
+	I2CBUF[0] = 2;
+	for(i = 0; i < (ARRAY_COUNT(P480)/2); i++) {
+		I2CBUF[1] = P480[i*2]&0x0ff;
+		I2CBUF[2] = P480[(i*2)+1]&0x0ff;
+		I2C_Write1(i2c_addr,I2CBUF);
+		BusyWaiting(70000);
+	}
+}
+
+void SET_NXP_HDMI_576P()
+{
+	unsigned int	I2CBUF[5];
+	unsigned int	i = 0;
+	unsigned int	i2c_addr = 0xe0;	
+	unsigned int P576[]={
+		0xff, 0x0,
+		0x1, 0x0,
+		0xa, 0x0,
+		0xb, 0x0,
+		0xc, 0x1,
+		0xf, 0x0,
+		0x10, 0x80,
+		0x11, 0x0,
+		0x12, 0x1,
+		0x15, 0x0,
+		0x16, 0x1,
+		0x17, 0x0,
+		0x18, 0xff,
+		0x19, 0xff,
+		0x1a, 0xff,
+		0x1b, 0xff,
+		0x1c, 0x0,
+		0x1d, 0x0,
+		0x1e, 0x0,//0x3
+		0x1f, 0xfc,
+		0x20, 0x23,
+		0x21, 0x50,
+		0x22, 0x14,
+		0x23, 0x8f,
+		0x24, 0xc,
+		0x25, 0x0,
+		0x80, 0x6,
+		0x81, 0x7,
+		0x82, 0xc0,
+		0x83, 0x7,
+		0x84, 0xc0,
+		0x85, 0x7,
+		0x86, 0xc0,
+		0x87, 0x2,
+		0x88, 0x59,
+		0x89, 0x1,
+		0x8a, 0x32,
+		0x8b, 0x0,
+		0x8c, 0x75,
+		0x8d, 0x6,
+		0x8e, 0x4a,
+		0x8f, 0x2,
+		0x90, 0xc,
+		0x91, 0x7,
+		0x92, 0xab,
+		0x93, 0x6,
+		0x94, 0xa5,
+		0x95, 0x7,
+		0x96, 0x4f,
+		0x97, 0x2,
+		0x98, 0xc,
+		0x99, 0x0,
+		0x9a, 0x40,
+		0x9b, 0x2,
+		0x9c, 0x0,
+		0x9d, 0x2,
+		0x9e, 0x0,
+		0xa0, 0x7,
+		0xa1, 0x0,
+		0xa2, 0x93,
+		0xa3, 0x0,
+		0xa4, 0x2d,
+		0xa5, 0x0,
+		0xa6, 0x0,
+		0xa7, 0x0,
+		0xa8, 0x0,
+		0xa9, 0x0,
+		0xaa, 0x0,
+		0xab, 0x0,
+		0xac, 0x0,
+		0xad, 0x0,
+		0xae, 0x0,
+		0xaf, 0x0,
+		0xb0, 0x0,
+		0xb1, 0x0,
+		0xb2, 0x0,
+		0xb3, 0x0,
+		0xb4, 0x0,
+		0xb5, 0x0,
+		0xb6, 0x0,
+		0xb7, 0x0,
+		0xb8, 0x0,
+		0xb9, 0x0,
+		0xba, 0x0,
+		0xbb, 0x0,
+		0xbc, 0x0,
+		0xbd, 0x0,
+		0xbe, 0x0,
+		0xbf, 0x0,
+		0xc0, 0x0,
+		0xc1, 0x0,
+		0xc2, 0x0,
+		0xc3, 0x0,
+		0xc4, 0x0,
+		0xc5, 0x0,
+		0xc6, 0x0,
+		0xc7, 0x0,
+		0xc8, 0x0,
+		0xca, 0x40,
+		0xcb, 0x0,
+		0xcc, 0x0,
+		0xcd, 0x0,
+		0xce, 0x0,
+		0xcf, 0x0,
+		0xd0, 0x11,
+		0xd1, 0x7a,
+		0xe4, 0x1,
+		0xe5, 0x48,
+		0xe8, 0x80,
+		0xe9, 0xc2,
+		0xea, 0x40,
+		0xeb, 0x0,
+		0xec, 0x0,
+		0xee, 0x3,
+		0xef, 0x1b,
+		0xf0, 0x0,
+		0xf1, 0x2,
+		0xf2, 0x2,
+		0xf5, 0x0,
+		0xf8, 0x0,
+		0xf9, 0x60,
+		0xfc, 0x0,
+		0xfd, 0x8,
+		0xfe, 0xa1,
+		0xff, 0x1,
+		0x0, 0x0,
+		0x1, 0x0,
+		0x2, 0x0,
+		0x3, 0x0,
+		0x4, 0x0,
+		0x5, 0x0,
+		0x6, 0x0,
+		0x7, 0x0,
+		0x8, 0x0,
+		0x9, 0x0,
+		0xa, 0x0,
+		0xb, 0x0,
+		0xc, 0x0,
+		0xd, 0x0,
+		0x1b, 0x0,
+		0x1c, 0x0,
+		0x1d, 0x0,
+		0x1e, 0x0,
+		0x1f, 0x0,
+		0x20, 0x0,
+		0x21, 0x0,
+		0x22, 0x0,
+		0x23, 0x0,
+		0x24, 0x0,
+		0x25, 0x0,
+		0x26, 0x0,
+		0x27, 0x0,
+		0x28, 0x0,
+		0x29, 0x0,
+		0x2a, 0x0,
+		0x2b, 0x0,
+		0x2c, 0x0,
+		0x2d, 0x0,
+		0x2e, 0x0,
+		0x2f, 0x0,
+		0x30, 0x0,
+		0x31, 0x0,
+		0x32, 0x0,
+		0x33, 0x0,
+		0x34, 0x0,
+		0x35, 0x0,
+		0x36, 0x0,
+		0x37, 0x0,
+		0x38, 0x0,
+		0x39, 0x0,
+		0x3a, 0x0,
+		0x3b, 0x0,
+		0x3c, 0x0,
+		0x3d, 0x0,
+		0x3e, 0x0,
+		0x3f, 0x0,
+		0x40, 0x0,
+		0x41, 0x0,
+		0x42, 0x0,
+		0x43, 0x0,
+		0x44, 0x0,
+		0x45, 0x0,
+		0x46, 0x0,
+		0x47, 0x0,
+		0x48, 0x0,
+		0xa0, 0x0,
+		0xa1, 0x0,
+		0xa2, 0x0,
+		0xa3, 0x0,
+		0xa4, 0x0,
+		0xa5, 0x0,
+		0xa6, 0x0,
+		0xa7, 0x0,
+		0xa8, 0x0,
+		0xbd, 0x0,
+		0xbe, 0x0,
+		0xbf, 0x0,
+		0xc0, 0x0,
+		0xc1, 0x0,
+		0xc2, 0x0,
+		0xc3, 0x0,
+		0xc4, 0x0,
+		0xc5, 0x0,
+		0xc6, 0x0,
+		0xc7, 0x0,
+		0xc8, 0x0,
+		0xca, 0x0,
+		0xff, 0x2,
+		0x0, 0x1e,
+		0x1, 0x2,
+		0x2, 0x0,
+		0x3, 0x84,
+		0x4, 0x0,
+		0x5, 0x1,
+		0x6, 0x92,
+		0x7, 0xfa,
+		0x8, 0x0,
+		0x9, 0x5b,
+		0xa, 0x0,
+		0xb, 0xa1,
+		0xc, 0x0,
+		0xd, 0x1,
+		0xe, 0x2,
+		0x10, 0x0,
+		0x11, 0x0,
+		0xff, 0x9,
+		0xfa, 0x0,
+		0xfb, 0xa0,
+		0xfc, 0x80,
+		0xfd, 0x60,
+		0xfe, 0x0,
+		0xff, 0x10,
+		0x20, 0x81,
+		0x21, 0x0,
+		0x22, 0x0,
+		0x23, 0x0,
+		0x24, 0x0,
+		0x25, 0x0,
+		0x26, 0x0,
+		0x27, 0x0,
+		0x28, 0x0,
+		0x29, 0x0,
+		0x2a, 0x0,
+		0x2b, 0x0,
+		0x2c, 0x0,
+		0x2d, 0x0,
+		0x2e, 0x0,
+		0x2f, 0x0,
+		0x30, 0x0,
+		0x31, 0x0,
+		0x32, 0x0,
+		0x33, 0x0,
+		0x34, 0x0,
+		0x35, 0x0,
+		0x36, 0x0,
+		0x37, 0x0,
+		0x38, 0x0,
+		0x39, 0x0,
+		0x3a, 0x0,
+		0x3b, 0x0,
+		0x3c, 0x0,
+		0x3d, 0x0,
+		0x3e, 0x0,
+		0x40, 0x82,
+		0x41, 0x2,
+		0x42, 0xd,
+		0x43, 0xc6,
+		0x44, 0x40,
+		0x45, 0x58,
+		0x46, 0x0,
+		0x47, 0x11,
+		0x48, 0x0,
+		0x49, 0x0,
+		0x4a, 0x0,
+		0x4b, 0x0,
+		0x4c, 0x0,
+		0x4d, 0x0,
+		0x4e, 0x0,
+		0x4f, 0x0,
+		0x50, 0x0,
+		0x51, 0x0,
+		0x52, 0x0,
+		0x53, 0x0,
+		0x54, 0x0,
+		0x55, 0x0,
+		0x56, 0x0,
+		0x57, 0x0,
+		0x58, 0x0,
+		0x59, 0x0,
+		0x5a, 0x0,
+		0x5b, 0x0,
+		0x5c, 0x0,
+		0x5d, 0x0,
+		0x5e, 0x0,
+		0x60, 0x83,
+		0x61, 0x0,
+		0x62, 0x0,
+		0x63, 0x0,
+		0x64, 0x0,
+		0x65, 0x0,
+		0x66, 0x0,
+		0x67, 0x0,
+		0x68, 0x0,
+		0x69, 0x0,
+		0x6a, 0x0,
+		0x6b, 0x0,
+		0x6c, 0x0,
+		0x6d, 0x0,
+		0x6e, 0x0,
+		0x6f, 0x0,
+		0x70, 0x0,
+		0x71, 0x0,
+		0x72, 0x0,
+		0x73, 0x0,
+		0x74, 0x0,
+		0x75, 0x0,
+		0x76, 0x0,
+		0x77, 0x0,
+		0x78, 0x0,
+		0x79, 0x0,
+		0x7a, 0x0,
+		0x7b, 0x0,
+		0x7c, 0x0,
+		0x7d, 0x0,
+		0x7e, 0x0,
+		0x80, 0x84,
+		0x81, 0x1,
+		0x82, 0xa,
+		0x83, 0x70,
+		0x84, 0x1,
+		0x85, 0x0,
+		0x86, 0x0,
+		0x87, 0x0,
+		0x88, 0x0,
+		0x89, 0x0,
+		0x8a, 0x0,
+		0x8b, 0x0,
+		0x8c, 0x0,
+		0x8d, 0x0,
+		0x8e, 0x0,
+		0x8f, 0x0,
+		0x90, 0x0,
+		0x91, 0x0,
+		0x92, 0x0,
+		0x93, 0x0,
+		0x94, 0x0,
+		0x95, 0x0,
+		0x96, 0x0,
+		0x97, 0x0,
+		0x98, 0x0,
+		0x99, 0x0,
+		0x9a, 0x0,
+		0x9b, 0x0,
+		0x9c, 0x0,
+		0x9d, 0x0,
+		0x9e, 0x0,
+		0xa0, 0x85,
+		0xa1, 0x0,
+		0xa2, 0x0,
+		0xa3, 0x0,
+		0xa4, 0x0,
+		0xa5, 0x0,
+		0xa6, 0x0,
+		0xa7, 0x0,
+		0xa8, 0x0,
+		0xa9, 0x0,
+		0xaa, 0x0,
+		0xab, 0x0,
+		0xac, 0x0,
+		0xad, 0x0,
+		0xae, 0x0,
+		0xaf, 0x0,
+		0xb0, 0x0,
+		0xb1, 0x0,
+		0xb2, 0x0,
+		0xb3, 0x0,
+		0xb4, 0x0,
+		0xb5, 0x0,
+		0xb6, 0x0,
+		0xb7, 0x0,
+		0xb8, 0x0,
+		0xb9, 0x0,
+		0xba, 0x0,
+		0xbb, 0x0,
+		0xbc, 0x0,
+		0xbd, 0x0,
+		0xbe, 0x0,
+		0xff, 0x11,
+		0x0, 0x1, // audio mute
+		0x1, 0x0,
+		0x2, 0x0,
+		0x3, 0x0,
+		0x4, 0x80,
+		0x5, 0x78,
+		0x6, 0x69,
+		0x7, 0x0,
+		0x8, 0x0,
+		0x9, 0x18,
+		0xa, 0x0,
+		0xb, 0x0,
+		0xc, 0x33,
+		0xd, 0x4,
+		0xe, 0x1,
+		0xf, 0x14,
+		0x14, 0x0,
+		0x15, 0x0,
+		0x16, 0x2,
+		0x17, 0x0,
+		0x18, 0x0,
+		0x19, 0x0,
+		0x1a, 0x0,
+		0x1b, 0x0,
+		0x1c, 0x0,
+		0x1d, 0x0,
+		0x1e, 0x0,
+		0x1f, 0x0,
+		0x20, 0x5,
+		0x21, 0x0,
+		0x22, 0x0,
+		0x23, 0x0,
+		0x24, 0x0,
+		0x25, 0x0,
+		0x26, 0x0,
+		0x27, 0x0,
+		0x28, 0x0,
+		0x29, 0x0,
+		0x2a, 0x0,
+		0x2b, 0x0,
+		0x2c, 0x0,
+		0x2d, 0x0,
+		0x2e, 0x0,
+		0x2f, 0x0,
+		0x30, 0x0,
+		0x31, 0x0,
+		0x32, 0x0,
+		0x33, 0x0,
+		0x34, 0x0,
+		0x35, 0x0,
+		0x36, 0x0,
+		0x37, 0x0,
+		0x38, 0x0,
+		0x39, 0x0,
+		0x3a, 0x0,
+		0x3b, 0x0,
+		0x3c, 0x0,
+		0x3d, 0x0,
+		0x3e, 0x0,
+		0x40, 0x6,
+		0x41, 0x0,
+		0x42, 0x0,
+		0x43, 0x0,
+		0x44, 0x0,
+		0x45, 0x0,
+		0x46, 0x0,
+		0x47, 0x0,
+		0x48, 0x0,
+		0x49, 0x0,
+		0x4a, 0x0,
+		0x4b, 0x0,
+		0x4c, 0x0,
+		0x4d, 0x0,
+		0x4e, 0x0,
+		0x4f, 0x0,
+		0x50, 0x0,
+		0x51, 0x0,
+		0x52, 0x0,
+		0x53, 0x0,
+		0x54, 0x0,
+		0x55, 0x0,
+		0x56, 0x0,
+		0x57, 0x0,
+		0x58, 0x0,
+		0x59, 0x0,
+		0x5a, 0x0,
+		0x5b, 0x0,
+		0x5c, 0x0,
+		0x5d, 0x0,
+		0x5e, 0x0,
+		0x60, 0x4,
+		0x61, 0x0,
+		0x62, 0x0,
+		0x63, 0x0,
+		0x64, 0x0,
+		0x65, 0x0,
+		0x66, 0x0,
+		0x67, 0x0,
+		0x68, 0x0,
+		0x69, 0x0,
+		0x6a, 0x0,
+		0x6b, 0x0,
+		0x6c, 0x0,
+		0x6d, 0x0,
+		0x6e, 0x0,
+		0x6f, 0x0,
+		0x70, 0x0,
+		0x71, 0x0,
+		0x72, 0x0,
+		0x73, 0x0,
+		0x74, 0x0,
+		0x75, 0x0,
+		0x76, 0x0,
+		0x77, 0x0,
+		0x78, 0x0,
+		0x79, 0x0,
+		0x7a, 0x0,
+		0x7b, 0x0,
+		0x7c, 0x0,
+		0x7d, 0x0,
+		0x7e, 0x0,
+		0xff, 0x12,
+		0x31, 0xcd,
+		0x32, 0x5e,
+		0x33, 0x50,
+		0x34, 0x0,
+		0x36, 0x0,
+		0x37, 0x0,
+		0x38, 0x0,
+		0x39, 0x0,
+		0x40, 0x0,
+		0x42, 0x0,
+		0x43, 0x0,
+		0x49, 0x0,
+		0x4b, 0x8e,
+		0x4c, 0x1b,
+		0x4d, 0xcd,
+		0x4e, 0x5e,
+		0x4f, 0x50,
+		0x50, 0x0,
+		0x60, 0x0,
+		0x61, 0x0,
+		0x63, 0x0,
+		0x64, 0x0,
+		0x65, 0x0,
+		0x66, 0x0,
+		0x67, 0x0,
+		0x68, 0x0,
+		0x69, 0x0,
+		0x6a, 0x0,
+		0x6b, 0x0,
+		0x6c, 0x0,
+		0x6d, 0x0,
+		0x6e, 0x0,
+		0x6f, 0x0,
+		0x70, 0x0,
+		0x71, 0x0,
+		0x90, 0x0,
+		0x91, 0x0,
+		0x97, 0x9,
+		0x98, 0x0,
+		0x99, 0x0,
+		0x9a, 0x64,
+		0xb8, 0x16
+	};
+
+	i2c_addr = i2c_addr >> 1;
+	I2CBUF[0] = 2;
+	for(i = 0; i < (ARRAY_COUNT(P576)/2); i++) {
+		I2CBUF[1] = P576[i*2]&0x0ff;
+		I2CBUF[2] = P576[(i*2)+1]&0x0ff;
+		I2C_Write1(i2c_addr,I2CBUF);
+		BusyWaiting(70000);
+	}
+}
+#else
+void SET_CAT_HDMI_480P()
+{
+	unsigned int	I2CBUF[5];
+	unsigned int	i = 0;
+	unsigned int	i2c_addr = 0x98;	
+	//Change to Bank 0
+	unsigned int P480[]={
+		0x0F, 0x00,
+		// HDMITX Reset Enable
+		0x04, 0xFF,
+		//$$$ Idle 1FF,
+		//$$$ Idle 1FF,
+		// HDMITX Reset Disable
+		0x04, 0x1F,
+		// Switch to PC program DDC mode
+		0x10, 0x01,
+		// HDCP Registers, reg20[0] CPDesired, reg20h[1] 1.1Feature
+		0x20, 0x00,
+		0x22, 0x02, 
+		// Clock Control Registers
+		0x58, 0x11,
+		0x59, 0x08,//edge should be 1
+		// input format 
+		0x70, 0x48,
+		// input color mode reg70[7:6], sync_emb reg70[3]
+		0x71, 0x00,
+		// EnUdFilt reg72[6], CSCSel reg72h[1:0] 
+		0x72, 0x00,  
+		0x73, 0x10,
+		0x74, 0x80,
+		0x75, 0x10,
+		// CSC Matrix 
+		0x76, 0x00,
+		0x77, 0x08,
+		0x78, 0x6a,
+		0x79, 0x1a,
+		0x7A, 0x4f,
+		0x7B, 0x1d,
+		0x7C, 0x00,
+		0x7D, 0x08,
+		0x7E, 0xf7,
+		0x7F, 0x0a,
+		0x80, 0x00,
+		0x81, 0x00,
+		0x82, 0x00,
+		0x83, 0x08,
+		0x84, 0x00,
+		0x85, 0x00,
+		0x86, 0xdb,
+		0x87, 0x0d,
+		0x88, 0x9e,
+		0x89, 0x12,
+		0x8A, 0x9e,
+		0x8B, 0x12,
+		0x8C, 0x9e,
+		0x8D, 0x12, 
+		// SYNC/DE Generation 
+		0x90, 0xF0,
+		0x91, 0x31,
+		0x92, 0x1F,
+		0x93, 0x7F,
+		0x94, 0x23,
+		0x95, 0x0E,
+		0x96, 0x4C,
+		0x97, 0x00,
+		0x98, 0x0C,
+		0x99, 0x02,
+		0x9A, 0x0C,
+		0x9B, 0xDF,
+		0x9C, 0x12,
+		0x9D, 0x23,
+		0x9E, 0x36,
+		0x9F, 0x00,
+		0xA0, 0x09,
+		0xA1, 0xF0,
+		0xA2, 0xFF,
+		0xA3, 0xFF, 
+		// Pattern Generation
+		0xA8, 0x80,
+		// PGEn = regA8[0]
+		0xA9, 0x00,
+		0xAA, 0x90,
+		0xAB, 0x70,
+		0xAC, 0x50,
+		0xAD, 0x00,
+		0xAE, 0x00,
+		0xAF, 0x10,
+		0xB0, 0x08,
+		// HDMI General Control , HDMIMODE REGC0H[0]
+		0xC0, 0x01,
+		0xC1, 0x00,
+		0xC2, 0x0A,
+		0xC3, 0x08,
+		0xC4, 0x00,
+		0xC5, 0x00,
+		0xC6, 0x03,
+		0xC7, 0x00,
+		0xC8, 0x00,
+		0xC9, 0x03,
+		0xCA, 0x00,
+		0xCB, 0x00,
+		0xCC, 0x00,
+		0xCD, 0x03,
+		0xCE, 0x03,
+		0xCF, 0x00,
+		0xD0, 0x00,
+		// Audio Channel Registers
+		0xE0, 0xD1,	// [7:6]=REGAudSWL, [5]=REGSPDIFTC, [4]=REGAudSel, [3:0]=REGAudioEn
+		0xE1, 0x01,
+		0xE2, 0x00,	// SRC0/1/2/3 maps to SRC0
+		0xE3, 0x00,
+		0xE4, 0x08,  
+		// Change to Bank 1
+		0x0F, 0x01,
+		// N/CTS Packet 
+		0x30, 0x00,
+		0x31, 0x00,
+		0x32, 0x00,
+		0x33, 0x00,
+		0x34, 0x60,
+		0x35, 0x00,
+		// Audio Sample Packet
+		0x36, 0x00,
+		0x37, 0x30,
+		// Null Packet
+		0x38, 0x00, 
+		0x39, 0x00, 
+		0x3A, 0x00, 
+		0x3B, 0x00, 
+		0x3C, 0x00, 
+		0x3D, 0x00, 
+		0x3E, 0x00,
+		0x3F, 0x00,
+		0x40, 0x00, 
+		0x41, 0x00, 
+		0x42, 0x00, 
+		0x43, 0x00, 
+		0x44, 0x00, 
+		0x45, 0x00, 
+		0x46, 0x00,
+		0x47, 0x00,
+		0x48, 0x00, 
+		0x49, 0x00, 
+		0x4A, 0x00, 
+		0x4B, 0x00, 
+		0x4C, 0x00, 
+		0x4D, 0x00, 
+		0x4E, 0x00,
+		0x4F, 0x00,
+		0x50, 0x00, 
+		0x51, 0x00, 
+		0x52, 0x00, 
+		0x53, 0x00, 
+		0x54, 0x00, 
+		0x55, 0x00, 
+		0x56, 0x00,
+		// AVI Packet
+		0x58, 0x20, 
+		0x59, 0x08, 
+		0x5A, 0x00, 
+		0x5B, 0x02,	// Video Format Code
+		0x5C, 0x00,
+		0x5D, 0x45,	// CheckSum 
+		0x5E, 0x00, 
+		0x5F, 0x00, 
+		0x60, 0x00, 
+		0x61, 0x00,
+		0x62, 0x00,
+		0x63, 0x00,
+		0x64, 0x00,
+		0x65, 0x00,
+		// AUDIO Info Frame
+		0x68, 0x01,	// should be 00, temp assign for solving MulCh problem
+		0x69, 0x00,
+		0x6A, 0x00,
+		0x6B, 0x00,	// InfoCA
+		0x6C, 0x00,
+		0x6D, 0x70,	// CA=00
+		// SPD Packet
+		0x70, 0x00, 	// Checksum
+		0x71, 0x00, 
+		0x72, 0x00, 
+		0x73, 0x00, 
+		0x74, 0x00, 
+		0x75, 0x00, 
+		0x76, 0x00,
+		0x78, 0x00, 
+		0x79, 0x00, 
+		0x7A, 0x00, 
+		0x7B, 0x00,
+		0x7C, 0x00,
+		0x7D, 0x00,
+		0x7E, 0x00, 
+		0x7F, 0x00, 
+		0x80, 0x00, 
+		0x81, 0x00,
+		0x82, 0x00,
+		0x83, 0x00,
+		0x84, 0x00,
+		0x85, 0x00,
+		0x86, 0x00,
+		0x87, 0x00,
+		0x88, 0x00,
+		0x89, 0x00,
+		// MPEG Info Frame
+		0x8A, 0x00,
+		0x8B, 0x00,
+		0x8C, 0x00,
+		0x8D, 0x00,
+		0x8E, 0x00,
+		0x8F, 0x00, 	// Checksum
+		// Audio Channel Status
+		0x91, 0x00,
+		0x92, 0x80,
+		0x93, 0x04,
+		0x94, 0x21,
+		0x95, 0x43, 
+		0x96, 0x65, 
+		0x97, 0x87,
+		0x98, 0x0E,	// Sampling Frequency
+		0x99, 0x1B, 
+		// Change to Bank 0
+		0x0F, 0x00,
+		// HDMITX VCLK Reset Disable
+		0x04, 0x14,
+		0xF3, 0x00,
+		0xF4, 0x00,
+		// All HDMITX Reset Disable
+		0x04, 0x00,
+		// Enable HDMITX AFE
+		0x61, 0x00,
+		0x62, 0x89,
+		// set audio mute
+		0xE0, 0xC0,
+		0x04, 0xC4
+	};
+	
+	i2c_addr = i2c_addr >> 1;
+	I2CBUF[0] = 2;
+	for(i = 0; i < (ARRAY_COUNT(P480)/2); i++) {
+		I2CBUF[1] = P480[i*2]&0x0ff;
+		I2CBUF[2] = P480[(i*2)+1]&0x0ff;
+		I2C_Write1(i2c_addr,I2CBUF);
+		BusyWaiting(70000);
+	}
+}
+
+void SET_CAT_HDMI_576P()
+{
+	unsigned int	I2CBUF[5];
+	unsigned int	i = 0;
+	unsigned int	i2c_addr = 0x98;	
+	//Change to Bank 0
+	unsigned int P576[]={
+		0x0F, 0x00,
+		// HDMITX Reset Enable
+		0x04, 0xFF,
+		//$$$ Idle 1FF,
+		//$$$ Idle 1FF,
+		// HDMITX Reset Disable
+		0x04, 0x1F,
+		// Switch to PC program DDC mode
+		0x10, 0x01,
+		// HDCP Registers, reg20[0] CPDesired, reg20h[1] 1.1Feature
+		0x20, 0x00,
+		0x22, 0x02, 
+		// Clock Control Registers
+		0x58, 0x11,
+		0x59, 0x08,//edge should be 1
+		// input format 
+		0x70, 0x48,
+		// input color mode reg70[7:6], sync_emb reg70[3]
+		0x71, 0x00,
+		// EnUdFilt reg72[6], CSCSel reg72h[1:0] 
+		0x72, 0x00,  
+		0x73, 0x10,
+		0x74, 0x80,
+		0x75, 0x10,
+		// CSC Matrix 
+		0x76, 0x00,
+		0x77, 0x08,
+		0x78, 0x6a,
+		0x79, 0x1a,
+		0x7A, 0x4f,
+		0x7B, 0x1d,
+		0x7C, 0x00,
+		0x7D, 0x08,
+		0x7E, 0xf7,
+		0x7F, 0x0a,
+		0x80, 0x00,
+		0x81, 0x00,
+		0x82, 0x00,
+		0x83, 0x08,
+		0x84, 0x00,
+		0x85, 0x00,
+		0x86, 0xdb,
+		0x87, 0x0d,
+		0x88, 0x9e,
+		0x89, 0x12,
+		0x8A, 0x9e,
+		0x8B, 0x12,
+		0x8C, 0x9e,
+		0x8D, 0x12, 
+		// SYNC/DE Generation 
+		0x90, 0x00,
+		0x91, 0xFF,
+		0x92, 0x1F,
+		0x93, 0x7F,
+		0x94, 0x23,
+		0x95, 0x0a,
+		0x96, 0x4a,
+		0x97, 0x00,
+		0x98, 0x0C,
+		0x99, 0x02,
+		0x9A, 0x0C,
+		0x9B, 0xDF,
+		0x9C, 0x12,
+		0x9D, 0x23,
+		0x9E, 0x36,
+		0x9F, 0x00,
+		0xA0, 0x04,//0x5
+		0xA1, 0x90,//0xa
+		0xA2, 0xFF,
+		0xA3, 0xFF, 
+		// Pattern Generation
+		0xA8, 0x80,
+		// PGEn = regA8[0]
+		0xA9, 0x00,
+		0xAA, 0x90,
+		0xAB, 0x70,
+		0xAC, 0x50,
+		0xAD, 0x00,
+		0xAE, 0x00,
+		0xAF, 0x10,
+		0xB0, 0x08,
+		// HDMI General Control , HDMIMODE REGC0H[0]
+		0xC0, 0x01,
+		0xC1, 0x00,
+		0xC2, 0x0A,
+		0xC3, 0x08,
+		0xC4, 0x00,
+		0xC5, 0x00,
+		0xC6, 0x03,
+		0xC7, 0x00,
+		0xC8, 0x00,
+		0xC9, 0x03,
+		0xCA, 0x00,
+		0xCB, 0x00,
+		0xCC, 0x00,
+		0xCD, 0x03,
+		0xCE, 0x03,
+		0xCF, 0x00,
+		0xD0, 0x00,
+		// Audio Channel Registers
+		0xE0, 0xD1,	// [7:6]=REGAudSWL, [5]=REGSPDIFTC, [4]=REGAudSel, [3:0]=REGAudioEn
+		0xE1, 0x01,
+		0xE2, 0x00,	// SRC0/1/2/3 maps to SRC0
+		0xE3, 0x00,
+		0xE4, 0x08,  
+		// Change to Bank 1
+		0x0F, 0x01,
+		// N/CTS Packet 
+		0x30, 0x00,
+		0x31, 0x00,
+		0x32, 0x00,
+		0x33, 0x00,
+		0x34, 0x60,
+		0x35, 0x00,
+		// Audio Sample Packet
+		0x36, 0x00,
+		0x37, 0x30,
+		// Null Packet
+		0x38, 0x00, 
+		0x39, 0x00, 
+		0x3A, 0x00, 
+		0x3B, 0x00, 
+		0x3C, 0x00, 
+		0x3D, 0x00, 
+		0x3E, 0x00,
+		0x3F, 0x00,
+		0x40, 0x00, 
+		0x41, 0x00, 
+		0x42, 0x00, 
+		0x43, 0x00, 
+		0x44, 0x00, 
+		0x45, 0x00, 
+		0x46, 0x00,
+		0x47, 0x00,
+		0x48, 0x00, 
+		0x49, 0x00, 
+		0x4A, 0x00, 
+		0x4B, 0x00, 
+		0x4C, 0x00, 
+		0x4D, 0x00, 
+		0x4E, 0x00,
+		0x4F, 0x00,
+		0x50, 0x00, 
+		0x51, 0x00, 
+		0x52, 0x00, 
+		0x53, 0x00, 
+		0x54, 0x00, 
+		0x55, 0x00, 
+		0x56, 0x00,
+		// AVI Packet
+		0x58, 0x20, 
+		0x59, 0x08, 
+		0x5A, 0x00, 
+		0x5B, 0x11,	// Video Format Code
+		0x5C, 0x00,
+		0x5D, 0x36,	// CheckSum 
+		0x5E, 0x00, 
+		0x5F, 0x00, 
+		0x60, 0x00, 
+		0x61, 0x00,
+		0x62, 0x00,
+		0x63, 0x00,
+		0x64, 0x00,
+		0x65, 0x00,
+		// AUDIO Info Frame
+		0x68, 0x01,	// should be 00, temp assign for solving MulCh problem
+		0x69, 0x00,
+		0x6A, 0x00,
+		0x6B, 0x00,	// InfoCA
+		0x6C, 0x00,
+		0x6D, 0x70,	// CA=00
+		// SPD Packet
+		0x70, 0x00, 	// Checksum
+		0x71, 0x00, 
+		0x72, 0x00, 
+		0x73, 0x00, 
+		0x74, 0x00, 
+		0x75, 0x00, 
+		0x76, 0x00,
+		0x78, 0x00, 
+		0x79, 0x00, 
+		0x7A, 0x00, 
+		0x7B, 0x00,
+		0x7C, 0x00,
+		0x7D, 0x00,
+		0x7E, 0x00, 
+		0x7F, 0x00, 
+		0x80, 0x00, 
+		0x81, 0x00,
+		0x82, 0x00,
+		0x83, 0x00,
+		0x84, 0x00,
+		0x85, 0x00,
+		0x86, 0x00,
+		0x87, 0x00,
+		0x88, 0x00,
+		0x89, 0x00,
+		// MPEG Info Frame
+		0x8A, 0x00,
+		0x8B, 0x00,
+		0x8C, 0x00,
+		0x8D, 0x00,
+		0x8E, 0x00,
+		0x8F, 0x00, 	// Checksum
+		// Audio Channel Status
+		0x91, 0x00,
+		0x92, 0x80,
+		0x93, 0x04,
+		0x94, 0x21,
+		0x95, 0x43, 
+		0x96, 0x65, 
+		0x97, 0x87,
+		0x98, 0x0E,	// Sampling Frequency
+		0x99, 0x1B, 
+		// Change to Bank 0
+		0x0F, 0x00,
+		// HDMITX VCLK Reset Disable
+		0x04, 0x14,
+		0xF3, 0x00,
+		0xF4, 0x00,
+		// All HDMITX Reset Disable
+		0x04, 0x00,
+		// Enable HDMITX AFE
+		0x61, 0x00,
+		0x62, 0x89,
+		// set audio mute
+		0xE0, 0xC0,
+		0x04, 0xC4
+	};
+
+	i2c_addr = i2c_addr >> 1;
+	I2CBUF[0] = 2;
+	for(i = 0; i < (ARRAY_COUNT(P576)/2); i++) {
+		I2CBUF[1] = P576[i*2]&0x0ff;
+		I2CBUF[2] = P576[(i*2)+1]&0x0ff;
+		I2C_Write1(i2c_addr,I2CBUF);
+		BusyWaiting(70000);
+	}
+}
+#endif
+#endif
+
+void setup_boot_image_mars(void)
+{
 	// reset video exception entry point
 	*(volatile unsigned int *)0xa00000a4 = 0x00801a3c;
 	*(volatile unsigned int *)0xa00000a8 = 0x00185a37;
@@ -65,78 +1742,49 @@ void setup_boot_image(void)
 	*(volatile unsigned int *)0xa00000b0 = 0x00000000;
 
 	if (logo_info.mode == 0) {
-		// NTSC mode
-		// set VO registers
-		*(volatile unsigned int *)0xb8005350 = 0xfffffffe ;
-		*(volatile unsigned int *)0xb8005350 = 0x3 ;
-		*(volatile unsigned int *)0xb8005354 = 0x2cf ;
-		*(volatile unsigned int *)0xb8005358 = 0x2ef5df ;
-		*(volatile unsigned int *)0xb800535c = 0xffff3210 ;
-		*(volatile unsigned int *)0xb8005360 = 0x0 ;
-
-		// color lookup table of Sub-Picture , index0~index3
-		*(volatile unsigned int *)0xb8005370 = logo_info.color[0];
-		*(volatile unsigned int *)0xb8005374 = logo_info.color[1];
-		*(volatile unsigned int *)0xb8005378 = logo_info.color[2];
-		*(volatile unsigned int *)0xb800537c = logo_info.color[3];
-		*(volatile unsigned int *)0xb80053b0 = 0xacf800 ;
-		*(volatile unsigned int *)0xb80053b4 = 0x9df800 ;
-		*(volatile unsigned int *)0xb80053bc = 0x4000 ;
-		*(volatile unsigned int *)0xb80053c0 = 0x0 ;
-		*(volatile unsigned int *)0xb80053c4 = 0x0 ;
-		*(volatile unsigned int *)0xb80053c8 = 0x0 ;
-		*(volatile unsigned int *)0xb80053cc = 0x0 ;
-		*(volatile unsigned int *)0xb80053d0 = 0x200 ;
-		*(volatile unsigned int *)0xb80053d8 = 0x4000 ;
-		*(volatile unsigned int *)0xb80053dc = 0x0 ;
-		*(volatile unsigned int *)0xb80053e0 = 0x0 ;
-		*(volatile unsigned int *)0xb80053e4 = 0x0 ;
-		*(volatile unsigned int *)0xb80053e8 = 0x0 ;
-		*(volatile unsigned int *)0xb80053ec = 0x0 ;
-		*(volatile unsigned int *)0xb80053f0 = 0x0 ;
-		*(volatile unsigned int *)0xb80053f4 = 0x0 ;
-		*(volatile unsigned int *)0xb80053f8 = 0x0 ;
-		*(volatile unsigned int *)0xb80053fc = 0x400 ;
-		*(volatile unsigned int *)0xb8005400 = 0xffd ;
-		*(volatile unsigned int *)0xb8005404 = 0xf8f ;
-		*(volatile unsigned int *)0xb8005408 = 0xf60 ;
-		*(volatile unsigned int *)0xb800540c = 0xf50 ;
-		*(volatile unsigned int *)0xb8005410 = 0xfa8 ;
-		*(volatile unsigned int *)0xb8005414 = 0x207 ;
-		*(volatile unsigned int *)0xb8005418 = 0x30a ;
-		*(volatile unsigned int *)0xb800541c = 0x50b ;
-		*(volatile unsigned int *)0xb80054b0 = 0x9dfacf ;
-		*(volatile unsigned int *)0xb80054e8 = 0x2001400 ;
-		*(volatile unsigned int *)0xb80054ec = 0x2001000 ;
-		*(volatile unsigned int *)0xb80054f0 = 0x2001400 ;
-		*(volatile unsigned int *)0xb80054f4 = 0x2001000 ;
-		*(volatile unsigned int *)0xb80054f8 = 0x400 ;
-		*(volatile unsigned int *)0xb80054fc = 0x20080200 ;
-		*(volatile unsigned int *)0xb8005500 = 0xf010eb10 ;
-		*(volatile unsigned int *)0xb8005564 = 0x0 ;
-		*(volatile unsigned int *)0xb8005568 = 0x1 ;
-		*(volatile unsigned int *)0xb800556c = 0x2 ;
-		*(volatile unsigned int *)0xb8005570 = 0x3 ;
-		*(volatile unsigned int *)0xb8005574 = 0x4 ;
-		*(volatile unsigned int *)0xb8005578 = 0x5 ;
-		*(volatile unsigned int *)0xb800557c = 0x6 ;
-		*(volatile unsigned int *)0xb8005580 = 0x7 ;
-		*(volatile unsigned int *)0xb8005584 = 0x8 ;
-
-		// Top and Bot address of Sub-Picture 
-		*(volatile unsigned int *)0xb8005530 = 0xf0000 ;
-		*(volatile unsigned int *)0xb8005534 = 0xf0000+logo_info.size;
-
-		// set TVE registers
-		*(volatile unsigned int *)0xb8000084 = 0x101cd800 ;
-		*(volatile unsigned int *)0xb800000c = 0x1 ;
-		*(volatile unsigned int *)0xb80180c8 = 0x124 ;
-		*(volatile unsigned int *)0xb80180cc = 0x188 ;
-		*(volatile unsigned int *)0xb8018134 = 0x278000 ;
-		*(volatile unsigned int *)0xb80180d0 = 0x1f8bbb ;
-		*(volatile unsigned int *)0xb80180d4 = 0x1f8cbb ;
-		*(volatile unsigned int *)0xb80180e8 = 0x1 ;
-		*(volatile unsigned int *)0xb8018154 = 0x200 ;
+		// TVE_INTST_reg : reset interrupt status
+		*(volatile unsigned int *)0xb8018020 = 0xfffffffe ;
+		// TVE_INTEN_reg : disable interrupt
+		*(volatile unsigned int *)0xb801801c = 0xfffffffe ;
+		// VO_FC_reg : disable  go bit
+		*(volatile unsigned int *)0xb8005014 = 0x01 ;    
+		
+		// VO_MIX1_reg : enable SUB1
+		*(volatile unsigned int *)0xb8005008 = 0x41 ;
+		// VO_M1_SIZE_reg : set mixer1's width 720 and height 480 
+		*(volatile unsigned int *)0xb8005994 = 0x2d01e0 ;
+		
+		// VO_SUB1_PXDT_reg  VO_SUB1_PXDB_reg : top and bottom address 
+		*(volatile unsigned int *)0xb80054ac = 0x5170;
+		*(volatile unsigned int *)0xb80054b0 = 0x5170 + logo_info.size;
+		// VO_SUB1_CLUT_reg : color lookup table address  ** 8 bytes aligned **
+		*(volatile unsigned int *)0xb80054a4 = 0x17e0;
+		// VO_SUB1_reg : used for DVD subpicture 
+		*(volatile unsigned int *)0xb8005490 = 0x800001 ;
+		// VO_SUB1_SUBP_reg : sub1 width 720
+		*(volatile unsigned int *)0xb8005494 = 0x2d0 ;
+		// VO_SUB1_SIZE_reg : canvas width 720 and height 480
+		*(volatile unsigned int *)0xb8005498 = 0x2d01e0 ;
+		
+		// VO_CH1_reg : enable reinterlace 
+		*(volatile unsigned int *)0xb80059f0 = 0x11 ;
+		// VO_MODE_reg : enable ch1 interlace and progressive 
+		*(volatile unsigned int *)0xb8005000 = 0x7 ;
+		// VO_OUT_reg  : enable i and p port 
+		*(volatile unsigned int *)0xb8005004 = 0x465 ;
+		
+		// TVE_TV_525p_700
+		*(volatile unsigned int *)0xb8000020 = 0x11820 ;
+		*(volatile unsigned int *)0xb801820c = 0x124 ;
+		*(volatile unsigned int *)0xb8018208 = 0x1fc0 ;
+		*(volatile unsigned int *)0xb8018210 = 0x200000 ;
+		*(volatile unsigned int *)0xb8018200 = 0x7bbefb ;
+		*(volatile unsigned int *)0xb8018204 = 0x7bbefb ;
+		*(volatile unsigned int *)0xb8018218 = 0x597e ;
+		*(volatile unsigned int *)0xb801821c = 0x597e ;
+		*(volatile unsigned int *)0xb8018000 = 0x2aa ;
+		*(volatile unsigned int *)0xb8018038 = 0x1 ;
+		*(volatile unsigned int *)0xb8018a00 = 0x200 ;
 		*(volatile unsigned int *)0xb8018880 = 0x1f ;
 		*(volatile unsigned int *)0xb8018884 = 0x7c ;
 		*(volatile unsigned int *)0xb8018888 = 0xf0 ;
@@ -189,8 +1837,8 @@ void setup_boot_image(void)
 		*(volatile unsigned int *)0xb8018964 = 0x54 ;
 		*(volatile unsigned int *)0xb8018968 = 0xff ;
 		*(volatile unsigned int *)0xb801896c = 0x3 ;
-		*(volatile unsigned int *)0xb80180d8 = 0x40 ;
-		*(volatile unsigned int *)0xb8018990 = 0x10 ;
+		*(volatile unsigned int *)0xb8018130 = 0x8 ;
+		*(volatile unsigned int *)0xb8018990 = 0x0 ;
 		*(volatile unsigned int *)0xb80189d0 = 0xc ;
 		*(volatile unsigned int *)0xb80189d4 = 0x4b ;
 		*(volatile unsigned int *)0xb80189d8 = 0x7a ;
@@ -200,126 +1848,142 @@ void setup_boot_image(void)
 		*(volatile unsigned int *)0xb80189e8 = 0x5a ;
 		*(volatile unsigned int *)0xb80189ec = 0x62 ;
 		*(volatile unsigned int *)0xb80189f0 = 0x84 ;
-		*(volatile unsigned int *)0xb8018000 = 0xae832359 ;
-		*(volatile unsigned int *)0xb8018004 = 0x306505 ;
-		*(volatile unsigned int *)0xb80180ac = 0xe0b59 ;
-		*(volatile unsigned int *)0xb8018048 = 0x8212353 ;
-		*(volatile unsigned int *)0xb8018050 = 0x815904 ;
-		*(volatile unsigned int *)0xb8018054 = 0x91ca0b ;
-		*(volatile unsigned int *)0xb801804c = 0x8222358 ;
-		*(volatile unsigned int *)0xb8018058 = 0x82aa09 ;
-		*(volatile unsigned int *)0xb80180c4 = 0x7ec00 ;
-		*(volatile unsigned int *)0xb80180ec = 0x19 ;
-		*(volatile unsigned int *)0xb80180ec = 0x6 ;
-		*(volatile unsigned int *)0xb80180ec = 0x11 ;
-		*(volatile unsigned int *)0xb80180f0 = 0x22d484 ;
-		*(volatile unsigned int *)0xb8018098 = 0x6a081000 ;
-		*(volatile unsigned int *)0xb801809c = 0x27e1040 ;
-		*(volatile unsigned int *)0xb8018148 = 0xa56d0d0 ;
-		*(volatile unsigned int *)0xb8018040 = 0x1 ;
-		*(volatile unsigned int *)0xb80180d8 = 0x3fe ;
-		*(volatile unsigned int *)0xb80180d8 = 0x3ab ;
-		*(volatile unsigned int *)0xb8018140 = 0x3fff000 ;
-		*(volatile unsigned int *)0xb8018144 = 0x3fff000 ;
-		*(volatile unsigned int *)0xb80180a8 = 0xff4810 ;
-		*(volatile unsigned int *)0xb80180ac = 0x8ff359 ;
-		*(volatile unsigned int *)0xb8018150 = 0x4c80 ;
-		*(volatile unsigned int *)0xb8018084 = 0x8000886e ;
-		*(volatile unsigned int *)0xb8018088 = 0x80008000 ;
-		*(volatile unsigned int *)0xb801808c = 0x8df4937c ;
-		*(volatile unsigned int *)0xb8018090 = 0xa014fd50 ;
-		*(volatile unsigned int *)0xb8018110 = 0x200e ;
-		*(volatile unsigned int *)0xb8018094 = 0x8845805f ;
-		*(volatile unsigned int *)0xb80180fc = 0x27e1804 ;
-		*(volatile unsigned int *)0xb80180a4 = 0x8202352 ;
-		*(volatile unsigned int *)0xb8018100 = 0x909803 ;
-		*(volatile unsigned int *)0xb8018104 = 0x800816 ;
-		*(volatile unsigned int *)0xb8018108 = 0x90691d ;
-		*(volatile unsigned int *)0xb80180a0 = 0x7e ;
-		*(volatile unsigned int *)0xb8018000 = 0x30000000 ;
-
-		// disable TVE colorbar, enable interrupt
-		*(volatile unsigned int *)0xb80180ec = 0x10 ;
-		*(volatile unsigned int *)0xb8005504 = 0xfffffffe ;
-		*(volatile unsigned int *)0xb8005504 = 0xb ;
-		*(volatile unsigned int *)0xb801810c = 0xa00a000 ;
-		*(volatile unsigned int *)0xb80180e0 = 0x0 ;
-		*(volatile unsigned int *)0xb80055e4 = 0x9 ;
-		*(volatile unsigned int *)0xb80180dc = 0x1 ;
+		*(volatile unsigned int *)0xb8018004 = 0x2832359 ;
+		*(volatile unsigned int *)0xb8018008 = 0xa832359 ;
+		*(volatile unsigned int *)0xb801800c = 0xa832359 ;
+		*(volatile unsigned int *)0xb80180b0 = 0x306505 ;
+		*(volatile unsigned int *)0xb80180b4 = 0x316 ;
+		*(volatile unsigned int *)0xb8018050 = 0x8106310 ;
+		*(volatile unsigned int *)0xb801805c = 0x815904 ;
+		*(volatile unsigned int *)0xb8018060 = 0x91ca0b ;
+		*(volatile unsigned int *)0xb8018054 = 0x3820a352 ;
+		*(volatile unsigned int *)0xb8018064 = 0x82aa09 ;
+		*(volatile unsigned int *)0xb8018058 = 0x3820a352 ;
+		*(volatile unsigned int *)0xb801806c = 0x82aa09 ;
+		*(volatile unsigned int *)0xb8018070 = 0xbe8be8 ;
+		*(volatile unsigned int *)0xb8018048 = 0x3f6 ;
+		*(volatile unsigned int *)0xb8018040 = 0x7 ;
+		*(volatile unsigned int *)0xb8018040 = 0x18 ;
+		*(volatile unsigned int *)0xb8018074 = 0x22d43f ;
+		*(volatile unsigned int *)0xb8018078 = 0x22cc88 ;
+		*(volatile unsigned int *)0xb801807c = 0x22cc89 ;
+		*(volatile unsigned int *)0xb8018108 = 0x80009404 ;
+		*(volatile unsigned int *)0xb801810c = 0x80008000 ;
+		*(volatile unsigned int *)0xb8018110 = 0x93929392 ;
+		*(volatile unsigned int *)0xb8018114 = 0x8d408c70 ;
+		*(volatile unsigned int *)0xb8018118 = 0x28c70 ;
+		*(volatile unsigned int *)0xb8018104 = 0x80008000 ;
+		*(volatile unsigned int *)0xb80180f0 = 0x27e1800 ;
+		*(volatile unsigned int *)0xb8018100 = 0x7f400e0 ;
+		*(volatile unsigned int *)0xb80180e0 = 0x1a0817a0 ;
+		*(volatile unsigned int *)0xb80180ec = 0x28a1bb0 ;
+		*(volatile unsigned int *)0xb80180e4 = 0x256d0d0 ;
+		*(volatile unsigned int *)0xb80180e8 = 0x2080000 ;
+		*(volatile unsigned int *)0xb8018044 = 0x1 ;
+		*(volatile unsigned int *)0xb8018080 = 0x20e0024e ;
+		*(volatile unsigned int *)0xb8018088 = 0x804232a ;
+		*(volatile unsigned int *)0xb801808c = 0x9ab ;
+		*(volatile unsigned int *)0xb8018010 = 0x3ffe ;
+		*(volatile unsigned int *)0xb8018130 = 0xc ;
+		*(volatile unsigned int *)0xb8018010 = 0x30cb ;
+		*(volatile unsigned int *)0xb8018130 = 0x5 ;
+		*(volatile unsigned int *)0xb80181b0 = 0x81ee34f ;
+		*(volatile unsigned int *)0xb80181cc = 0xbe8800 ;
+		*(volatile unsigned int *)0xb80181d0 = 0xa0c82c ;
+		*(volatile unsigned int *)0xb80181d4 = 0xbe8be8 ;
+		*(volatile unsigned int *)0xb80181d8 = 0x8002000 ;
+		*(volatile unsigned int *)0xb80181b4 = 0xfe ;
+		*(volatile unsigned int *)0xb8018000 = 0x3c0 ;
+		
+		// HDMI reg
+		*(volatile unsigned int *)0xb8000020 = 0x520000 ;
+		*(volatile unsigned int *)0xb80180b8 = 0x3a002000 ;
+		*(volatile unsigned int *)0xb80180bc = 0x8022046 ;
+		*(volatile unsigned int *)0xb80180c0 = 0x201a008 ;
+		*(volatile unsigned int *)0xb80180c4 = 0x2032008 ;
+		*(volatile unsigned int *)0xb80180c8 = 0x2002000 ;
+		*(volatile unsigned int *)0xb80180cc = 0x2002000 ;
+		*(volatile unsigned int *)0xb80180d0 = 0x8d4a074 ;
+		*(volatile unsigned int *)0xb800d020 = 0x0 ;
+		*(volatile unsigned int *)0xb800d024 = 0xf9c92a ;
+		*(volatile unsigned int *)0xb800d028 = 0xa05f31 ;
+		*(volatile unsigned int *)0xb800d02c = 0x121b99a ;
+		*(volatile unsigned int *)0xb800d200 = 0x374fc84 ;
+		*(volatile unsigned int *)0xb800d034 = 0x3f ;
+		*(volatile unsigned int *)0xb800d030 = 0x924 ;
+		*(volatile unsigned int *)0xb800d040 = 0x8ca0f0 ;
+		*(volatile unsigned int *)0xb800d044 = 0xa70 ;
+		*(volatile unsigned int *)0xb800d0bc = 0x14000000 ;
+		*(volatile unsigned int *)0xb800d0b8 = 0x7d04a ;
+		*(volatile unsigned int *)0xb8018000 = 0x2aa ;
+		*(volatile unsigned int *)0xb8018000 = 0x3c0 ;
+		*(volatile unsigned int *)0xb800d07c = 0xd0282 ;
+		*(volatile unsigned int *)0xb800d080 = 0xd83065 ;
+		*(volatile unsigned int *)0xb800d084 = 0x2 ;
+		*(volatile unsigned int *)0xb800d088 = 0x0 ;
+		*(volatile unsigned int *)0xb800d08c = 0x0 ;
+		*(volatile unsigned int *)0xb800d090 = 0x0 ;
+		*(volatile unsigned int *)0xb800d094 = 0x0 ;
+		*(volatile unsigned int *)0xb800d098 = 0x0 ;
+		*(volatile unsigned int *)0xb800d09c = 0x0 ;
+		*(volatile unsigned int *)0xb800d0b0 = 0x7762 ;
+		*(volatile unsigned int *)0xb800d0a0 = 0x11 ;
+		*(volatile unsigned int *)0xb800d0a4 = 0x7 ;
+		
+		// TVE_AV_CTRL_reg : disable i_black
+		*(volatile unsigned int *)0xb8018040 = 0x4 ;
+		// TVE_AV_CTRL_reg : disable p_black
+		*(volatile unsigned int *)0xb8018040 = 0x2 ;
+		// TVE_INTST_reg : reset interrupt status
+		*(volatile unsigned int *)0xb8018020 = 0xfffffffe ;
+		// TVE_INTEN_reg : enable i  channel interrupt
+		*(volatile unsigned int *)0xb801801c = 0x5 ;
+		// VO_FC_reg : enable mix1's go bit
+		*(volatile unsigned int *)0xb8005014 = 0x3 ;
 	} else if (logo_info.mode == 1) {
-		// PAL_I mode
-		// set VO registers
-		*(volatile unsigned int *)0xb8005350 = 0xfffffffe ;
-		*(volatile unsigned int *)0xb8005350 = 0x3 ;
-		*(volatile unsigned int *)0xb8005354 = 0x2cf ;
-		*(volatile unsigned int *)0xb8005358 = 0x31f63f ;
-		*(volatile unsigned int *)0xb800535c = 0xffff3210 ;
-		*(volatile unsigned int *)0xb8005360 = 0x0 ;
+		// TVE_INTST_reg : reset interrupt status
+		*(volatile unsigned int *)0xb8018020 = 0xfffffffe ;
+		// TVE_INTEN_reg : disable interrupt
+		*(volatile unsigned int *)0xb801801c = 0xfffffffe ;
+		// VO_FC_reg : disable  go bit
+		*(volatile unsigned int *)0xb8005014 = 0x01 ;    
 		
-		// color lookup table of Sub-Picture , index0~index3
-		*(volatile unsigned int *)0xb8005370 = logo_info.color[0] ;
-		*(volatile unsigned int *)0xb8005374 = logo_info.color[1] ;
-		*(volatile unsigned int *)0xb8005378 = logo_info.color[2] ;
-		*(volatile unsigned int *)0xb800537c = logo_info.color[3] ;
-		*(volatile unsigned int *)0xb80053b0 = 0xacf800 ;
-		*(volatile unsigned int *)0xb80053b4 = 0xa3f800 ;
-		*(volatile unsigned int *)0xb80053bc = 0x4000 ;
-		*(volatile unsigned int *)0xb80053c0 = 0x0 ;
-		*(volatile unsigned int *)0xb80053c4 = 0x0 ;
-		*(volatile unsigned int *)0xb80053c8 = 0x0 ;
-		*(volatile unsigned int *)0xb80053cc = 0x0 ;
-		*(volatile unsigned int *)0xb80053d0 = 0x200 ;
-		*(volatile unsigned int *)0xb80053d8 = 0x4000 ;
-		*(volatile unsigned int *)0xb80053dc = 0x0 ;
-		*(volatile unsigned int *)0xb80053e0 = 0x0 ;
-		*(volatile unsigned int *)0xb80053e4 = 0x0 ;
-		*(volatile unsigned int *)0xb80053e8 = 0x0 ;
-		*(volatile unsigned int *)0xb80053ec = 0x0 ;
-		*(volatile unsigned int *)0xb80053f0 = 0x0 ;
-		*(volatile unsigned int *)0xb80053f4 = 0x0 ;
-		*(volatile unsigned int *)0xb80053f8 = 0x0 ;
-		*(volatile unsigned int *)0xb80053fc = 0x400 ;
-		*(volatile unsigned int *)0xb8005400 = 0xffd ;
-		*(volatile unsigned int *)0xb8005404 = 0xf8f ;
-		*(volatile unsigned int *)0xb8005408 = 0xf60 ;
-		*(volatile unsigned int *)0xb800540c = 0xf50 ;
-		*(volatile unsigned int *)0xb8005410 = 0xfa8 ;
-		*(volatile unsigned int *)0xb8005414 = 0x207 ;
-		*(volatile unsigned int *)0xb8005418 = 0x30a ;
-		*(volatile unsigned int *)0xb800541c = 0x50b ;
-		*(volatile unsigned int *)0xb80054b0 = 0xa3facf ;
-		*(volatile unsigned int *)0xb80054b4 = 0x16030100 ;
-		*(volatile unsigned int *)0xb80054e8 = 0x2001400 ;
-		*(volatile unsigned int *)0xb80054ec = 0x2001000 ;
-		*(volatile unsigned int *)0xb80054f0 = 0x2001400 ;
-		*(volatile unsigned int *)0xb80054f4 = 0x2001000 ;
-		*(volatile unsigned int *)0xb80054f8 = 0x400 ;
-		*(volatile unsigned int *)0xb80054fc = 0x20080200 ;
-		*(volatile unsigned int *)0xb8005500 = 0xf010eb10 ;
-		*(volatile unsigned int *)0xb8005564 = 0x0 ;
-		*(volatile unsigned int *)0xb8005568 = 0x1 ;
-		*(volatile unsigned int *)0xb800556c = 0x2 ;
-		*(volatile unsigned int *)0xb8005570 = 0x3 ;
-		*(volatile unsigned int *)0xb8005574 = 0x4 ;
-		*(volatile unsigned int *)0xb8005578 = 0x5 ;
-		*(volatile unsigned int *)0xb800557c = 0x6 ;
-		*(volatile unsigned int *)0xb8005580 = 0x7 ;
-		*(volatile unsigned int *)0xb8005584 = 0x8 ;
+		// VO_MIX1_reg : enable SUB1
+		*(volatile unsigned int *)0xb8005008 = 0x41 ;
+		// VO_M1_SIZE_reg : set mixer1's width 720 and height 576 
+		*(volatile unsigned int *)0xb8005994 = 0x2d0240 ;
 		
-		// Top and Bot address of Sub-Picture 
-		*(volatile unsigned int *)0xb8005530 = 0x000f0000 ;
-		*(volatile unsigned int *)0xb8005534 = 0x000f0000+logo_info.size ;
+		// VO_SUB1_PXDT_reg  VO_SUB1_PXDB_reg : top and bottom address 
+		*(volatile unsigned int *)0xb80054ac = 0x5170;
+		*(volatile unsigned int *)0xb80054b0 = 0x5170 + logo_info.size;
+		// VO_SUB1_CLUT_reg : color lookup table address  ** 8 bytes aligned **
+		*(volatile unsigned int *)0xb80054a4 = 0x17e0;
+		// VO_SUB1_reg : used for DVD subpicture 
+		*(volatile unsigned int *)0xb8005490 = 0x800001 ;
+		// VO_SUB1_SUBP_reg : sub1 width 720
+		*(volatile unsigned int *)0xb8005494 = 0x2d0 ;
+		// VO_SUB1_SIZE_reg : canvas width 720 and height 576
+		*(volatile unsigned int *)0xb8005498 = 0x2d0240 ;
 		
-		// set TVE registers
-		*(volatile unsigned int *)0xb8000084 = 0x101cd800 ;
-		*(volatile unsigned int *)0xb800000c = 0x1 ;
-		*(volatile unsigned int *)0xb80180c8 = 0x124 ;
-		*(volatile unsigned int *)0xb80180cc = 0x188 ;
-		*(volatile unsigned int *)0xb8018134 = 0x278000 ;
-		*(volatile unsigned int *)0xb80180d0 = 0x1f8bbb ;
-		*(volatile unsigned int *)0xb80180d4 = 0x1f8cbb ;
-		*(volatile unsigned int *)0xb80180e8 = 0x1 ;
-		*(volatile unsigned int *)0xb8018154 = 0x205 ;
+		// VO_CH1_reg : enable reinterlace 
+		*(volatile unsigned int *)0xb80059f0 = 0x11 ;
+		// VO_MODE_reg : enable ch1 interlace and progressive
+		*(volatile unsigned int *)0xb8005000 = 0x7 ;
+		// VO_OUT_reg  : enable i and p port 
+		*(volatile unsigned int *)0xb8005004 = 0x465 ;
+		
+		// TVE_TV_625p
+		*(volatile unsigned int *)0xb8000020 = 0x11820 ;
+		*(volatile unsigned int *)0xb801820c = 0x124 ;
+		*(volatile unsigned int *)0xb8018208 = 0x1fc0 ;
+		*(volatile unsigned int *)0xb8018210 = 0x200000 ;
+		*(volatile unsigned int *)0xb8018200 = 0x7bbefb ;
+		*(volatile unsigned int *)0xb8018204 = 0x7bbefb ;
+		*(volatile unsigned int *)0xb8018218 = 0x597e ;
+		*(volatile unsigned int *)0xb801821c = 0x597e ;
+		*(volatile unsigned int *)0xb8018000 = 0x2aa ;
+		*(volatile unsigned int *)0xb8018038 = 0x1 ;
+		*(volatile unsigned int *)0xb8018a00 = 0x205 ;
 		*(volatile unsigned int *)0xb8018880 = 0xcb ;
 		*(volatile unsigned int *)0xb8018884 = 0x8a ;
 		*(volatile unsigned int *)0xb8018888 = 0x9 ;
@@ -372,7 +2036,7 @@ void setup_boot_image(void)
 		*(volatile unsigned int *)0xb8018964 = 0x47 ;
 		*(volatile unsigned int *)0xb8018968 = 0x55 ;
 		*(volatile unsigned int *)0xb801896c = 0x1 ;
-		*(volatile unsigned int *)0xb80180d8 = 0x40 ;
+		*(volatile unsigned int *)0xb8018130 = 0x8 ;
 		*(volatile unsigned int *)0xb8018990 = 0x0 ;
 		*(volatile unsigned int *)0xb80189d0 = 0x0 ;
 		*(volatile unsigned int *)0xb80189d4 = 0x3f ;
@@ -383,51 +2047,1023 @@ void setup_boot_image(void)
 		*(volatile unsigned int *)0xb80189e8 = 0x50 ;
 		*(volatile unsigned int *)0xb80189ec = 0x57 ;
 		*(volatile unsigned int *)0xb80189f0 = 0x75 ;
-		*(volatile unsigned int *)0xb8018000 = 0x2e9c235f ;
-		*(volatile unsigned int *)0xb8018004 = 0x29ae6d ;
-		*(volatile unsigned int *)0xb80180ac = 0xe0b1b ;
-		*(volatile unsigned int *)0xb8018048 = 0x80fa30d ;
-		*(volatile unsigned int *)0xb8018050 = 0x816935 ;
-		*(volatile unsigned int *)0xb8018054 = 0x94fa6e ;
-		*(volatile unsigned int *)0xb801804c = 0x81f234c ;
-		*(volatile unsigned int *)0xb8018058 = 0x82ca6b ;
-		*(volatile unsigned int *)0xb80180c4 = 0x7ec00 ;
-		*(volatile unsigned int *)0xb80180ec = 0x19 ;
-		*(volatile unsigned int *)0xb80180ec = 0x6 ;
-		*(volatile unsigned int *)0xb80180ec = 0x11 ;
-		*(volatile unsigned int *)0xb80180f0 = 0x22d43c ;
-		*(volatile unsigned int *)0xb8018098 = 0x6a081000 ;
-		*(volatile unsigned int *)0xb801809c = 0x27e1bb0 ;
-		*(volatile unsigned int *)0xb8018148 = 0xa56d0d0 ;
-		*(volatile unsigned int *)0xb8018040 = 0x1 ;
-		*(volatile unsigned int *)0xb80180d8 = 0x3fe ;
-		*(volatile unsigned int *)0xb80180d8 = 0x3ab ;
-		*(volatile unsigned int *)0xb8018140 = 0x3fff000 ;
-		*(volatile unsigned int *)0xb8018144 = 0x3fff000 ;
-		*(volatile unsigned int *)0xb8018150 = 0x5c80 ;
-		*(volatile unsigned int *)0xb8018084 = 0x80008807 ;
-		*(volatile unsigned int *)0xb8018088 = 0x80008000 ;
-		*(volatile unsigned int *)0xb801808c = 0x8d0c9266 ;
-		*(volatile unsigned int *)0xb8018090 = 0xa0038110 ;
-		*(volatile unsigned int *)0xb8018110 = 0x2003 ;
-		*(volatile unsigned int *)0xb8018094 = 0x88008112 ;
-		*(volatile unsigned int *)0xb80180fc = 0x27e1800 ;
-		*(volatile unsigned int *)0xb80180a4 = 0x821a358 ;
-		*(volatile unsigned int *)0xb8018100 = 0x938800 ;
-		*(volatile unsigned int *)0xb8018104 = 0xa6f816 ;
-		*(volatile unsigned int *)0xb8018108 = 0x93694f ;
-		*(volatile unsigned int *)0xb80180a0 = 0x7e ;
-		*(volatile unsigned int *)0xb8018000 = 0x30000000 ;
+		*(volatile unsigned int *)0xb8018004 = 0x29c235f ;
+		*(volatile unsigned int *)0xb8018008 = 0xa9c235f ;
+		*(volatile unsigned int *)0xb801800c = 0xa9c235f ;
+		*(volatile unsigned int *)0xb80180b0 = 0x29ae6d ;
+		*(volatile unsigned int *)0xb80180b4 = 0x31b ;
+		*(volatile unsigned int *)0xb8018050 = 0x80fa30d ;
+		*(volatile unsigned int *)0xb801805c = 0x816935 ;
+		*(volatile unsigned int *)0xb8018060 = 0x94fa6e ;
+		*(volatile unsigned int *)0xb8018054 = 0x381f234c ;
+		*(volatile unsigned int *)0xb8018064 = 0x82ca6b ;
+		*(volatile unsigned int *)0xb8018058 = 0x381f234c ;
+		*(volatile unsigned int *)0xb801806c = 0x82ca6b ;
+		*(volatile unsigned int *)0xb8018048 = 0x3f6 ;
+		*(volatile unsigned int *)0xb8018040 = 0x7 ;
+		*(volatile unsigned int *)0xb8018040 = 0x18 ;
+		*(volatile unsigned int *)0xb8018074 = 0x22d43c ;
+		*(volatile unsigned int *)0xb8018078 = 0x22cc88 ;
+		*(volatile unsigned int *)0xb801807c = 0x22cc89 ;
+		*(volatile unsigned int *)0xb8018108 = 0x80009404 ;
+		*(volatile unsigned int *)0xb801810c = 0x80008000 ;
+		*(volatile unsigned int *)0xb8018110 = 0x93929392 ;
+		*(volatile unsigned int *)0xb8018114 = 0x8d408c70 ;
+		*(volatile unsigned int *)0xb8018118 = 0x28c70 ;
+		*(volatile unsigned int *)0xb8018104 = 0x80008000 ;
+		*(volatile unsigned int *)0xb80180f0 = 0x27e1800 ;
+		*(volatile unsigned int *)0xb8018100 = 0x7f400e0 ;
+		*(volatile unsigned int *)0xb80180e0 = 0x1a0817a0 ;
+		*(volatile unsigned int *)0xb80180ec = 0x28a1bb0 ;
+		*(volatile unsigned int *)0xb80180e4 = 0x256d0d0 ;
+		*(volatile unsigned int *)0xb8018044 = 0x1 ;
+		*(volatile unsigned int *)0xb8018080 = 0x20290242 ;
+		*(volatile unsigned int *)0xb8018088 = 0x800e32a ;
+		*(volatile unsigned int *)0xb801808c = 0x824 ;
+		*(volatile unsigned int *)0xb8018010 = 0x3ffe ;
+		*(volatile unsigned int *)0xb8018130 = 0xc ;
+		*(volatile unsigned int *)0xb8018010 = 0x30c9 ;
+		*(volatile unsigned int *)0xb8018130 = 0x5 ;
+		*(volatile unsigned int *)0xb80181b0 = 0x81e634d ;
+		*(volatile unsigned int *)0xb80181cc = 0xbe8800 ;
+		*(volatile unsigned int *)0xb80181d0 = 0xa6c82c ;
+		*(volatile unsigned int *)0xb80181d4 = 0xbe8be8 ;
+		*(volatile unsigned int *)0xb80181d8 = 0x8002000 ;
+		*(volatile unsigned int *)0xb80181b4 = 0xfe ;
+		*(volatile unsigned int *)0xb8018000 = 0x3c0 ;
 		
-		// disable TVE colorbar, enable interrupt
-		*(volatile unsigned int *)0xb80180ec = 0x10 ;
-		*(volatile unsigned int *)0xb8005504 = 0xfffffffe ;
-		*(volatile unsigned int *)0xb8005504 = 0xb ;
-		*(volatile unsigned int *)0xb801810c = 0xa00a000 ;
-		*(volatile unsigned int *)0xb80180e0 = 0x0 ;
-		*(volatile unsigned int *)0xb80055f0 = 0x9 ;
+		// HDMI reg
+		*(volatile unsigned int *)0xb8000020 = 0x520000 ;
+		*(volatile unsigned int *)0xb80180b8 = 0x3a002000 ;
+		*(volatile unsigned int *)0xb80180bc = 0x8d62038 ;
+		*(volatile unsigned int *)0xb80180c0 = 0x29c2358 ;
+		*(volatile unsigned int *)0xb80180c4 = 0x2012358 ;
+		*(volatile unsigned int *)0xb80180c8 = 0x2002000 ;
+		*(volatile unsigned int *)0xb80180cc = 0x2002000 ;
+		*(volatile unsigned int *)0xb80180d0 = 0x8d3206e ;
+		*(volatile unsigned int *)0xb800d020 = 0x0 ;
+		*(volatile unsigned int *)0xb800d024 = 0xf9c92a ;
+		*(volatile unsigned int *)0xb800d028 = 0xa05f31 ;
+		*(volatile unsigned int *)0xb800d02c = 0x121b99a ;
+		*(volatile unsigned int *)0xb800d200 = 0x374fc84 ;
+		*(volatile unsigned int *)0xb800d034 = 0x3f ;
+		*(volatile unsigned int *)0xb800d030 = 0x924 ;
+		*(volatile unsigned int *)0xb800d040 = 0x8ca0f0 ;
+		*(volatile unsigned int *)0xb800d044 = 0xa70 ;
+		*(volatile unsigned int *)0xb800d0bc = 0x14000000 ;
+		*(volatile unsigned int *)0xb800d0b8 = 0x7d04a ;
+		*(volatile unsigned int *)0xb8018000 = 0x2aa ;
+		*(volatile unsigned int *)0xb8018000 = 0x3c0 ;
+		*(volatile unsigned int *)0xb800d07c = 0xd0282 ;
+		*(volatile unsigned int *)0xb800d080 = 0xd83056 ;
+		*(volatile unsigned int *)0xb800d084 = 0x11 ;
+		*(volatile unsigned int *)0xb800d088 = 0x0 ;
+		*(volatile unsigned int *)0xb800d08c = 0x0 ;
+		*(volatile unsigned int *)0xb800d090 = 0x0 ;
+		*(volatile unsigned int *)0xb800d094 = 0x0 ;
+		*(volatile unsigned int *)0xb800d098 = 0x0 ;
+		*(volatile unsigned int *)0xb800d09c = 0x0 ;
+		*(volatile unsigned int *)0xb800d0b0 = 0x7762 ;
+		*(volatile unsigned int *)0xb800d0a0 = 0x11 ;
+		*(volatile unsigned int *)0xb800d0a4 = 0x7 ;
 		
-		*(volatile unsigned int *)0xb80180dc = 0x1 ;
+		// TVE_AV_CTRL_reg : disable i_black
+		*(volatile unsigned int *)0xb8018040 = 0x4 ;
+		// TVE_AV_CTRL_reg : disable p_black
+		*(volatile unsigned int *)0xb8018040 = 0x2 ;
+		// TVE_INTST_reg : reset interrupt status
+		*(volatile unsigned int *)0xb8018020 = 0xfffffffe ;
+		// TVE_INTEN_reg : enable i  channel interrupt
+		*(volatile unsigned int *)0xb801801c = 0x5 ;
+		// VO_FC_reg : enable mix1's go bit
+		*(volatile unsigned int *)0xb8005014 = 0x3 ;
+	} else {
+		// not support yet...
+	}
+}
+
+void setup_boot_image(void)
+{
+	unsigned int value;
+
+	if (platform_info.board_id == realtek_pvr_demo_board)
+		return;
+
+	// change to "composite" mode for SCART
+	value = *(volatile unsigned int *)0xb801b108;
+	*(volatile unsigned int *)0xb801b108 = (value & 0xffbfffff) ;
+	
+	// change to AV mode for SCART
+	if (platform_info.board_id == realtek_1261_demo_board) {
+		value = *(volatile unsigned int *)0xb801b10c;
+		*(volatile unsigned int *)0xb801b10c = (value & 0xfffffff3) ;
+	}
+
+	// reset video exception entry point
+	*(volatile unsigned int *)0xa00000a4 = 0x00801a3c;
+	*(volatile unsigned int *)0xa00000a8 = 0x00185a37;
+	*(volatile unsigned int *)0xa00000ac = 0x08004003;
+	*(volatile unsigned int *)0xa00000b0 = 0x00000000;
+
+	if (logo_info.mode == 0) {
+		// NTSC mode
+		if (is_venus_cpu()) {
+//			*(volatile unsigned int *)0xb801b200 = 0x61 ;
+			// set VO registers
+			*(volatile unsigned int *)0xb8005350 = 0xfffffffe ;
+			*(volatile unsigned int *)0xb8005350 = 0x3 ;
+			*(volatile unsigned int *)0xb8005354 = 0x2cf ;
+			*(volatile unsigned int *)0xb8005358 = 0x2ef5df ;
+			*(volatile unsigned int *)0xb800535c = 0xffff3210 ;
+			*(volatile unsigned int *)0xb8005360 = 0x0 ;
+	
+			// color lookup table of Sub-Picture , index0~index3
+			*(volatile unsigned int *)0xb8005370 = logo_info.color[0];
+			*(volatile unsigned int *)0xb8005374 = logo_info.color[1];
+			*(volatile unsigned int *)0xb8005378 = logo_info.color[2];
+			*(volatile unsigned int *)0xb800537c = logo_info.color[3];
+			*(volatile unsigned int *)0xb80053b0 = 0xacf800 ;
+			*(volatile unsigned int *)0xb80053b4 = 0x9df800 ;
+			*(volatile unsigned int *)0xb80053bc = 0x4000 ;
+			*(volatile unsigned int *)0xb80053c0 = 0x0 ;
+			*(volatile unsigned int *)0xb80053c4 = 0x0 ;
+			*(volatile unsigned int *)0xb80053c8 = 0x0 ;
+			*(volatile unsigned int *)0xb80053cc = 0x0 ;
+			*(volatile unsigned int *)0xb80053d0 = 0x200 ;
+			*(volatile unsigned int *)0xb80053d8 = 0x4000 ;
+			*(volatile unsigned int *)0xb80053dc = 0x0 ;
+			*(volatile unsigned int *)0xb80053e0 = 0x0 ;
+			*(volatile unsigned int *)0xb80053e4 = 0x0 ;
+			*(volatile unsigned int *)0xb80053e8 = 0x0 ;
+			*(volatile unsigned int *)0xb80053ec = 0x0 ;
+			*(volatile unsigned int *)0xb80053f0 = 0x0 ;
+			*(volatile unsigned int *)0xb80053f4 = 0x0 ;
+			*(volatile unsigned int *)0xb80053f8 = 0x0 ;
+			*(volatile unsigned int *)0xb80053fc = 0x400 ;
+			*(volatile unsigned int *)0xb8005400 = 0xffd ;
+			*(volatile unsigned int *)0xb8005404 = 0xf8f ;
+			*(volatile unsigned int *)0xb8005408 = 0xf60 ;
+			*(volatile unsigned int *)0xb800540c = 0xf50 ;
+			*(volatile unsigned int *)0xb8005410 = 0xfa8 ;
+			*(volatile unsigned int *)0xb8005414 = 0x207 ;
+			*(volatile unsigned int *)0xb8005418 = 0x30a ;
+			*(volatile unsigned int *)0xb800541c = 0x50b ;
+			*(volatile unsigned int *)0xb80054b0 = 0x9dfacf ;
+			*(volatile unsigned int *)0xb80054e8 = 0x2001400 ;
+			*(volatile unsigned int *)0xb80054ec = 0x2001000 ;
+			*(volatile unsigned int *)0xb80054f0 = 0x2001400 ;
+			*(volatile unsigned int *)0xb80054f4 = 0x2001000 ;
+			*(volatile unsigned int *)0xb80054f8 = 0x400 ;
+			*(volatile unsigned int *)0xb80054fc = 0x20080200 ;
+			*(volatile unsigned int *)0xb8005500 = 0xf010eb10 ;
+			*(volatile unsigned int *)0xb8005564 = 0x0 ;
+			*(volatile unsigned int *)0xb8005568 = 0x1 ;
+			*(volatile unsigned int *)0xb800556c = 0x2 ;
+			*(volatile unsigned int *)0xb8005570 = 0x3 ;
+			*(volatile unsigned int *)0xb8005574 = 0x4 ;
+			*(volatile unsigned int *)0xb8005578 = 0x5 ;
+			*(volatile unsigned int *)0xb800557c = 0x6 ;
+			*(volatile unsigned int *)0xb8005580 = 0x7 ;
+			*(volatile unsigned int *)0xb8005584 = 0x8 ;
+	
+			// Top and Bot address of Sub-Picture 
+			*(volatile unsigned int *)0xb8005530 = 0xf0000 ;
+			*(volatile unsigned int *)0xb8005534 = 0xf0000+logo_info.size ;
+	
+			// set TVE registers
+			*(volatile unsigned int *)0xb8000084 = 0x101cd800 ;
+			*(volatile unsigned int *)0xb800000c = 0x1 ;
+			*(volatile unsigned int *)0xB80180C8 = 0x12D;     
+			*(volatile unsigned int *)0xB80180CC = 0x188;     
+			*(volatile unsigned int *)0xB8018134 = 0x278000;  
+			*(volatile unsigned int *)0xB80180D0 = 0x1F9AAA;  
+			*(volatile unsigned int *)0xB80180D4 = 0x1F9AAA;  
+			*(volatile unsigned int *)0xB80180E8 = 0x1;       
+			*(volatile unsigned int *)0xB8018154 = 0x200;     
+			*(volatile unsigned int *)0xB8018880 = 0x1F;      
+			*(volatile unsigned int *)0xB8018884 = 0x7C;      
+			*(volatile unsigned int *)0xB8018888 = 0xF0;      
+			*(volatile unsigned int *)0xB801888C = 0x21;      
+			*(volatile unsigned int *)0xB8018890 = 0x0;       
+			*(volatile unsigned int *)0xB8018894 = 0x2;       
+			*(volatile unsigned int *)0xB8018898 = 0x2;       
+			*(volatile unsigned int *)0xB801889C = 0x3F;      
+			*(volatile unsigned int *)0xB80188A0 = 0x2;       
+			*(volatile unsigned int *)0xB80188A8 = 0x8D;      
+			*(volatile unsigned int *)0xB80188AC = 0x78;      
+			*(volatile unsigned int *)0xB80188B0 = 0x10;      
+			*(volatile unsigned int *)0xB80188B4 = 0x7;       
+			*(volatile unsigned int *)0xB80188B8 = 0x1C;      
+			*(volatile unsigned int *)0xB80188B8 = 0x1C;      
+			*(volatile unsigned int *)0xB8018984 = 0x20;      
+			*(volatile unsigned int *)0xB801898C = 0x2;       
+			*(volatile unsigned int *)0xB80188BC = 0x0;       
+			*(volatile unsigned int *)0xB80188C8 = 0xC8;      
+			*(volatile unsigned int *)0xB80188CC = 0x0;       
+			*(volatile unsigned int *)0xB80188D0 = 0x0;       
+			*(volatile unsigned int *)0xB80188E0 = 0x8;       
+			*(volatile unsigned int *)0xB80188E4 = 0x31;      
+			*(volatile unsigned int *)0xB80188E8 = 0x6;       
+			*(volatile unsigned int *)0xB80188EC = 0x6;       
+			*(volatile unsigned int *)0xB80188F0 = 0xB3;      
+			*(volatile unsigned int *)0xB80188F4 = 0x3;       
+			*(volatile unsigned int *)0xB80188F8 = 0x59;      
+			*(volatile unsigned int *)0xB80189C0 = 0x64;      
+			*(volatile unsigned int *)0xB80189C4 = 0x2D;      
+			*(volatile unsigned int *)0xB80189C8 = 0x7;       
+			*(volatile unsigned int *)0xB80189CC = 0x14;      
+			*(volatile unsigned int *)0xB8018920 = 0x0;       
+			*(volatile unsigned int *)0xB8018924 = 0x3A;      
+			*(volatile unsigned int *)0xB8018928 = 0x11;      
+			*(volatile unsigned int *)0xB801892C = 0x4B;      
+			*(volatile unsigned int *)0xB8018930 = 0x11;      
+			*(volatile unsigned int *)0xB8018934 = 0x3C;      
+			*(volatile unsigned int *)0xB8018938 = 0x1B;      
+			*(volatile unsigned int *)0xB801893C = 0x1B;      
+			*(volatile unsigned int *)0xB8018940 = 0x24;      
+			*(volatile unsigned int *)0xB8018944 = 0x7;       
+			*(volatile unsigned int *)0xB8018948 = 0xF8;      
+			*(volatile unsigned int *)0xB801894C = 0x0;       
+			*(volatile unsigned int *)0xB8018950 = 0x0;       
+			*(volatile unsigned int *)0xB8018954 = 0xF;       
+			*(volatile unsigned int *)0xB8018958 = 0xF;       
+			*(volatile unsigned int *)0xB801895C = 0x60;      
+			*(volatile unsigned int *)0xB8018960 = 0xA0;      
+			*(volatile unsigned int *)0xB8018964 = 0x54;      
+			*(volatile unsigned int *)0xB8018968 = 0xFF;      
+			*(volatile unsigned int *)0xB801896C = 0x3;       
+			*(volatile unsigned int *)0xB80180D8 = 0x40;      
+			*(volatile unsigned int *)0xB8018990 = 0x0;       
+			*(volatile unsigned int *)0xB80189D0 = 0xC;       
+			*(volatile unsigned int *)0xB80189D4 = 0x4B;      
+			*(volatile unsigned int *)0xB80189D8 = 0x7A;      
+			*(volatile unsigned int *)0xB80189DC = 0x2B;      
+			*(volatile unsigned int *)0xB80189E0 = 0x85;      
+			*(volatile unsigned int *)0xB80189E4 = 0xAA;      
+			*(volatile unsigned int *)0xB80189E8 = 0x5A;      
+			*(volatile unsigned int *)0xB80189EC = 0x62;      
+			*(volatile unsigned int *)0xB80189F0 = 0x84;      
+			*(volatile unsigned int *)0xB8018000 = 0x2A832359;
+			*(volatile unsigned int *)0xB8018004 = 0x306505;  
+			*(volatile unsigned int *)0xB80180AC = 0xE0B16;   
+			*(volatile unsigned int *)0xB8018048 = 0x8106310; 
+			*(volatile unsigned int *)0xB8018050 = 0x815904;  
+			*(volatile unsigned int *)0xB8018054 = 0x91CA0B;  
+			*(volatile unsigned int *)0xB801804C = 0x820A352; 
+			*(volatile unsigned int *)0xB8018058 = 0x82AA09;  
+			*(volatile unsigned int *)0xB80180C4 = 0x7EC00;   
+			*(volatile unsigned int *)0xB80180EC = 0x19;      
+			*(volatile unsigned int *)0xB80180EC = 0x6;       
+			*(volatile unsigned int *)0xB80180EC = 0x1;       
+			*(volatile unsigned int *)0xB80180F0 = 0x22D43F;  
+			*(volatile unsigned int *)0xB80180F4 = 0x22CC88;  
+			*(volatile unsigned int *)0xB8018084 = 0x80009404;
+			*(volatile unsigned int *)0xB8018088 = 0x80008000;
+			*(volatile unsigned int *)0xB801808C = 0x93929392;
+			*(volatile unsigned int *)0xB8018090 = 0x8C708D40;
+			*(volatile unsigned int *)0xB8018110 = 0xC70;     
+			*(volatile unsigned int *)0xB8018094 = 0x80008000;
+			*(volatile unsigned int *)0xB80180FC = 0x27E1800; 
+			*(volatile unsigned int *)0xB80180A8 = 0x7F4800;  
+			*(volatile unsigned int *)0xB8018098 = 0x6A0817A0;
+			*(volatile unsigned int *)0xB801809C = 0x28A1BB0; 
+			*(volatile unsigned int *)0xB8018148 = 0xE56D0D0; 
+			*(volatile unsigned int *)0xB801814C = 0x40;      
+			*(volatile unsigned int *)0xB8018040 = 0x1;       
+			*(volatile unsigned int *)0xB8018044 = 0x20E0024E;
+			*(volatile unsigned int *)0xB801805C = 0x804232A; 
+			*(volatile unsigned int *)0xB8018060 = 0x9AB;     
+			*(volatile unsigned int *)0xB80180D8 = 0x7FE;     
+			*(volatile unsigned int *)0xB80180D8 = 0x32B;     
+			*(volatile unsigned int *)0xB80180A4 = 0x8216359; 
+			*(volatile unsigned int *)0xB8018100 = 0xBE8800;  
+			*(volatile unsigned int *)0xB8018104 = 0xA0C82C;  
+			*(volatile unsigned int *)0xB8018108 = 0xBE8BE8;  
+			*(volatile unsigned int *)0xB80180A0 = 0x7E;      
+			*(volatile unsigned int *)0xB80180A0 = 0x2F;      
+			*(volatile unsigned int *)0xB8018000 = 0x30000000;
+	
+			// disable TVE colorbar, enable interrupt
+			*(volatile unsigned int *)0xb80180ec = 0x18 ;
+			*(volatile unsigned int *)0xb8005504 = 0xfffffffe ;
+			*(volatile unsigned int *)0xb8005504 = 0xf ;
+			*(volatile unsigned int *)0xb801810c = 0xa00a000 ;
+			*(volatile unsigned int *)0xb80180e0 = 0x0 ;
+			*(volatile unsigned int *)0xb80055e4 = 0x9 ;
+			*(volatile unsigned int *)0xb80180dc = 0x1 ;
+
+#ifndef CONFIG_REALTEK_HDMI_NONE
+			// HDMI
+			*(volatile unsigned int *)0xb801b36c = 0x0;
+			*(volatile unsigned int *)0xb801b300 = 0x63;
+			*(volatile unsigned int *)0xb801b330 = 0x0;
+			*(volatile unsigned int *)0xb801b338 = 0x0;
+			*(volatile unsigned int *)0xb801b33c = 0x8;
+			*(volatile unsigned int *)0xb801b36c = 0x1;
+			
+			BusyWaiting(70000);
+#ifdef CONFIG_REALTEK_HDMI_NXP
+			SET_NXP_HDMI_480P();
+#else
+			SET_CAT_HDMI_480P();
+#endif
+			BusyWaiting(70000);
+#endif
+		} else {
+//			*(volatile unsigned int *)0xb801b200 = 0x62 ;
+			// set VO registers
+			*(volatile unsigned int *)0xb8005350 = 0xfffffffe ;
+			*(volatile unsigned int *)0xb8005350 = 0x3 ;
+			*(volatile unsigned int *)0xb8005354 = 0x2cf ;
+			*(volatile unsigned int *)0xb8005358 = 0x2ef5df ;
+			*(volatile unsigned int *)0xb800535c = 0xffff3210 ;
+			*(volatile unsigned int *)0xb8005360 = 0x0 ;
+	
+			// color lookup table of Sub-Picture , index0~index3
+			*(volatile unsigned int *)0xb8005370 = logo_info.color[0];
+			*(volatile unsigned int *)0xb8005374 = logo_info.color[1];
+			*(volatile unsigned int *)0xb8005378 = logo_info.color[2];
+			*(volatile unsigned int *)0xb800537c = logo_info.color[3];
+			*(volatile unsigned int *)0xb80053b0 = 0xacf800 ;
+			*(volatile unsigned int *)0xb80053b4 = 0x9df800 ;
+			*(volatile unsigned int *)0xb80056cc = 0x4000 ;
+			*(volatile unsigned int *)0xb80056d0 = 0x0 ;
+			*(volatile unsigned int *)0xb80056c8 = 0x2 ;
+			*(volatile unsigned int *)0xb80056fc = 0x4000 ;
+			*(volatile unsigned int *)0xb8005700 = 0x0 ;
+			*(volatile unsigned int *)0xb80056f4 = 0x2 ;
+			*(volatile unsigned int *)0xb80054b0 = 0x9dfacf ;
+			*(volatile unsigned int *)0xb80054e8 = 0x2001400 ;
+			*(volatile unsigned int *)0xb80054ec = 0x2001000 ;
+			*(volatile unsigned int *)0xb80054f0 = 0x2001400 ;
+			*(volatile unsigned int *)0xb80054f4 = 0x2001000 ;
+			*(volatile unsigned int *)0xb80054f8 = 0x400 ;
+			*(volatile unsigned int *)0xb80054fc = 0x20080200 ;
+			*(volatile unsigned int *)0xb8005500 = 0xf010eb10 ;
+			*(volatile unsigned int *)0xb8005564 = 0x0 ;
+			*(volatile unsigned int *)0xb8005568 = 0x1 ;
+			*(volatile unsigned int *)0xb800556c = 0x2 ;
+			*(volatile unsigned int *)0xb8005570 = 0x3 ;
+			*(volatile unsigned int *)0xb8005574 = 0x4 ;
+			*(volatile unsigned int *)0xb8005578 = 0x5 ;
+			*(volatile unsigned int *)0xb800557c = 0x6 ;
+			*(volatile unsigned int *)0xb8005580 = 0x7 ;
+			*(volatile unsigned int *)0xb8005584 = 0x8 ;
+	
+			// Top and Bot address of Sub-Picture 
+			*(volatile unsigned int *)0xb8005530 = 0xf0000 ;
+			*(volatile unsigned int *)0xb8005534 = 0xf0000+logo_info.size ;
+	
+			// set TVE registers
+			*(volatile unsigned int *)0xb8000084 = 0x101cd800 ;
+			*(volatile unsigned int *)0xb800000c = 0x1 ;
+			*(volatile unsigned int *)0xB80180C8 = 0x124 ;    
+			*(volatile unsigned int *)0xB80180CC = 0x188 ;    
+			*(volatile unsigned int *)0xB8018134 = 0x278000 ; 
+			*(volatile unsigned int *)0xB80180D0 = 0x3FBBBB ; 
+			*(volatile unsigned int *)0xB80180D4 = 0x3FCBBB ; 
+			*(volatile unsigned int *)0xB80180E8 = 0x1 ;      
+			*(volatile unsigned int *)0xB8018154 = 0x200 ;     
+			*(volatile unsigned int *)0xB8018880 = 0x1F ;     
+			*(volatile unsigned int *)0xB8018884 = 0x7C ;     
+			*(volatile unsigned int *)0xB8018888 = 0xF0 ;     
+			*(volatile unsigned int *)0xB801888C = 0x21 ;     
+			*(volatile unsigned int *)0xB8018890 = 0x0 ;      
+			*(volatile unsigned int *)0xB8018894 = 0x2 ;      
+			*(volatile unsigned int *)0xB8018898 = 0x2 ;      
+			*(volatile unsigned int *)0xB801889C = 0x3F ;     
+			*(volatile unsigned int *)0xB80188A0 = 0x2 ;      
+			*(volatile unsigned int *)0xB80188A8 = 0x8D ;     
+			*(volatile unsigned int *)0xB80188AC = 0x78 ;     
+			*(volatile unsigned int *)0xB80188B0 = 0x10 ;     
+			*(volatile unsigned int *)0xB80188B4 = 0x7 ;      
+			*(volatile unsigned int *)0xB80188B8 = 0x1C ;     
+			*(volatile unsigned int *)0xB80188B8 = 0x1C ;     
+			*(volatile unsigned int *)0xB8018984 = 0x20 ;     
+			*(volatile unsigned int *)0xB801898C = 0x2 ;      
+			*(volatile unsigned int *)0xB80188BC = 0x0 ;      
+			*(volatile unsigned int *)0xB80188C8 = 0xC8 ;      
+			*(volatile unsigned int *)0xB80188CC = 0x0 ;      
+			*(volatile unsigned int *)0xB80188D0 = 0x0 ;      
+			*(volatile unsigned int *)0xB80188E0 = 0x8 ;      
+			*(volatile unsigned int *)0xB80188E4 = 0x31 ;     
+			*(volatile unsigned int *)0xB80188E8 = 0x6 ;      
+			*(volatile unsigned int *)0xB80188EC = 0x6 ;      
+			*(volatile unsigned int *)0xB80188F0 = 0xB3 ;     
+			*(volatile unsigned int *)0xB80188F4 = 0x3 ;      
+			*(volatile unsigned int *)0xB80188F8 = 0x59 ;     
+			*(volatile unsigned int *)0xB80189C0 = 0x64 ;     
+			*(volatile unsigned int *)0xB80189C4 = 0x2D ;     
+			*(volatile unsigned int *)0xB80189C8 = 0x7 ;      
+			*(volatile unsigned int *)0xB80189CC = 0x18 ;     
+			*(volatile unsigned int *)0xB8018920 = 0x0 ;      
+			*(volatile unsigned int *)0xB8018924 = 0x3A ;     
+			*(volatile unsigned int *)0xB8018928 = 0x11 ;     
+			*(volatile unsigned int *)0xB801892C = 0x4B ;     
+			*(volatile unsigned int *)0xB8018930 = 0x11 ;     
+			*(volatile unsigned int *)0xB8018934 = 0x3C ;     
+			*(volatile unsigned int *)0xB8018938 = 0x1B ;     
+			*(volatile unsigned int *)0xB801893C = 0x1B ;     
+			*(volatile unsigned int *)0xB8018940 = 0x24 ;     
+			*(volatile unsigned int *)0xB8018944 = 0x7 ;      
+			*(volatile unsigned int *)0xB8018948 = 0xF8 ;     
+			*(volatile unsigned int *)0xB801894C = 0x0 ;      
+			*(volatile unsigned int *)0xB8018950 = 0x0 ;      
+			*(volatile unsigned int *)0xB8018954 = 0xF ;      
+			*(volatile unsigned int *)0xB8018958 = 0xF ;      
+			*(volatile unsigned int *)0xB801895C = 0x60 ;     
+			*(volatile unsigned int *)0xB8018960 = 0xA0 ;     
+			*(volatile unsigned int *)0xB8018964 = 0x54 ;     
+			*(volatile unsigned int *)0xB8018968 = 0xFF ;     
+			*(volatile unsigned int *)0xB801896C = 0x3 ;      
+			*(volatile unsigned int *)0xB80180D8 = 0x40 ;     
+			*(volatile unsigned int *)0xB8018990 = 0x0 ;      
+			*(volatile unsigned int *)0xB80189D0 = 0xC ;      
+			*(volatile unsigned int *)0xB80189D4 = 0x4B ;     
+			*(volatile unsigned int *)0xB80189D8 = 0x7A ;     
+			*(volatile unsigned int *)0xB80189DC = 0x2B ;     
+			*(volatile unsigned int *)0xB80189E0 = 0x85 ;     
+			*(volatile unsigned int *)0xB80189E4 = 0xAA ;     
+			*(volatile unsigned int *)0xB80189E8 = 0x5A ;     
+			*(volatile unsigned int *)0xB80189EC = 0x62 ;     
+			*(volatile unsigned int *)0xB80189F0 = 0x84 ;     
+			*(volatile unsigned int *)0xB8018000 = 0x2A832359 ;
+			*(volatile unsigned int *)0xB8018004 = 0x306505 ; 
+			*(volatile unsigned int *)0xB80180AC = 0xB16 ;    
+			*(volatile unsigned int *)0xB8018048 = 0x8106310 ;
+			*(volatile unsigned int *)0xB8018050 = 0x815904 ; 
+			*(volatile unsigned int *)0xB8018054 = 0x91CA0B ; 
+			*(volatile unsigned int *)0xB801804C = 0x820A352 ;
+			*(volatile unsigned int *)0xB8018058 = 0x82AA09 ; 
+			*(volatile unsigned int *)0xB80180C4 = 0x7EC00 ;  
+			*(volatile unsigned int *)0xB80180EC = 0x19 ;     
+			*(volatile unsigned int *)0xB80180EC = 0x6 ;      
+			*(volatile unsigned int *)0xB80180EC = 0x1 ;     
+			*(volatile unsigned int *)0xB80180F0 = 0x22D43F ; 
+			*(volatile unsigned int *)0xB80180F4 = 0x22CC88 ; 
+			*(volatile unsigned int *)0xB8018084 = 0x80009404 ;
+			*(volatile unsigned int *)0xB8018088 = 0x80008000 ;
+			*(volatile unsigned int *)0xB801808C = 0x93929392 ;
+			*(volatile unsigned int *)0xB8018090 = 0x8C708D40 ;
+			*(volatile unsigned int *)0xB8018110 = 0xC70 ;    
+			*(volatile unsigned int *)0xB8018094 = 0x80008000 ;
+			*(volatile unsigned int *)0xB80180FC = 0x27E1800 ;
+			*(volatile unsigned int *)0xB80180A8 = 0x7F400E0 ;
+			*(volatile unsigned int *)0xB80180AC = 0x2359 ;   
+			*(volatile unsigned int *)0xB8018098 = 0x6A0817A0 ;
+			*(volatile unsigned int *)0xB801809C = 0x28A1BB0 ; 
+			*(volatile unsigned int *)0xB8018148 = 0xE56D0D0 ;
+			*(volatile unsigned int *)0xB801814C = 0x40 ;     
+			*(volatile unsigned int *)0xB8018040 = 0x1 ;      
+			*(volatile unsigned int *)0xB8018044 = 0x20E0024E ;
+			*(volatile unsigned int *)0xB801805C = 0x804232A  ;
+			*(volatile unsigned int *)0xB8018060 = 0x9AB ;    
+			*(volatile unsigned int *)0xB80180D8 = 0x7FE ;    
+			*(volatile unsigned int *)0xB80180D8 = 0x32B ;    
+			*(volatile unsigned int *)0xB80180A4 = 0x81EE34F ;
+			*(volatile unsigned int *)0xB8018100 = 0xBE8800 ; 
+			*(volatile unsigned int *)0xB8018104 = 0xA0C82C ; 
+			*(volatile unsigned int *)0xB8018108 = 0xBE8BE8 ; 
+			*(volatile unsigned int *)0xB80180A0 = 0x7E ;     
+			*(volatile unsigned int *)0xB8018000 = 0x30000000 ;
+	
+			// set HDMI registers           
+			*(volatile unsigned int *)0xB80000D0 = 0x1 ;       
+			*(volatile unsigned int *)0xB8018158 = 0x3A002000 ;
+			*(volatile unsigned int *)0xB8018164 = 0x8022046 ; 
+			*(volatile unsigned int *)0xB8018168 = 0x201A008 ; 
+			*(volatile unsigned int *)0xB801816C = 0x2032008 ; 
+			*(volatile unsigned int *)0xB8018170 = 0x2002000 ; 
+			*(volatile unsigned int *)0xB8018174 = 0x2002000 ; 
+			*(volatile unsigned int *)0xB8018160 = 0x8D4A074 ; 
+			*(volatile unsigned int *)0xB800D010 = 0x0 ;       
+			*(volatile unsigned int *)0xB800D014 = 0xF9C938 ;  
+			*(volatile unsigned int *)0xB800D018 = 0xA05F30 ;  
+			*(volatile unsigned int *)0xB800D01C = 0x125499A ; 
+			*(volatile unsigned int *)0xB800D150 = 0x37AFCB4 ; 
+			*(volatile unsigned int *)0xB800D020 = 0x3B ;      
+			*(volatile unsigned int *)0xB800D154 = 0x924 ;     
+			*(volatile unsigned int *)0xB800D02C = 0x4630F0 ;  
+			*(volatile unsigned int *)0xB800D030 = 0x73 ;      
+			*(volatile unsigned int *)0xB800D034 = 0x2AA2AA ;   
+			*(volatile unsigned int *)0xB800D038 = 0x3E02AA ;  
+			*(volatile unsigned int *)0xB800D03C = 0xFFE11 ;   
+			*(volatile unsigned int *)0xB800D040 = 0x2A3503 ;  
+			*(volatile unsigned int *)0xB800D044 = 0xFEDCBA98 ;
+			*(volatile unsigned int *)0xB800D048 = 0x1501800 ; 
+			*(volatile unsigned int *)0xB800D04C = 0x6978 ;    
+			*(volatile unsigned int *)0xB800D040 = 0x202003 ;  
+			*(volatile unsigned int *)0xB800D048 = 0x501800 ;  
+			*(volatile unsigned int *)0xB800D054 = 0xD ;       
+			*(volatile unsigned int *)0xB800D058 = 0x0 ;       
+			*(volatile unsigned int *)0xB800D05C = 0x0 ;       
+			*(volatile unsigned int *)0xB800D060 = 0x0 ;       
+			*(volatile unsigned int *)0xB800D064 = 0x0 ;       
+			*(volatile unsigned int *)0xB800D068 = 0x0 ;       
+			*(volatile unsigned int *)0xB800D06C = 0x0 ;       
+			*(volatile unsigned int *)0xB800D070 = 0x0 ;       
+			*(volatile unsigned int *)0xB800D074 = 0x0 ;        
+			*(volatile unsigned int *)0xB800D078 = 0x0 ;        
+			*(volatile unsigned int *)0xB800D07C = 0x21084210 ; 
+			*(volatile unsigned int *)0xB800D080 = 0x7E ;       
+			*(volatile unsigned int *)0xB800D088 = 0x0 ;        
+			*(volatile unsigned int *)0xB800D08C = 0xCA1 ;      
+			*(volatile unsigned int *)0xB800D094 = 0x1C000000 ; 
+			*(volatile unsigned int *)0xB800D090 = 0x7D04B ;    
+			*(volatile unsigned int *)0xB800D094 = 0x1C000000 ; 
+			*(volatile unsigned int *)0xB800D098 = 0x0 ;        
+			*(volatile unsigned int *)0xB800D100 = 0x2A ;       
+			*(volatile unsigned int *)0xB800D104 = 0x25131FB ;  
+			*(volatile unsigned int *)0xB800D108 = 0x241F1FF ;  
+			*(volatile unsigned int *)0xB800D10C = 0xE8 ;       
+			*(volatile unsigned int *)0xB800D110 = 0x0 ;        
+			*(volatile unsigned int *)0xB800D118 = 0x0 ;        
+			*(volatile unsigned int *)0xB800D11C = 0x0 ;        
+			*(volatile unsigned int *)0xB800D120 = 0x0 ;        
+			*(volatile unsigned int *)0xB800D124 = 0x0 ;        
+			*(volatile unsigned int *)0xB800D128 = 0x0 ;        
+			*(volatile unsigned int *)0xB800D12C = 0x0 ;        
+			*(volatile unsigned int *)0xB800D134 = 0x0 ;        
+			*(volatile unsigned int *)0xB800D13C = 0x0 ;        
+			*(volatile unsigned int *)0xB800D140 = 0x0 ;        
+			*(volatile unsigned int *)0xB800D144 = 0x0 ;        
+			*(volatile unsigned int *)0xB800D148 = 0x0 ;        
+			*(volatile unsigned int *)0xB800D14C = 0x0 ;        
+			*(volatile unsigned int *)0xB800D000 = 0x6 ;        
+			*(volatile unsigned int *)0xB800D058 = 0xD0282 ;   
+			*(volatile unsigned int *)0xB800D05C = 0x580015 ;  
+			*(volatile unsigned int *)0xB800D060 = 0x2 ;       
+			*(volatile unsigned int *)0xB800D064 = 0x0 ;       
+			*(volatile unsigned int *)0xB800D068 = 0x0 ;       
+			*(volatile unsigned int *)0xB800D06C = 0x0 ;       
+			*(volatile unsigned int *)0xB800D070 = 0x0 ;      
+			*(volatile unsigned int *)0xB800D074 = 0x0 ;      
+			*(volatile unsigned int *)0xB800D078 = 0x0 ;      
+			*(volatile unsigned int *)0xB800D088 = 0x7762 ;   
+			*(volatile unsigned int *)0xB800D07C = 0x21084210 ;
+			*(volatile unsigned int *)0xB800D080 = 0x7E ;     
+			*(volatile unsigned int *)0xB800D07C = 0x11 ;     
+			*(volatile unsigned int *)0xB800D080 = 0x3 ;     
+	
+			// disable TVE colorbar, enable interrupt
+			*(volatile unsigned int *)0xb80180ec = 0x18 ;
+			*(volatile unsigned int *)0xb8005504 = 0xfffffffe ;
+			*(volatile unsigned int *)0xb8005504 = 0xf ;
+			*(volatile unsigned int *)0xb801810c = 0xa00a000 ;
+			*(volatile unsigned int *)0xb80180e0 = 0x0 ;
+			*(volatile unsigned int *)0xb80055e4 = 0x9 ;
+			*(volatile unsigned int *)0xb80180dc = 0x1 ;
+		}
+	} else if (logo_info.mode == 1) {
+		// PAL_I mode
+		if (is_venus_cpu()) {
+//			*(volatile unsigned int *)0xb801b200 = 0x63 ;
+			// set VO registers
+			*(volatile unsigned int *)0xb8005350 = 0xfffffffe ;
+			*(volatile unsigned int *)0xb8005350 = 0x3 ;
+			*(volatile unsigned int *)0xb8005354 = 0x2cf ;
+			*(volatile unsigned int *)0xb8005358 = 0x31f63f ;
+			*(volatile unsigned int *)0xb800535c = 0xffff3210 ;
+			*(volatile unsigned int *)0xb8005360 = 0x0 ;
+			
+			// color lookup table of Sub-Picture , index0~index3
+			*(volatile unsigned int *)0xb8005370 = logo_info.color[0] ;
+			*(volatile unsigned int *)0xb8005374 = logo_info.color[1] ;
+			*(volatile unsigned int *)0xb8005378 = logo_info.color[2] ;
+			*(volatile unsigned int *)0xb800537c = logo_info.color[3] ;
+			*(volatile unsigned int *)0xb80053b0 = 0xacf800 ;
+			*(volatile unsigned int *)0xb80053b4 = 0xa3f800 ;
+			*(volatile unsigned int *)0xb80053bc = 0x4000 ;
+			*(volatile unsigned int *)0xb80053c0 = 0x0 ;
+			*(volatile unsigned int *)0xb80053c4 = 0x0 ;
+			*(volatile unsigned int *)0xb80053c8 = 0x0 ;
+			*(volatile unsigned int *)0xb80053cc = 0x0 ;
+			*(volatile unsigned int *)0xb80053d0 = 0x200 ;
+			*(volatile unsigned int *)0xb80053d8 = 0x4000 ;
+			*(volatile unsigned int *)0xb80053dc = 0x0 ;
+			*(volatile unsigned int *)0xb80053e0 = 0x0 ;
+			*(volatile unsigned int *)0xb80053e4 = 0x0 ;
+			*(volatile unsigned int *)0xb80053e8 = 0x0 ;
+			*(volatile unsigned int *)0xb80053ec = 0x0 ;
+			*(volatile unsigned int *)0xb80053f0 = 0x0 ;
+			*(volatile unsigned int *)0xb80053f4 = 0x0 ;
+			*(volatile unsigned int *)0xb80053f8 = 0x0 ;
+			*(volatile unsigned int *)0xb80053fc = 0x400 ;
+			*(volatile unsigned int *)0xb8005400 = 0xffd ;
+			*(volatile unsigned int *)0xb8005404 = 0xf8f ;
+			*(volatile unsigned int *)0xb8005408 = 0xf60 ;
+			*(volatile unsigned int *)0xb800540c = 0xf50 ;
+			*(volatile unsigned int *)0xb8005410 = 0xfa8 ;
+			*(volatile unsigned int *)0xb8005414 = 0x207 ;
+			*(volatile unsigned int *)0xb8005418 = 0x30a ;
+			*(volatile unsigned int *)0xb800541c = 0x50b ;
+			*(volatile unsigned int *)0xb80054b0 = 0xa3facf ;
+			*(volatile unsigned int *)0xb80054b4 = 0x16030100 ;
+			*(volatile unsigned int *)0xb80054e8 = 0x2001400 ;
+			*(volatile unsigned int *)0xb80054ec = 0x2001000 ;
+			*(volatile unsigned int *)0xb80054f0 = 0x2001400 ;
+			*(volatile unsigned int *)0xb80054f4 = 0x2001000 ;
+			*(volatile unsigned int *)0xb80054f8 = 0x400 ;
+			*(volatile unsigned int *)0xb80054fc = 0x20080200 ;
+			*(volatile unsigned int *)0xb8005500 = 0xf010eb10 ;
+			*(volatile unsigned int *)0xb8005564 = 0x0 ;
+			*(volatile unsigned int *)0xb8005568 = 0x1 ;
+			*(volatile unsigned int *)0xb800556c = 0x2 ;
+			*(volatile unsigned int *)0xb8005570 = 0x3 ;
+			*(volatile unsigned int *)0xb8005574 = 0x4 ;
+			*(volatile unsigned int *)0xb8005578 = 0x5 ;
+			*(volatile unsigned int *)0xb800557c = 0x6 ;
+			*(volatile unsigned int *)0xb8005580 = 0x7 ;
+			*(volatile unsigned int *)0xb8005584 = 0x8 ;
+			
+			// Top and Bot address of Sub-Picture 
+			*(volatile unsigned int *)0xb8005530 = 0xf0000 ;
+			*(volatile unsigned int *)0xb8005534 = 0xf0000+logo_info.size ;
+			
+			// set TVE registers
+			*(volatile unsigned int *)0xb8000084 = 0x101cd800 ;
+			*(volatile unsigned int *)0xb800000c = 0x1 ;
+			*(volatile unsigned int *)0xB80180C8 = 0x136;
+			*(volatile unsigned int *)0xB80180CC = 0x188;
+			*(volatile unsigned int *)0xB8018134 = 0x278000;
+			*(volatile unsigned int *)0xB80180D0 = 0x1F9AAA;
+			*(volatile unsigned int *)0xB80180D4 = 0x1F9AAA;
+			*(volatile unsigned int *)0xB80180E8 = 0x1;
+			*(volatile unsigned int *)0xB8018154 = 0x205;
+			*(volatile unsigned int *)0xB8018880 = 0xCB;
+			*(volatile unsigned int *)0xB8018884 = 0x8A;
+			*(volatile unsigned int *)0xB8018888 = 0x9;
+			*(volatile unsigned int *)0xB801888C = 0x2A;
+			*(volatile unsigned int *)0xB8018890 = 0x0;
+			*(volatile unsigned int *)0xB8018894 = 0x0;
+			*(volatile unsigned int *)0xB8018898 = 0x0;
+			*(volatile unsigned int *)0xB801889C = 0x9B;
+			*(volatile unsigned int *)0xB80188A0 = 0x2;
+			*(volatile unsigned int *)0xB80188A8 = 0x78;
+			*(volatile unsigned int *)0xB80188AC = 0x78;
+			*(volatile unsigned int *)0xB80188B0 = 0x10;
+			*(volatile unsigned int *)0xB80188B4 = 0x3;
+			*(volatile unsigned int *)0xB80188B8 = 0x1F;
+			*(volatile unsigned int *)0xB80188B8 = 0x1D;
+			*(volatile unsigned int *)0xB8018984 = 0x20;
+			*(volatile unsigned int *)0xB801898C = 0x2;
+			*(volatile unsigned int *)0xB80188BC = 0x0;
+			*(volatile unsigned int *)0xB80188C8 = 0xD7;
+			*(volatile unsigned int *)0xB80188CC = 0x29;
+			*(volatile unsigned int *)0xB80188D0 = 0x3;
+			*(volatile unsigned int *)0xB80188E0 = 0x9;
+			*(volatile unsigned int *)0xB80188E4 = 0x31;
+			*(volatile unsigned int *)0xB80188E8 = 0x38;
+			*(volatile unsigned int *)0xB80188EC = 0x6;
+			*(volatile unsigned int *)0xB80188F0 = 0xBF;
+			*(volatile unsigned int *)0xB80188F4 = 0x3;
+			*(volatile unsigned int *)0xB80188F8 = 0x5F;
+			*(volatile unsigned int *)0xB80189C0 = 0x5C;
+			*(volatile unsigned int *)0xB80189C4 = 0x40;
+			*(volatile unsigned int *)0xB80189C8 = 0x24;
+			*(volatile unsigned int *)0xB80189CC = 0x1C;
+			*(volatile unsigned int *)0xB8018920 = 0x0;
+			*(volatile unsigned int *)0xB8018924 = 0x39;
+			*(volatile unsigned int *)0xB8018928 = 0x22;
+			*(volatile unsigned int *)0xB801892C = 0x5A;
+			*(volatile unsigned int *)0xB8018930 = 0x22;
+			*(volatile unsigned int *)0xB8018934 = 0xA8;
+			*(volatile unsigned int *)0xB8018938 = 0x1C;
+			*(volatile unsigned int *)0xB801893C = 0x34;
+			*(volatile unsigned int *)0xB8018940 = 0x14;
+			*(volatile unsigned int *)0xB8018944 = 0x3;
+			*(volatile unsigned int *)0xB8018948 = 0xFE;
+			*(volatile unsigned int *)0xB801894C = 0x1;
+			*(volatile unsigned int *)0xB8018950 = 0x54;
+			*(volatile unsigned int *)0xB8018954 = 0xFE;
+			*(volatile unsigned int *)0xB8018958 = 0x7E;
+			*(volatile unsigned int *)0xB801895C = 0x60;
+			*(volatile unsigned int *)0xB8018960 = 0x80;
+			*(volatile unsigned int *)0xB8018964 = 0x47;
+			*(volatile unsigned int *)0xB8018968 = 0x55;
+			*(volatile unsigned int *)0xB801896C = 0x1;
+			*(volatile unsigned int *)0xB80180D8 = 0x40;
+			*(volatile unsigned int *)0xB8018990 = 0x0;
+			*(volatile unsigned int *)0xB80189D0 = 0x0;
+			*(volatile unsigned int *)0xB80189D4 = 0x3F;
+			*(volatile unsigned int *)0xB80189D8 = 0x71;
+			*(volatile unsigned int *)0xB80189DC = 0x20;
+			*(volatile unsigned int *)0xB80189E0 = 0x80;
+			*(volatile unsigned int *)0xB80189E4 = 0xA4;
+			*(volatile unsigned int *)0xB80189E8 = 0x50;
+			*(volatile unsigned int *)0xB80189EC = 0x57;
+			*(volatile unsigned int *)0xB80189F0 = 0x75;
+			*(volatile unsigned int *)0xB8018000 = 0x2A9C235F;
+			*(volatile unsigned int *)0xB8018004 = 0x29AE6D;
+			*(volatile unsigned int *)0xB80180AC = 0xE0B1B;
+			*(volatile unsigned int *)0xB8018048 = 0x80FA30D;
+			*(volatile unsigned int *)0xB8018050 = 0x816935;
+			*(volatile unsigned int *)0xB8018054 = 0x94FA6E;
+			*(volatile unsigned int *)0xB801804C = 0x81F234C;
+			*(volatile unsigned int *)0xB8018058 = 0x82CA6B;
+			*(volatile unsigned int *)0xB80180C4 = 0x7EC00;
+			*(volatile unsigned int *)0xB80180EC = 0x19;
+			*(volatile unsigned int *)0xB80180EC = 0x6;
+			*(volatile unsigned int *)0xB80180EC = 0x1;
+			*(volatile unsigned int *)0xB80180F0 = 0x22D43C;
+			*(volatile unsigned int *)0xB80180F4 = 0x22CC88;
+			*(volatile unsigned int *)0xB8018084 = 0x80009404;
+			*(volatile unsigned int *)0xB8018088 = 0x80008000;
+			*(volatile unsigned int *)0xB801808C = 0x93929392;
+			*(volatile unsigned int *)0xB8018090 = 0x8C708D40;
+			*(volatile unsigned int *)0xB8018110 = 0xC70;
+			*(volatile unsigned int *)0xB8018094 = 0x80008000;
+			*(volatile unsigned int *)0xB80180FC = 0x27E1800;
+			*(volatile unsigned int *)0xB80180A8 = 0x7F4800;
+			*(volatile unsigned int *)0xB8018098 = 0x6A0817A0;
+			*(volatile unsigned int *)0xB801809C = 0x28A1BB0;
+			*(volatile unsigned int *)0xB8018148 = 0xA56D0D0;
+			*(volatile unsigned int *)0xB8018040 = 0x1;
+			*(volatile unsigned int *)0xB8018044 = 0x20290242;
+			*(volatile unsigned int *)0xB801805C = 0x800E32A;
+			*(volatile unsigned int *)0xB8018060 = 0x824;
+			*(volatile unsigned int *)0xB80180D8 = 0x3FE;
+			*(volatile unsigned int *)0xB80180D8 = 0x32B;
+			*(volatile unsigned int *)0xB80180A4 = 0x81E634D;
+			*(volatile unsigned int *)0xB8018100 = 0xBE8800;
+			*(volatile unsigned int *)0xB8018104 = 0xA6C82C;
+			*(volatile unsigned int *)0xB8018108 = 0xBE8BE8;
+			*(volatile unsigned int *)0xB80180A0 = 0x7E;
+			*(volatile unsigned int *)0xB80180A0 = 0x2F ; 
+			*(volatile unsigned int *)0xB8018000 = 0x30000000;
+
+			
+			// disable TVE colorbar, enable interrupt
+			*(volatile unsigned int *)0xb80180ec = 0x18 ;
+			*(volatile unsigned int *)0xb8005504 = 0xfffffffe ;
+			*(volatile unsigned int *)0xb8005504 = 0xf ;
+			*(volatile unsigned int *)0xb801810c = 0xa00a000 ;
+			*(volatile unsigned int *)0xb80180e0 = 0x0 ;
+			*(volatile unsigned int *)0xb80055f0 = 0x9 ;
+			*(volatile unsigned int *)0xb80180dc = 0x1 ;
+
+#ifndef CONFIG_REALTEK_HDMI_NONE
+			// HDMI
+			*(volatile unsigned int *)0xb801b36c = 0x0;
+			*(volatile unsigned int *)0xb801b300 = 0x63;
+			*(volatile unsigned int *)0xb801b330 = 0x0;
+			*(volatile unsigned int *)0xb801b338 = 0x0;
+			*(volatile unsigned int *)0xb801b33c = 0x8;
+			*(volatile unsigned int *)0xb801b36c = 0x1;
+			
+			BusyWaiting(70000);
+#ifdef CONFIG_REALTEK_HDMI_NXP
+			SET_NXP_HDMI_576P();
+#else
+			SET_CAT_HDMI_576P();
+#endif
+			BusyWaiting(70000);
+#endif
+		} else {
+//			*(volatile unsigned int *)0xb801b200 = 0x64 ;
+			// set VO registers
+			*(volatile unsigned int *)0xb8005350 = 0xfffffffe ;
+			*(volatile unsigned int *)0xb8005350 = 0x3 ;
+			*(volatile unsigned int *)0xb8005354 = 0x2cf ;
+			*(volatile unsigned int *)0xb8005358 = 0x31f63f ;
+			*(volatile unsigned int *)0xb800535c = 0xffff3210 ;
+			*(volatile unsigned int *)0xb8005360 = 0x0 ;
+
+			//color lookup table of Sub-Picture , index0~index3
+			*(volatile unsigned int *)0xb8005370 = logo_info.color[0] ;
+			*(volatile unsigned int *)0xb8005374 = logo_info.color[1] ;
+			*(volatile unsigned int *)0xb8005378 = logo_info.color[2] ;
+			*(volatile unsigned int *)0xb800537c = logo_info.color[3] ;
+			*(volatile unsigned int *)0xb80053b0 = 0xacf800 ;
+			*(volatile unsigned int *)0xb80053b4 = 0xa3f800 ;
+			*(volatile unsigned int *)0xb80056cc = 0x4000 ;
+			*(volatile unsigned int *)0xb80056d0 = 0x0 ;
+			*(volatile unsigned int *)0xb80056c8 = 0x2 ;
+			*(volatile unsigned int *)0xb80056fc = 0x4000 ;
+			*(volatile unsigned int *)0xb8005700 = 0x0 ;
+			*(volatile unsigned int *)0xb80056f4 = 0x2 ;
+			*(volatile unsigned int *)0xb80054b0 = 0xa3facf ;
+			*(volatile unsigned int *)0xb80054b4 = 0x16030100 ;
+			*(volatile unsigned int *)0xb80054e8 = 0x2001400 ;
+			*(volatile unsigned int *)0xb80054ec = 0x2001000 ;
+			*(volatile unsigned int *)0xb80054f0 = 0x2001400 ;
+			*(volatile unsigned int *)0xb80054f4 = 0x2001000 ;
+			*(volatile unsigned int *)0xb80054f8 = 0x400 ;
+			*(volatile unsigned int *)0xb80054fc = 0x20080200 ;
+			*(volatile unsigned int *)0xb8005500 = 0xf010eb10 ;
+			*(volatile unsigned int *)0xb8005564 = 0x0 ;
+			*(volatile unsigned int *)0xb8005568 = 0x1 ;
+			*(volatile unsigned int *)0xb800556c = 0x2 ;
+			*(volatile unsigned int *)0xb8005570 = 0x3 ;
+			*(volatile unsigned int *)0xb8005574 = 0x4 ;
+			*(volatile unsigned int *)0xb8005578 = 0x5 ;
+			*(volatile unsigned int *)0xb800557c = 0x6 ;
+			*(volatile unsigned int *)0xb8005580 = 0x7 ;
+			*(volatile unsigned int *)0xb8005584 = 0x8 ;
+
+			// Top and Bot address of Sub-Picture 
+			*(volatile unsigned int *)0xb8005530 = 0xf0000 ;
+			*(volatile unsigned int *)0xb8005534 = 0xf0000+logo_info.size ;
+
+			// set TVE registers
+			*(volatile unsigned int *)0xb8000084 = 0x101cd800 ;
+			*(volatile unsigned int *)0xb800000c = 0x1 ;
+			*(volatile unsigned int *)0xB80180C8 = 0x124 ;    
+			*(volatile unsigned int *)0xB80180CC = 0x188 ;    
+			*(volatile unsigned int *)0xB8018134 = 0x278000 ; 
+			*(volatile unsigned int *)0xB80180D0 = 0x3FBBBB ; 
+			*(volatile unsigned int *)0xB80180D4 = 0x3FCBBB ; 
+			*(volatile unsigned int *)0xB80180E8 = 0x1 ;      
+			*(volatile unsigned int *)0xB8018154 = 0x205 ;    
+			*(volatile unsigned int *)0xB8018880 = 0xCB ;     
+			*(volatile unsigned int *)0xB8018884 = 0x8A ;     
+			*(volatile unsigned int *)0xB8018888 = 0x9 ;      
+			*(volatile unsigned int *)0xB801888C = 0x2A ;     
+			*(volatile unsigned int *)0xB8018890 = 0x0 ;      
+			*(volatile unsigned int *)0xB8018894 = 0x0 ;      
+			*(volatile unsigned int *)0xB8018898 = 0x0 ;      
+			*(volatile unsigned int *)0xB801889C = 0x9B ;     
+			*(volatile unsigned int *)0xB80188A0 = 0x2 ;      
+			*(volatile unsigned int *)0xB80188A8 = 0x78 ;     
+			*(volatile unsigned int *)0xB80188AC = 0x78 ;     
+			*(volatile unsigned int *)0xB80188B0 = 0x10 ;     
+			*(volatile unsigned int *)0xB80188B4 = 0x3 ;      
+			*(volatile unsigned int *)0xB80188B8 = 0x1D ;     
+			*(volatile unsigned int *)0xB80188B8 = 0x1D ;     
+			*(volatile unsigned int *)0xB8018984 = 0x20 ;     
+			*(volatile unsigned int *)0xB801898C = 0x2 ;      
+			*(volatile unsigned int *)0xB80188BC = 0x0 ;      
+			*(volatile unsigned int *)0xB80188C8 = 0xD7 ;     
+			*(volatile unsigned int *)0xB80188CC = 0x29 ;     
+			*(volatile unsigned int *)0xB80188D0 = 0x3 ;      
+			*(volatile unsigned int *)0xB80188E0 = 0x9 ;      
+			*(volatile unsigned int *)0xB80188E4 = 0x31 ;     
+			*(volatile unsigned int *)0xB80188E8 = 0x38 ;     
+			*(volatile unsigned int *)0xB80188EC = 0x6 ;      
+			*(volatile unsigned int *)0xB80188F0 = 0xBF ;     
+			*(volatile unsigned int *)0xB80188F4 = 0x3 ;      
+			*(volatile unsigned int *)0xB80188F8 = 0x5F ;     
+			*(volatile unsigned int *)0xB80189C0 = 0x5C ;     
+			*(volatile unsigned int *)0xB80189C4 = 0x40 ;     
+			*(volatile unsigned int *)0xB80189C8 = 0x24 ;     
+			*(volatile unsigned int *)0xB80189CC = 0x2B ;     
+			*(volatile unsigned int *)0xB8018920 = 0x0 ;      
+			*(volatile unsigned int *)0xB8018924 = 0x39 ;     
+			*(volatile unsigned int *)0xB8018928 = 0x22 ;     
+			*(volatile unsigned int *)0xB801892C = 0x5A ;     
+			*(volatile unsigned int *)0xB8018930 = 0x22 ;     
+			*(volatile unsigned int *)0xB8018934 = 0xA8 ;     
+			*(volatile unsigned int *)0xB8018938 = 0x1C ;     
+			*(volatile unsigned int *)0xB801893C = 0x34 ;     
+			*(volatile unsigned int *)0xB8018940 = 0x14 ;     
+			*(volatile unsigned int *)0xB8018944 = 0x3 ;      
+			*(volatile unsigned int *)0xB8018948 = 0xFE ;     
+			*(volatile unsigned int *)0xB801894C = 0x1 ;      
+			*(volatile unsigned int *)0xB8018950 = 0x54 ;     
+			*(volatile unsigned int *)0xB8018954 = 0xFE ;     
+			*(volatile unsigned int *)0xB8018958 = 0x7E ;     
+			*(volatile unsigned int *)0xB801895C = 0x60 ;     
+			*(volatile unsigned int *)0xB8018960 = 0x80 ;     
+			*(volatile unsigned int *)0xB8018964 = 0x47 ;     
+			*(volatile unsigned int *)0xB8018968 = 0x55 ;     
+			*(volatile unsigned int *)0xB801896C = 0x1 ;      
+			*(volatile unsigned int *)0xB80180D8 = 0x40 ;     
+			*(volatile unsigned int *)0xB8018990 = 0x0 ;      
+			*(volatile unsigned int *)0xB80189D0 = 0x0 ;      
+			*(volatile unsigned int *)0xB80189D4 = 0x3F ;     
+			*(volatile unsigned int *)0xB80189D8 = 0x71 ;     
+			*(volatile unsigned int *)0xB80189DC = 0x20 ;     
+			*(volatile unsigned int *)0xB80189E0 = 0x80 ;     
+			*(volatile unsigned int *)0xB80189E4 = 0xA4 ;     
+			*(volatile unsigned int *)0xB80189E8 = 0x50 ;     
+			*(volatile unsigned int *)0xB80189EC = 0x57 ;     
+			*(volatile unsigned int *)0xB80189F0 = 0x75 ;     
+			*(volatile unsigned int *)0xB8018000 = 0x2A9C235F ;
+			*(volatile unsigned int *)0xB8018004 = 0x29AE6D ; 
+			*(volatile unsigned int *)0xB80180AC = 0xB1B ;    
+			*(volatile unsigned int *)0xB8018048 = 0x80FA30D ;
+			*(volatile unsigned int *)0xB8018050 = 0x816935 ; 
+			*(volatile unsigned int *)0xB8018054 = 0x94FA6E ; 
+			*(volatile unsigned int *)0xB801804C = 0x81F234C ;
+			*(volatile unsigned int *)0xB8018058 = 0x82CA6B ; 
+			*(volatile unsigned int *)0xB80180C4 = 0x7EC00 ;  
+			*(volatile unsigned int *)0xB80180EC = 0x19 ;     
+			*(volatile unsigned int *)0xB80180EC = 0x6 ;     
+			*(volatile unsigned int *)0xB80180EC = 0x1 ;      
+			*(volatile unsigned int *)0xB80180F0 = 0x22D43C ; 
+			*(volatile unsigned int *)0xB80180F4 = 0x22CC88 ; 
+			*(volatile unsigned int *)0xB8018084 = 0x80009404 ;
+			*(volatile unsigned int *)0xB8018088 = 0x80008000 ;
+			*(volatile unsigned int *)0xB801808C = 0x93929392 ;
+			*(volatile unsigned int *)0xB8018090 = 0x8C708D40 ;
+			*(volatile unsigned int *)0xB8018110 = 0xC70 ;    
+			*(volatile unsigned int *)0xB8018094 = 0x80008000 ;
+			*(volatile unsigned int *)0xB80180FC = 0x27E1800 ;
+			*(volatile unsigned int *)0xB80180A8 = 0x7F400E0 ;
+			*(volatile unsigned int *)0xB80180AC = 0x2359 ;   
+			*(volatile unsigned int *)0xB8018098 = 0x6A0817A0 ;
+			*(volatile unsigned int *)0xB801809C = 0x28A1BB0 ;
+			*(volatile unsigned int *)0xB8018148 = 0xA56D0D0 ;
+			*(volatile unsigned int *)0xB8018040 = 0x1 ;      
+			*(volatile unsigned int *)0xB8018044 = 0x20290242 ;
+			*(volatile unsigned int *)0xB801805C = 0x800E32A ;
+			*(volatile unsigned int *)0xB8018060 = 0x824 ;    
+			*(volatile unsigned int *)0xB80180D8 = 0x3FE ;    
+			*(volatile unsigned int *)0xB80180D8 = 0x32B ;    
+			*(volatile unsigned int *)0xB80180A4 = 0x81E634D ; 
+			*(volatile unsigned int *)0xB8018100 = 0xBE8800 ; 
+			*(volatile unsigned int *)0xB8018104 = 0xA6C82C ; 
+			*(volatile unsigned int *)0xB8018108 = 0xBE8BE8 ; 
+			*(volatile unsigned int *)0xB80180A0 = 0x7E ;     
+			*(volatile unsigned int *)0xB8018000 = 0x30000000 ;
+
+			// set HDMI registers            
+			*(volatile unsigned int *)0xB80000D0 = 0x1 ;      
+			*(volatile unsigned int *)0xB8018158 = 0x3A002000 ;
+			*(volatile unsigned int *)0xB8018164 = 0x8D62038 ;
+			*(volatile unsigned int *)0xB8018168 = 0x2002008 ; 
+			*(volatile unsigned int *)0xB801816C = 0x2016008 ; 
+			*(volatile unsigned int *)0xB8018170 = 0x2002000 ;
+			*(volatile unsigned int *)0xB8018174 = 0x2002000 ;
+			*(volatile unsigned int *)0xB8018160 = 0x8D3206E ; 
+			*(volatile unsigned int *)0xB800D010 = 0x0 ;      
+			*(volatile unsigned int *)0xB800D014 = 0xF9C938 ; 
+			*(volatile unsigned int *)0xB800D018 = 0xA05F30 ; 
+			*(volatile unsigned int *)0xB800D01C = 0x125499A ; 
+			*(volatile unsigned int *)0xB800D150 = 0x37AFCB4 ;
+			*(volatile unsigned int *)0xB800D020 = 0x3B ;     
+			*(volatile unsigned int *)0xB800D154 = 0x924 ;    
+			*(volatile unsigned int *)0xB800D02C = 0x4630F0 ; 
+			*(volatile unsigned int *)0xB800D030 = 0x73 ;     
+			*(volatile unsigned int *)0xB800D034 = 0x2AA2AA ; 
+			*(volatile unsigned int *)0xB800D038 = 0x3E02AA ; 
+			*(volatile unsigned int *)0xB800D03C = 0xFFE11 ;  
+			*(volatile unsigned int *)0xB800D040 = 0x2A3503 ; 
+			*(volatile unsigned int *)0xB800D044 = 0xFEDCBA98 ;
+			*(volatile unsigned int *)0xB800D048 = 0x1501800 ;
+			*(volatile unsigned int *)0xB800D04C = 0x6978 ;   
+			*(volatile unsigned int *)0xB800D040 = 0x202003 ; 
+			*(volatile unsigned int *)0xB800D048 = 0x501800 ; 
+			*(volatile unsigned int *)0xB800D054 = 0xD ;      
+			*(volatile unsigned int *)0xB800D058 = 0x0 ;      
+			*(volatile unsigned int *)0xB800D05C = 0x0 ;      
+			*(volatile unsigned int *)0xB800D060 = 0x0 ;      
+			*(volatile unsigned int *)0xB800D064 = 0x0 ;      
+			*(volatile unsigned int *)0xB800D068 = 0x0 ;      
+			*(volatile unsigned int *)0xB800D06C = 0x0 ;      
+			*(volatile unsigned int *)0xB800D070 = 0x0 ;      
+			*(volatile unsigned int *)0xB800D074 = 0x0 ;      
+			*(volatile unsigned int *)0xB800D078 = 0x0 ;      
+			*(volatile unsigned int *)0xB800D07C = 0x21084210 ;
+			*(volatile unsigned int *)0xB800D080 = 0x7E ;     
+			*(volatile unsigned int *)0xB800D088 = 0x0 ;      
+			*(volatile unsigned int *)0xB800D08C = 0xCA1 ;    
+			*(volatile unsigned int *)0xB800D094 = 0x1C000000 ;
+			*(volatile unsigned int *)0xB800D090 = 0x7D04B ;  
+			*(volatile unsigned int *)0xB800D094 = 0x1C000000 ;
+			*(volatile unsigned int *)0xB800D098 = 0x0 ;      
+			*(volatile unsigned int *)0xB800D100 = 0x2A ;     
+			*(volatile unsigned int *)0xB800D104 = 0x25131FB ;
+			*(volatile unsigned int *)0xB800D108 = 0x241F1FF ;
+			*(volatile unsigned int *)0xB800D10C = 0xE8 ;     
+			*(volatile unsigned int *)0xB800D110 = 0x0 ;      
+			*(volatile unsigned int *)0xB800D118 = 0x0 ;      
+			*(volatile unsigned int *)0xB800D11C = 0x0 ;      
+			*(volatile unsigned int *)0xB800D120 = 0x0 ;      
+			*(volatile unsigned int *)0xB800D124 = 0x0 ;      
+			*(volatile unsigned int *)0xB800D128 = 0x0 ;      
+			*(volatile unsigned int *)0xB800D12C = 0x0 ;      
+			*(volatile unsigned int *)0xB800D134 = 0x0 ;      
+			*(volatile unsigned int *)0xB800D13C = 0x0 ;      
+			*(volatile unsigned int *)0xB800D140 = 0x0 ;      
+			*(volatile unsigned int *)0xB800D144 = 0x0 ;      
+			*(volatile unsigned int *)0xB800D148 = 0x0 ;      
+			*(volatile unsigned int *)0xB800D14C = 0x0 ;      
+			*(volatile unsigned int *)0xB800D000 = 0x6 ;      
+			*(volatile unsigned int *)0xB800D058 = 0xD0282 ;  
+			*(volatile unsigned int *)0xB800D05C = 0x580006 ; 
+			*(volatile unsigned int *)0xB800D060 = 0x11 ;     
+			*(volatile unsigned int *)0xB800D064 = 0x0 ;      
+			*(volatile unsigned int *)0xB800D068 = 0x0 ;      
+			*(volatile unsigned int *)0xB800D06C = 0x0 ;      
+			*(volatile unsigned int *)0xB800D070 = 0x0 ;      
+			*(volatile unsigned int *)0xB800D074 = 0x0 ;      
+			*(volatile unsigned int *)0xB800D078 = 0x0 ;      
+			*(volatile unsigned int *)0xB800D088 = 0x7762 ;   
+			*(volatile unsigned int *)0xB800D07C = 0x21084210 ;
+			*(volatile unsigned int *)0xB800D080 = 0x7E ;     
+			*(volatile unsigned int *)0xB800D07C = 0x11 ;     
+			*(volatile unsigned int *)0xB800D080 = 0x3 ;      
+
+			// disable TVE colorbar, enable interrupt
+			*(volatile unsigned int *)0xb80180ec = 0x18 ;
+			*(volatile unsigned int *)0xb8005504 = 0xfffffffe ;
+			*(volatile unsigned int *)0xb8005504 = 0xf ;
+			*(volatile unsigned int *)0xb801810c = 0xa00a000 ;
+			*(volatile unsigned int *)0xb80180e0 = 0x0 ;
+			*(volatile unsigned int *)0xb80055f0 = 0x9 ;
+			*(volatile unsigned int *)0xb80180dc = 0x1 ;
+		}
 	} else {
 		// PAL_M mode
 		// set VO registers
@@ -488,8 +3124,8 @@ void setup_boot_image(void)
 		*(volatile unsigned int *)0xb8005584 = 0x8 ;
 
 		// Top and Bot address of Sub-Picture 
-		*(volatile unsigned int *)0xb8005530 = 0x000f0000 ;
-		*(volatile unsigned int *)0xb8005534 = 0x000f0000+logo_info.size ;
+		*(volatile unsigned int *)0xb8005530 = 0xf0000 ;
+		*(volatile unsigned int *)0xb8005534 = 0xf0000+logo_info.size ;
 
 		// set TVE registers
 		*(volatile unsigned int *)0xb8000084 = 0x101cd800 ;
@@ -497,8 +3133,13 @@ void setup_boot_image(void)
 		*(volatile unsigned int *)0xb80180c8 = 0x124 ;
 		*(volatile unsigned int *)0xb80180cc = 0x188 ;
 		*(volatile unsigned int *)0xb8018134 = 0x3f8000 ;
-		*(volatile unsigned int *)0xb80180d0 = 0x1f9aaa ;
-		*(volatile unsigned int *)0xb80180d4 = 0x1f9aaa ;
+		if (is_venus_cpu()) {
+			*(volatile unsigned int *)0xb80180d0 = 0x1f9aaa ;
+			*(volatile unsigned int *)0xb80180d4 = 0x1f9aaa ;
+		} else {
+			*(volatile unsigned int *)0xb80180d0 = 0x3fbbbb ;
+			*(volatile unsigned int *)0xb80180d4 = 0x3fbbbb ;
+		}
 		*(volatile unsigned int *)0xb80180e8 = 0x1 ;
 		*(volatile unsigned int *)0xb8018154 = 0x200 ;
 		*(volatile unsigned int *)0xb8018880 = 0xa3 ;
@@ -566,7 +3207,11 @@ void setup_boot_image(void)
 		*(volatile unsigned int *)0xb80189f0 = 0x84 ;
 		*(volatile unsigned int *)0xb8018000 = 0x2e832359 ;
 		*(volatile unsigned int *)0xb8018004 = 0x306505 ;
-		*(volatile unsigned int *)0xb80180ac = 0xe0b59 ;
+		if (is_venus_cpu()) {
+			*(volatile unsigned int *)0xb80180ac = 0xe0b59 ;
+		} else {
+			*(volatile unsigned int *)0xb80180ac = 0x3b59 ;
+		}
 		*(volatile unsigned int *)0xb8018048 = 0x8212353 ;
 		*(volatile unsigned int *)0xb8018050 = 0x815904 ;
 		*(volatile unsigned int *)0xb8018054 = 0x91ca0b ;
@@ -614,15 +3259,24 @@ void setup_boot_image(void)
  */
 static int venus_pm_enter(suspend_state_t state)
 {
-	int gpio;
 	int value = 0;
 	char *value_ptr, *value_end_ptr;
-	unsigned int options=0;
+	unsigned int options=0, hwinfo=0, powerkey_irrp, ejectkey_irrp;
+	int voltage_gpio, powerkey_gpio, ejectkey_gpio, vfd_type;
 
 	switch (state)
 	{
 	case PM_SUSPEND_STANDBY:
 	case PM_SUSPEND_MEM:
+#if 1
+		// This is to check RTC time and Alarm time when schedule record is not waken up at right time
+		prom_printf("\nRTC time: %x %x %x %x %x\nAlarm time: %x %x %x %x\n", 
+			inl(VENUS_MIS_RTCDATE2), inl(VENUS_MIS_RTCDATE1), 
+			inl(VENUS_MIS_RTCHR), inl(VENUS_MIS_RTCMIN), 
+			inl(VENUS_MIS_RTCSEC), 
+			inl(VENUS_MIS_ALMDATE2), inl(VENUS_MIS_ALMDATE1), 
+			inl(VENUS_MIS_ALMHR), inl(VENUS_MIS_ALMMIN));
+#endif
 #ifdef CONFIG_REALTEK_USE_EXTERNAL_TIMER_INTERRUPT
 		value = inl(VENUS_MIS_TC2CR);
 		value |= 0x20000000;
@@ -647,33 +3301,215 @@ static int venus_pm_enter(suspend_state_t state)
 		}
 #endif
 		outl(0x7FE20, VENUS_MIS_ISR);		/* Clear VFD, IrDA, and all RTC's interrupts */
-		while(inl(VENUS_MIS_IR_SR) & 0x01)
+		while(inl(VENUS_MIS_IR_SR) & 0x01) {
 			inl(VENUS_MIS_IR_RP);
+			outl(0x1, VENUS_MIS_IR_SR);
+		}
 		value_ptr = parse_token(platform_info.system_parameters, "12V5V_GPIO");
 		if(value_ptr && strlen(value_ptr)) {
-			gpio = (int)simple_strtol(value_ptr, &value_end_ptr, 10);
+			voltage_gpio = (int)simple_strtol(value_ptr, &value_end_ptr, 10);
 			if(value_ptr == value_end_ptr) {
 				prom_printf("The value of 12V5V_GPIO seems to have problem.\n");
-				gpio = -1;
-			}
-			if(!strcmp(value_end_ptr, ",hion"))
-				gpio |= 0x10000000;
-			else if(strcmp(value_end_ptr, ",hioff")) {
-				prom_printf("The value of 12V5V_GPIO doesn't have a sub-parameter of \"hion\" or \"hioff\"\n");
-				gpio = -1;
+				voltage_gpio = -1;
+			} else if(voltage_gpio < 0 || (is_venus_cpu() && voltage_gpio > 35) || (is_neptune_cpu() && voltage_gpio > 47) || (is_mars_cpu() && voltage_gpio > 105)) {
+				prom_printf("GPIO number setting exceeds the limits.\n");
+				voltage_gpio = -1;
+			} else {
+				if(!strcmp(value_end_ptr, ",hion"))
+					voltage_gpio |= 0x10000000;
+				else if(strcmp(value_end_ptr, ",hioff")) {
+					prom_printf("The value of 12V5V_GPIO doesn't have a sub-parameter of \"hion\" or \"hioff\"\n");
+					voltage_gpio = -1;
+				}
 			}
 		} else {
-			gpio = -1;
-			prom_printf("No 12V5V_GPIO setting in system_parameters. Use board_id instead.\n");
+			prom_printf("No 12V5V_GPIO setting in system_parameters. If possible, use board_id instead.\n");
+			if(platform_info.board_id == 0x1 || platform_info.board_id == 0x5)
+				voltage_gpio = 33 | 0x10000000;
+			else if(platform_info.board_id == 0xa || platform_info.board_id == 0xb || platform_info.board_id == 0x5000a)
+				voltage_gpio = 34 | 0x10000000;
+			else if(platform_info.board_id == 0x4)
+				voltage_gpio = 12 | 0x10000000;
+			else
+				voltage_gpio = -1;
 		}
 		if(value_ptr)
 			kfree(value_ptr);
-/* For Venus CPU, if bit0 of 0xb8008800 is equal to 1, it represents that the package of the chip is QFP, otherwise it is BGA. */
-		if((platform_info.cpu_id == realtek_venus_cpu || platform_info.cpu_id == realtek_venus2_cpu) && ((*(volatile unsigned int *)0xb8008800) & 0x1))
+		prom_printf("12V5V_GPIO setting=%x\n", voltage_gpio);
+
+/* For Venus and Neptune CPU, if bit0 of 0xb8008800 is equal to 1, it represents that the package of the chip is QFP, otherwise it is BGA. */
+/* For Mars, the register for this is 0xb8000300 */
+/* Bit 4 of hwinfo represents package type */
+		if(((is_venus_cpu() || is_neptune_cpu()) && ((*(volatile unsigned int *)0xb8008800) & 0x1)) || 
+			(is_mars_cpu() && ~((*(volatile unsigned int *)0xb8000300) & 0x8000)))
 			;
 		else
+			hwinfo |= 0x10;
+		if(suspend_options == 1)
 			options |= 0x1;
-		Suspend_ret = venus_cpu_suspend(platform_info.board_id, gpio, options);
+		prom_printf("options=%x\n",options);
+
+/* Bit 0-3 of hwinfo represent CPU type */
+		if(is_venus_cpu())
+			;
+		else if(is_neptune_cpu())
+			hwinfo |= 0x1;
+		else if(is_mars_cpu())
+			hwinfo |= 0x2;
+		else
+			hwinfo = -1;
+		if(hwinfo>=0)
+			prom_printf("hwinfo=%x\n",hwinfo);
+		else
+			prom_printf("Unknown CPU type.\n");
+		
+		//POWERKEY_IRRP
+		value_ptr = parse_token(platform_info.system_parameters, "POWERKEY_IRRP");
+		if(value_ptr && strlen(value_ptr)) {
+			powerkey_irrp = (int)simple_strtol(value_ptr, &value_end_ptr, 16);
+			if(value_ptr == value_end_ptr) {
+				prom_printf("The value of POWERKEY_IRRP seems to have problem.\n");
+				powerkey_irrp = 0;
+			}
+		} else {
+			powerkey_irrp = 0xFF00FC03;
+		}
+		prom_printf("powerkey_irrp=%x\n",powerkey_irrp);
+		if(value_ptr)
+			kfree(value_ptr);
+		
+		//EJECTKEY_IRRP
+		value_ptr = parse_token(platform_info.system_parameters, "EJECTKEY_IRRP");
+		if(value_ptr && strlen(value_ptr)) {
+			ejectkey_irrp = (int)simple_strtol(value_ptr, &value_end_ptr, 16);
+			if(value_ptr == value_end_ptr) {
+				prom_printf("The value of EJECTKEY_IRRP seems to have problem.\n");
+				ejectkey_irrp = 0;
+			}
+		} else {
+			ejectkey_irrp = 0xE817FC03;
+		}
+		prom_printf("ejectkey_irrp=%x\n",ejectkey_irrp);
+		if(value_ptr)
+			kfree(value_ptr);
+
+		//POWERKEY_GPIO
+		value_ptr = parse_token(platform_info.system_parameters, "POWERKEY_GPIO");
+		if(value_ptr && strlen(value_ptr)) {
+			powerkey_gpio = (int)simple_strtol(value_ptr, &value_end_ptr, 10);
+			if(value_ptr == value_end_ptr) {
+				prom_printf("The value of POWERKEY_GPIO seems to have problem.\n");
+				powerkey_gpio = -1;
+			} else if(powerkey_gpio < 0 || (is_venus_cpu() && powerkey_gpio > 35) || (is_neptune_cpu() && powerkey_gpio > 47) || (is_mars_cpu() && powerkey_gpio > 105)) {
+				prom_printf("GPIO number of POWERKEY_GPIO setting exceeds the limits.\n");
+				powerkey_gpio = -1;
+			}
+		} else {
+			powerkey_gpio = -1;
+		}
+		prom_printf("powerkey_gpio=%d\n",powerkey_gpio);
+		if(value_ptr)
+			kfree(value_ptr);
+		
+		//EJECTKEY_GPIO
+		value_ptr = parse_token(platform_info.system_parameters, "EJECTKEY_GPIO");
+		if(value_ptr && strlen(value_ptr)) {
+			ejectkey_gpio = (int)simple_strtol(value_ptr, &value_end_ptr, 10);
+			if(value_ptr == value_end_ptr) {
+				prom_printf("The value of EJECTKEY_GPIO seems to have problem.\n");
+				ejectkey_gpio = -1;
+			} else if(ejectkey_gpio < 0 || (is_venus_cpu() && ejectkey_gpio > 35) || (is_neptune_cpu() && ejectkey_gpio > 47) || (is_mars_cpu() && ejectkey_gpio > 105)) {
+				prom_printf("GPIO number of EJECTKEY_GPIO setting exceeds the limits.\n");
+				ejectkey_gpio = -1;
+			}
+		} else {
+			ejectkey_gpio = -1;
+		}
+		prom_printf("ejectkey_gpio=%d\n",ejectkey_gpio);
+		if(value_ptr)
+			kfree(value_ptr);
+
+		//VFD_TYPE
+		value_ptr = parse_token(platform_info.system_parameters, "VFD_TYPE");
+		if(value_ptr && strlen(value_ptr)) {
+			if(!strcmp(value_ptr, "NEC"))
+				vfd_type = 1;
+			else if(!strcmp(value_ptr, "RC5"))
+				vfd_type = 2;
+			else if(!strcmp(value_ptr, "SHARP"))
+				vfd_type = 3;
+			else if(!strcmp(value_ptr, "SONY"))
+				vfd_type = 4;
+			else if(!strcmp(value_ptr, "C03"))
+				vfd_type = 5;
+			else if(!strcmp(value_ptr, "RC6"))
+				vfd_type = 6;
+			else
+				vfd_type = 0;
+		} else {
+			vfd_type = 0;
+		}
+		prom_printf("vfd_type=%d\n",vfd_type);
+		if(value_ptr)
+			kfree(value_ptr);
+
+#ifndef CONFIG_PM_SLEEP_POLLING
+// To simulate the boards that have no RTC
+//		outl(inl(VENUS_MIS_RTCCR)&~0x1, VENUS_MIS_RTCCR);
+		outl(inl(VENUS_MIS_IR_CR) | 0x400, VENUS_MIS_IR_CR);
+		int gpio_num, reg_adr, gpie_base;
+
+		if(is_mars_cpu())
+			gpie_base = MARS_MIS_GP0IE;
+		else
+			gpie_base = VENUS_MIS_GP0IE;
+		
+		gpio_num = powerkey_gpio;
+		reg_adr = gpie_base;
+		while(gpio_num >= 0) {
+			if(gpio_num < 32)
+				outl(inl(reg_adr)|(1<<gpio_num), reg_adr);
+			gpio_num -= 32;
+			reg_adr += 4;
+		}
+
+		gpio_num = ejectkey_gpio;
+		reg_adr = gpie_base;
+		while(gpio_num >= 0) {
+			if(gpio_num < 32)
+				outl(inl(reg_adr)|(1<<gpio_num), reg_adr);
+			gpio_num -= 32;
+			reg_adr += 4;
+		}
+#endif
+		if(is_mars_cpu()) {
+			Suspend_ret = mars_cpu_suspend(platform_info.board_id, voltage_gpio, options, hwinfo, powerkey_irrp, ejectkey_irrp, powerkey_gpio, ejectkey_gpio, vfd_type);
+			setup_boot_image_mars();
+		} else {
+			Suspend_ret = venus_cpu_suspend(platform_info.board_id, voltage_gpio, options, hwinfo, powerkey_irrp, ejectkey_irrp, powerkey_gpio, ejectkey_gpio, vfd_type);
+			setup_boot_image();
+		}
+#ifndef CONFIG_PM_SLEEP_POLLING
+		outl(inl(VENUS_MIS_IR_CR) & ~0x400, VENUS_MIS_IR_CR);
+
+		gpio_num = powerkey_gpio;
+		reg_adr = gpie_base;
+		while(gpio_num >= 0) {
+			if(gpio_num < 32)
+				outl(inl(reg_adr)&~(1<<gpio_num), reg_adr);
+			gpio_num -= 32;
+			reg_adr += 4;
+		}
+
+		gpio_num = ejectkey_gpio;
+		reg_adr = gpie_base;
+		while(gpio_num >= 0) {
+			if(gpio_num < 32)
+				outl(inl(reg_adr)&~(1<<gpio_num), reg_adr);
+			gpio_num -= 32;
+			reg_adr += 4;
+		}
+#endif
 		value = inl(VENUS_MIS_RTCCR);
 		value &= ~0x1;
 		outl(value, VENUS_MIS_RTCCR);
@@ -724,6 +3560,8 @@ static int venus_pm_prepare(suspend_state_t state)
 	return 0;
 }
 
+extern atomic_t rtk_rtc_found;
+
 /**
  *	venus_pm_finish - Finish up suspend sequence.
  *	@state:		State we're coming out of.
@@ -738,9 +3576,11 @@ static int venus_pm_finish(suspend_state_t state)
 	{
 	case PM_SUSPEND_STANDBY:
 	case PM_SUSPEND_MEM:
-		tv.tv_sec = rtc_get_time();
-		tv.tv_nsec = 0;
-		do_settimeofday(&tv);
+		if(atomic_read(&rtk_rtc_found)>0) {
+			tv.tv_sec = rtc_get_time();
+			tv.tv_nsec = 0;
+			do_settimeofday(&tv);
+		}
 		if (dvr_task != 0) {
 			if(Suspend_ret==2)
 				send_sig_info(SIGUSR_RTC_ALARM, (void *)2, (struct task_struct *)dvr_task);
@@ -773,12 +3613,8 @@ static struct pm_ops venus_pm_ops = {
 	.finish		= venus_pm_finish,
 };
 
-static int __init venus_pm_init(void)
+static int __init venus_logo_init(void)
 {
-	char *strptr;
-	int count = LOGO_INFO_SIZE;
-
-	printk("Realtek Venus Power Management, (c) 2006 Realtek Semiconductor Corp.\n");
 	printk("========== board id: %x ==========\n", platform_info.board_id);
 
 /*
@@ -788,44 +3624,69 @@ static int __init venus_pm_init(void)
 	else
 		strptr = (char *)LOGO_INFO_ADDR1;
 */
-	switch(platform_info.board_id) {
-	case realtek_avhdd_demo_board:
-	case realtek_avhdd2_demo_board:
-	case C02_avhdd_board:
-	case realtek_pvrbox_demo_board:
-	case C05_pvrbox_board:
-	case C05_pvrbox2_board:
-	case C07_avhdd_board:
-	case C07_pvrbox_board:
-	case C07_pvrbox2_board:
-	case C09_pvrbox_board:
-	case C09_pvrbox2_board:
-	case C03_pvr2_board:
-		strptr = (char *)LOGO_INFO_ADDR2;
-		break;
-	default:
-		strptr = (char *)LOGO_INFO_ADDR1;
-		break;
-	}
+	if (is_venus_cpu()) {
+		char *strptr;
+		int count = LOGO_INFO_SIZE;
 
-        while (--count > 0) {
-                if (!memcmp(strptr, "-l", 2))
+		switch(platform_info.board_id) {
+		case realtek_1071_avhdd_mk_demo_board:
+		case C10_1071_avhdd_board:
+			goto neptune_mode;
 			break;
-		strptr++;
-        }
-//	printk("strptr value: %s \n", strptr);
-	if (count != 0) {
-		strptr += 3;
-		sscanf(strptr, "%d %d %x %x %x %x", &logo_info.mode, &logo_info.size,
-		&logo_info.color[0], &logo_info.color[1], &logo_info.color[2], &logo_info.color[3]);
+		case realtek_avhdd_demo_board:
+		case realtek_avhdd2_demo_board:
+		case C02_avhdd_board:
+		case realtek_pvrbox_demo_board:
+		case C05_pvrbox_board:
+		case C05_pvrbox2_board:
+		case C07_avhdd_board:
+		case C07_pvrbox_board:
+		case C07_pvrbox2_board:
+		case C09_pvrbox_board:
+		case C09_pvrbox2_board:
+		case C03_pvr2_board:
+			strptr = (char *)LOGO_INFO_ADDR2;
+			break;
+		default:
+			strptr = (char *)LOGO_INFO_ADDR1;
+			break;
+		}
+	
+	        while (--count > 0) {
+	                if (!memcmp(strptr, "-l", 2))
+				break;
+			strptr++;
+	        }
+//		printk("strptr value: %s \n", strptr);
+		if (count != 0) {
+			strptr += 3;
+			sscanf(strptr, "%d %d %x %x %x %x", &logo_info.mode, &logo_info.size,
+			&logo_info.color[0], &logo_info.color[1], &logo_info.color[2], &logo_info.color[3]);
+		} else {
+			printk("[INFO] logo info not found, use PAL as default...\n");
+			logo_info.mode = 1;	// PAL
+			logo_info.size = 2724;
+			logo_info.color[0] = 0x6ba53f;
+			logo_info.color[1] = 0x6da555;
+			logo_info.color[2] = 0x749889;
+			logo_info.color[3] = 0x8080eb;
+		}
 	} else {
-		printk("[INFO] logo info not found, use PAL as default...\n");
-		logo_info.mode = 1;	// PAL
-		logo_info.size = 2724;
-		logo_info.color[0] = 0x6ba53f;
-		logo_info.color[1] = 0x6da555;
-		logo_info.color[2] = 0x749889;
-		logo_info.color[3] = 0x8080eb;
+		boot_extern_param *boot_param;
+
+neptune_mode:
+		printk("[INFO] neptune mode...\n");
+		if (is_venus_cpu() || is_neptune_cpu()) 
+			boot_param = (boot_extern_param *)BOOT_PARAM_ADDR_NEPTUNE;
+		else
+			boot_param = (boot_extern_param *)BOOT_PARAM_ADDR_MARS;
+		printk("boot_param value: %x \n", boot_param);
+		logo_info.mode = boot_param->logo_type; 
+		logo_info.size = boot_param->logo_offset; 
+		logo_info.color[0] = boot_param->logo_reg_5370;
+		logo_info.color[1] = boot_param->logo_reg_5374;
+		logo_info.color[2] = boot_param->logo_reg_5378;
+		logo_info.color[3] = boot_param->logo_reg_537c;
 	}
 	printk("mode: %d \n", logo_info.mode);
 	printk("size: %d \n", logo_info.size);
@@ -833,9 +3694,15 @@ static int __init venus_pm_init(void)
 	printk("color2: 0x%x \n", logo_info.color[1]);
 	printk("color3: 0x%x \n", logo_info.color[2]);
 	printk("color4: 0x%x \n", logo_info.color[3]);
+}
+
+static int __init venus_pm_init(void)
+{
+	printk("Realtek Venus Power Management, (c) 2006 Realtek Semiconductor Corp.\n");
 
 	pm_set_ops(&venus_pm_ops);
 	return 0;
 }
 
+core_initcall(venus_logo_init);
 late_initcall(venus_pm_init);

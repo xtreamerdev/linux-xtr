@@ -318,8 +318,12 @@ static int fat_fill_inode(struct inode *inode, struct msdos_dir_entry *de)
 
 	if ((de->attr & ATTR_DIR) && !IS_FREE(de->name)) {
 		inode->i_generation &= ~1;
-		inode->i_mode = MSDOS_MKMODE(de->attr,
-			S_IRWXUGO & ~sbi->options.fs_dmask) | S_IFDIR;
+		if (de->attr & ATTR_HIDDEN) 
+			inode->i_mode = MSDOS_MKMODE(de->attr,
+				S_IRWXUGO & ~sbi->options.fs_dmask) | S_IFHIDE;
+		else
+			inode->i_mode = MSDOS_MKMODE(de->attr,
+				S_IRWXUGO & ~sbi->options.fs_dmask) | S_IFDIR;
 		inode->i_op = sbi->dir_ops;
 		inode->i_fop = &fat_dir_operations;
 
@@ -336,11 +340,18 @@ static int fat_fill_inode(struct inode *inode, struct msdos_dir_entry *de)
 		inode->i_nlink = fat_subdirs(inode);
 	} else { /* not a directory */
 		inode->i_generation |= 1;
-		inode->i_mode = MSDOS_MKMODE(de->attr,
-		    ((sbi->options.showexec &&
-			!is_exec(de->ext))
-			? S_IRUGO|S_IWUGO : S_IRWXUGO)
-		    & ~sbi->options.fs_fmask) | S_IFREG;
+		if (de->attr & ATTR_HIDDEN) 
+			inode->i_mode = MSDOS_MKMODE(de->attr,
+			    ((sbi->options.showexec &&
+				!is_exec(de->ext))
+				? S_IRUGO|S_IWUGO : S_IRWXUGO)
+			    & ~sbi->options.fs_fmask) | S_IFHIDE;
+		else
+			inode->i_mode = MSDOS_MKMODE(de->attr,
+			    ((sbi->options.showexec &&
+				!is_exec(de->ext))
+				? S_IRUGO|S_IWUGO : S_IRWXUGO)
+			    & ~sbi->options.fs_fmask) | S_IFREG;
 		MSDOS_I(inode)->i_start = le16_to_cpu(de->start);
 		if (sbi->fat_bits == 32)
 			MSDOS_I(inode)->i_start |= (le16_to_cpu(de->starthi) << 16);
@@ -1275,7 +1286,8 @@ int fat_fill_super(struct super_block *sb, void *data, int silent,
 //			       le32_to_cpu(fsinfo->signature2),
 //			       sbi->fsinfo_sector);
 		} else {
-			sbi->free_clusters = le32_to_cpu(fsinfo->free_clusters);
+			/* EJ: in order to get the correct information of free space... */
+//			sbi->free_clusters = le32_to_cpu(fsinfo->free_clusters);
 			sbi->prev_free = le32_to_cpu(fsinfo->next_cluster);
 		}
 

@@ -30,16 +30,19 @@
 #include <asm/page.h>
 
 #include <prom.h>
+#include <platform.h>
 
 extern char *find_args(char *args, char *name);
 
 #ifdef	CONFIG_REALTEK_RECLAIM_BOOT_MEM
-#define	F_ADDR	0x80010000
+#define	F_ADDR1	0x80010000
+#define	F_ADDR2	0x80020000
 #define	T_ADDR1	0x80090000
 #define	T_ADDR2	0x800f0000
+#define	T_ADDR3	0x80100000
 #endif
 static unsigned int debug_flag = 0;
-static unsigned int audio_addr = 0;
+unsigned int audio_addr = 0;
 /*#define DEBUG*/
 
 enum yamon_memtypes {
@@ -231,11 +234,21 @@ unsigned long __init prom_free_prom_memory(void)
 	}
 	printk("Freeing prom memory: %ldkb freed\n", freed >> 10);
 #ifdef	CONFIG_REALTEK_RECLAIM_BOOT_MEM
-	addr = F_ADDR;
-	if (debug_flag)
-		dest = T_ADDR1;
-	else
-		dest = T_ADDR2;
+	if (!is_mars_cpu()) {
+		// venus or neptune
+		addr = F_ADDR1;
+		if (debug_flag)
+			dest = T_ADDR1;
+		else
+			dest = T_ADDR2;
+	} else {
+		// mars
+		addr = F_ADDR2;
+		if (debug_flag)
+			dest = T_ADDR1;
+		else
+			dest = T_ADDR3;
+	}
 	printk("Reclaim bootloader memory from %x to %x\n", addr, dest);
 	count = 0;
 	while (addr < dest) {

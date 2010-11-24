@@ -27,6 +27,29 @@
 #include <asm/ptrace.h>
 #include <asm/highmem.h>		/* For VMALLOC_END */
 
+//void my_print_tlb_content(void);
+struct page *my_follow_page(struct mm_struct *mm, unsigned long address);
+
+extern unsigned long dvr_asid;
+
+void my_show_code(struct task_struct *child, unsigned int *pc)
+{
+	long i;
+
+	printk("\nCode:");
+
+	for(i = -3 ; i < 6 ; i++) {
+		unsigned int insn;
+		int copied;
+		copied = access_process_vm(child, (unsigned int)(pc+i), &insn, sizeof(insn), 0);
+		if (copied != sizeof(insn)) {
+			printk(" (Bad address in epc)\n");
+			break;
+		}
+		printk("%c%08x%c", (i?' ':'<'), insn, (i?' ':'>'));
+	}
+}
+
 /*
  * This routine handles page faults.  It determines the address,
  * and the problem, and then passes it off to one of the appropriate
@@ -127,6 +150,7 @@ bad_area:
 bad_area_nosemaphore:
 	/* User mode accesses just cause a SIGSEGV */
 	if (user_mode(regs)) {
+		struct page *page = NULL;
 		tsk->thread.cp0_badvaddr = address;
 		tsk->thread.error_code = write;
 
@@ -138,6 +162,44 @@ bad_area_nosemaphore:
 		       field, (unsigned long) regs->cp0_epc,
 		       field, (unsigned long) regs->regs[31]);
 
+		printk("current context: %x \n", current->mm->context[0]);
+		printk("dvr_asid: 0x%x\n", (int)dvr_asid);
+		page = my_follow_page(current->mm, regs->regs[29]);
+		if (page) {
+			unsigned long virtual;
+
+			virtual = page_to_pfn(page)<<PAGE_SHIFT | 0x80000000;
+			printk("########## User stack address: %x \n", virtual);
+			printk("Page flags: %x, index: %d, count: %d, mapcount: %d \n", page->flags, page->index, 
+					page->_count, page->_mapcount);
+		} else
+			printk("########## Can't find corresponding page of user stack...\n");
+/*
+		my_print_tlb_content();
+
+		show_regs(regs);
+		{
+			unsigned long tmp;
+			int copied;
+			unsigned int asid;
+			
+			asid = read_c0_entryhi() & 0xff;
+			printk("current context: %x \n", current->mm->context[0]);
+			printk("current asid: %x \n", asid);
+
+			copied = access_process_vm(current, regs->cp0_epc, &tmp, sizeof(tmp), 0);
+			if (copied != sizeof(tmp))
+				printk("epc copied: %d \n", copied);
+			printk("epc page: %x \n", tmp);
+			copied = access_process_vm(current, regs->regs[31], &tmp, sizeof(tmp), 0);
+			if (copied != sizeof(tmp))
+				printk("ra copied: %d \n", copied);
+			printk("ra page: %x \n", tmp);
+
+			my_show_code(current, (unsigned int *)regs->cp0_epc);
+			my_show_code(current, (unsigned int *)regs->regs[31]);
+		}
+*/
 		info.si_signo = SIGSEGV;
 		info.si_errno = 0;
 		/* info.si_code has been set above */

@@ -63,7 +63,11 @@ static unsigned long height_to_maxindex[RADIX_TREE_MAX_PATH];
 /*
  * Radix tree node cache.
  */
+#ifdef CONFIG_REALTEK_SBSS_IN_DMEM
+static kmem_cache_t *radix_tree_node_cachep __attribute__ ((section(".sbss")));
+#else
 static kmem_cache_t *radix_tree_node_cachep;
+#endif
 
 /*
  * Per-cpu pool of preloaded nodes
@@ -72,7 +76,11 @@ struct radix_tree_preload {
 	int nr;
 	struct radix_tree_node *nodes[RADIX_TREE_MAX_PATH];
 };
+#ifdef CONFIG_REALTEK_SBSS_IN_DMEM
+DEFINE_PER_CPU(struct radix_tree_preload, radix_tree_preloads) __attribute__ ((section(".sbss"))) = { 0, };
+#else
 DEFINE_PER_CPU(struct radix_tree_preload, radix_tree_preloads) = { 0, };
+#endif
 
 /*
  * This assumes that the caller has performed appropriate preallocation, and

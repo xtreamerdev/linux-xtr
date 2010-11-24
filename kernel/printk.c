@@ -92,9 +92,17 @@ static DEFINE_SPINLOCK(logbuf_lock);
  * The indices into log_buf are not constrained to log_buf_len - they
  * must be masked before subscripting
  */
+#ifdef CONFIG_SHARED_PRINTK
+unsigned int av_lock = 0;
+
+static unsigned long log_start __attribute__ ((section(".bss.log.start")));	/* Index into log_buf: next char to be read by syslog() */
+static unsigned long con_start __attribute__ ((section(".bss.con.start")));	/* Index into log_buf: next char to be sent to consoles */
+static unsigned long log_end __attribute__ ((section(".bss.log.end")));	/* Index into log_buf: most-recently-written-char + 1 */
+#else
 static unsigned long log_start;	/* Index into log_buf: next char to be read by syslog() */
 static unsigned long con_start;	/* Index into log_buf: next char to be sent to consoles */
 static unsigned long log_end;	/* Index into log_buf: most-recently-written-char + 1 */
+#endif
 
 /*
  *	Array of consoles built from command line options (console=)
@@ -156,9 +164,89 @@ __setup("console=", console_setup);
 #ifdef CONFIG_PRINTK
 
 static char __log_buf[__LOG_BUF_LEN];
+#ifdef CONFIG_SHARED_PRINTK
+static char *log_buf __attribute__ ((section(".bss.buff")));
+static int log_buf_len __attribute__ ((section(".bss.buff.len")));
+static unsigned long logged_chars __attribute__ ((section(".bss.logged"))); /* Number of chars produced since last read+clear operation */
+
+static struct work_struct printk_work;
+static unsigned int printk_data;
+
+static void printk_wq(void *ptr)
+{
+	if (!down_trylock(&console_sem)) {
+		console_locked = 1;
+		console_may_schedule = 0;
+		release_console_sem();
+	}
+	schedule_delayed_work(&printk_work, 1);
+}
+
+static void lock_hw_sem(void)
+{
+	volatile int *ptr = (int *)0xb801a000;
+	if (av_lock)
+		return;
+	while (*ptr != 1) ;
+//		if (system_state == SYSTEM_RUNNING)
+//			msleep(1);
+}
+
+static void unlock_hw_sem(void)
+{
+	volatile int *ptr = (int *)0xb801a000;
+	if (av_lock)
+		return;
+	*ptr = 0;
+}
+/*
+static void flush_log_buffer()
+{
+//	unsigned long dc_lsize = current_cpu_data.dcache.linesz;
+	unsigned long dc_lsize = 16;
+	unsigned long addr = (unsigned long)log_buf;
+	unsigned long size = log_buf_len;
+
+	
+	while (size > 0) {
+		flush_dcache_line(addr);
+		addr += dc_lsize;
+		size -= dc_lsize;
+	}
+}
+*/
+#else
 static char *log_buf = __log_buf;
 static int log_buf_len = __LOG_BUF_LEN;
 static unsigned long logged_chars; /* Number of chars produced since last read+clear operation */
+
+#define lock_hw_sem()
+#define unlock_hw_sem()
+#endif
+void __init printk_setup(void)
+{
+	int *ptr = (int *)0xa00000e8;
+	int cnt;
+
+	/* clear the bss */
+	for (cnt = 0; cnt < 6; cnt++)
+		ptr[cnt] = 0;
+
+#ifdef CONFIG_SHARED_PRINTK
+	log_buf = __log_buf;
+	log_buf = (char *)((unsigned)log_buf | 0xa0000000);
+	log_buf_len = __LOG_BUF_LEN;
+
+	INIT_WORK(&printk_work, printk_wq, &printk_data);
+#endif
+}
+
+void __init printk_setup_tail(void)
+{
+#ifdef CONFIG_SHARED_PRINTK
+	schedule_work(&printk_work);
+#endif
+}
 
 static int __init log_buf_len_setup(char *str)
 {
@@ -178,6 +266,7 @@ static int __init log_buf_len_setup(char *str)
 		}
 
 		spin_lock_irqsave(&logbuf_lock, flags);
+		lock_hw_sem();
 		log_buf_len = size;
 		log_buf = new_log_buf;
 
@@ -191,6 +280,7 @@ static int __init log_buf_len_setup(char *str)
 		log_start -= offset;
 		con_start -= offset;
 		log_end -= offset;
+		unlock_hw_sem();
 		spin_unlock_irqrestore(&logbuf_lock, flags);
 
 		printk("log_buf_len: %d\n", log_buf_len);
@@ -248,17 +338,22 @@ int do_syslog(int type, char __user * buf, int len)
 		if (error)
 			goto out;
 		i = 0;
+//		flush_log_buffer();
 		spin_lock_irq(&logbuf_lock);
+		lock_hw_sem();
 		while (!error && (log_start != log_end) && i < len) {
 			c = LOG_BUF(log_start);
 			log_start++;
+			unlock_hw_sem();
 			spin_unlock_irq(&logbuf_lock);
 			error = __put_user(c,buf);
 			buf++;
 			i++;
 			cond_resched();
 			spin_lock_irq(&logbuf_lock);
+			lock_hw_sem();
 		}
+		unlock_hw_sem();
 		spin_unlock_irq(&logbuf_lock);
 		if (!error)
 			error = i;
@@ -280,7 +375,9 @@ int do_syslog(int type, char __user * buf, int len)
 		count = len;
 		if (count > log_buf_len)
 			count = log_buf_len;
+//		flush_log_buffer();
 		spin_lock_irq(&logbuf_lock);
+		lock_hw_sem();
 		if (count > logged_chars)
 			count = logged_chars;
 		if (do_clear)
@@ -297,11 +394,14 @@ int do_syslog(int type, char __user * buf, int len)
 			if (j + log_buf_len < log_end)
 				break;
 			c = LOG_BUF(j);
+			unlock_hw_sem();
 			spin_unlock_irq(&logbuf_lock);
 			error = __put_user(c,&buf[count-1-i]);
 			cond_resched();
 			spin_lock_irq(&logbuf_lock);
+			lock_hw_sem();
 		}
+		unlock_hw_sem();
 		spin_unlock_irq(&logbuf_lock);
 		if (error)
 			break;
@@ -436,7 +536,12 @@ static void call_console_drivers(unsigned long start, unsigned long end)
 			}
 		}
 	}
-	_call_console_drivers(start_print, end, msg_level);
+/* When shared_printk is turned on, chars from AP will be directed to printk buffer and "msg_level" may be -1.
+    For this situation, some chars will still slip to console when we set console_loglevel to 1. */
+	if(msg_level == -1)
+		_call_console_drivers(start_print, end, default_message_loglevel);
+	else
+		_call_console_drivers(start_print, end, msg_level);
 }
 
 static void emit_log_char(char c)
@@ -449,6 +554,16 @@ static void emit_log_char(char c)
 		con_start = log_end - log_buf_len;
 	if (logged_chars < log_buf_len)
 		logged_chars++;
+}
+
+void lock_emit_log_char(char c) {
+	unsigned long flags;
+
+	spin_lock_irqsave(&logbuf_lock, flags);
+	lock_hw_sem();
+	emit_log_char(c);
+	unlock_hw_sem();
+	spin_unlock_irqrestore(&logbuf_lock, flags);
 }
 
 /*
@@ -527,6 +642,7 @@ asmlinkage int vprintk(const char *fmt, va_list args)
 
 	/* This stops the holder of console_sem just where we want him */
 	spin_lock_irqsave(&logbuf_lock, flags);
+	lock_hw_sem();
 
 	/* Emit the output into the temporary buffer */
 	printed_len = vscnprintf(printk_buf, sizeof(printk_buf), fmt, args);
@@ -604,6 +720,7 @@ asmlinkage int vprintk(const char *fmt, va_list args)
 		 * CPU until it is officially up.  We shouldn't be calling into
 		 * random console drivers on a CPU which doesn't exist yet..
 		 */
+		unlock_hw_sem();
 		spin_unlock_irqrestore(&logbuf_lock, flags);
 		goto out;
 	}
@@ -613,6 +730,7 @@ asmlinkage int vprintk(const char *fmt, va_list args)
 		 * We own the drivers.  We can drop the spinlock and let
 		 * release_console_sem() print the text
 		 */
+		unlock_hw_sem();
 		spin_unlock_irqrestore(&logbuf_lock, flags);
 		console_may_schedule = 0;
 		release_console_sem();
@@ -622,6 +740,7 @@ asmlinkage int vprintk(const char *fmt, va_list args)
 		 * allows the semaphore holder to proceed and to call the
 		 * console drivers with the output which we just produced.
 		 */
+		unlock_hw_sem();
 		spin_unlock_irqrestore(&logbuf_lock, flags);
 	}
 out:
@@ -732,14 +851,27 @@ void release_console_sem(void)
 	unsigned long _con_start, _log_end;
 	unsigned long wake_klogd = 0;
 
+//	flush_log_buffer();
 	for ( ; ; ) {
 		spin_lock_irqsave(&logbuf_lock, flags);
+		lock_hw_sem();
 		wake_klogd |= log_start - log_end;
 		if (con_start == log_end)
 			break;			/* Nothing to print */
 		_con_start = con_start;
+#ifdef CONFIG_SHARED_PRINTK
+		if (log_end - con_start > 100) {
+			_log_end = _con_start+100;
+			con_start = _log_end;
+		} else {
+			_log_end = log_end;
+			con_start = log_end;	/* Flush */
+		}
+#else
 		_log_end = log_end;
 		con_start = log_end;		/* Flush */
+#endif
+		unlock_hw_sem();
 		spin_unlock(&logbuf_lock);
 		call_console_drivers(_con_start, _log_end);
 		local_irq_restore(flags);
@@ -747,6 +879,7 @@ void release_console_sem(void)
 	console_locked = 0;
 	console_may_schedule = 0;
 	up(&console_sem);
+	unlock_hw_sem();
 	spin_unlock_irqrestore(&logbuf_lock, flags);
 	if (wake_klogd && !oops_in_progress && waitqueue_active(&log_wait))
 		wake_up_interruptible(&log_wait);
@@ -915,7 +1048,9 @@ void register_console(struct console * console)
 		 * for us.
 		 */
 		spin_lock_irqsave(&logbuf_lock, flags);
+		lock_hw_sem();
 		con_start = log_start;
+		unlock_hw_sem();
 		spin_unlock_irqrestore(&logbuf_lock, flags);
 	}
 	release_console_sem();

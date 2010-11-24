@@ -56,7 +56,7 @@ int cdfs_copy_from_cd(struct super_block * sb, int inode, unsigned int start, un
   int start_sector, start_byte, stop_sector, stop_byte, sector;
   int status=0;
   struct cdrom_read_audio cdda;
-  unsigned int read_size=CD_FRAMESIZE_RAW;	//CD_FRAMESIZE_RAW=2352
+  unsigned int read_size=CD_FRAMESIZE_RAW_Q;	//CD_FRAMESIZE_RAW_Q=2352+16=2368
   cd * this_cd = cdfs_info(sb);      
   //unsigned start_lba=this_cd->track[inode].start_lba;
   unsigned start_lba=this_cd->track[inode].start_lba;
@@ -86,7 +86,7 @@ int cdfs_copy_from_cd(struct super_block * sb, int inode, unsigned int start, un
   if (!stop_byte)
   {	/* empty frame */
   	stop_sector -= 1;
-  	stop_byte    = CD_FRAMESIZE_RAW;	//CD_FRAMESIZE_RAW=2352
+  	stop_byte    = CD_FRAMESIZE_RAW_Q;	//CD_FRAMESIZE_RAW_Q=2352+16=2368
   }
 
   cdda.addr_format = CDROM_LBA;	//Using CDROM_LBA format
@@ -103,7 +103,7 @@ int cdfs_copy_from_cd(struct super_block * sb, int inode, unsigned int start, un
     {
       this_cd->cache_sector = cdda.addr.lba = sector;
 
-	  //printk("<vcd module> Reading sector %d in ACD ST \n",cdda.addr.lba);
+	  PRINT("<vcd module> Reading sector %d in ACD ST \n",cdda.addr.lba);
           status = cdfs_read_cd(sb, (&cdda), cdda.buf);
 	  
       if (status)
@@ -113,10 +113,10 @@ int cdfs_copy_from_cd(struct super_block * sb, int inode, unsigned int start, un
       }
       /*
       else
-		  printk("<vcd module> Reading sector %d in ACD SP OK status=%d\n", cdda.addr.lba, status);
-      */
+		  PRINT("<vcd module> Reading sector %d in ACD SP OK status=%d\n", cdda.addr.lba, status);
+	*/
     }
-    temp2=temp+(sector-this_cd->cache_sector)*CD_FRAMESIZE_RAW;	//CD_FRAMESIZE_RAW=2352
+    temp2=temp+(sector-this_cd->cache_sector)*CD_FRAMESIZE_RAW_Q;	//CD_FRAMESIZE_RAW_Q=2352+16=2368
     if (sector==start_sector)
     {
 		temp_start  = temp2+start_byte;
@@ -191,7 +191,7 @@ mmap:               generic_file_mmap
 
 int kcdfsd_add_cdda_request(struct file * file, struct page *page)
 {
-  PRINT("david: Do nothing, later will return call daemon.c:kcdfsd_add_request() with CDDA_REQUEST=%d\n",CDDA_REQUEST);
+  PRINT("david: return call daemon.c:kcdfsd_add_request() w/ CDDA_REQUEST\n");
   return kcdfsd_add_request(file->f_dentry, page, CDDA_REQUEST);
 }
 
@@ -218,7 +218,7 @@ int cdfs_read_cd(struct super_block *s, struct cdrom_read_audio *cdda, char* buf
 	sector=(*cdda).addr.lba;
 	cgc.sense = &buffer2;
 	cgc.buffer = buff;
-	cgc.buflen=CD_FRAMESIZE_RAW;
+	cgc.buflen=CD_FRAMESIZE_RAW_Q;
 	cgc.data_direction=CGC_DATA_READ;
 	cgc.quiet = 1;
 	cgc.stat = 1;
@@ -234,11 +234,17 @@ int cdfs_read_cd(struct super_block *s, struct cdrom_read_audio *cdda, char* buf
 	cgc.cmd[8]=1;	//Transfer length in blocks LSB
 	//cgc.cmd[9]=1<<4;
 	cgc.cmd[9]=0xf8;
-	//cgc.cmd[10]=2;
+	#ifdef CONFIG_USE_CDDA_SUBCHANNEL
+	cgc.cmd[10]=2;
+	#else
 	cgc.cmd[10]=0;
+	#endif
 	cgc.cmd[11]=0;
 	//printk("Reading sector %2d ST\n",sector);
 	ret=cdfs_ioctl( s, CDROM_SEND_PACKET, (unsigned int)&cgc );
+	//printk("buff[2352]=0x%x buff[2353]=0x%x\n",buff[2352],buff[2353]);
+	//buff[2352]|=0x10;
+	//printk("buff[2352]=0x%x buff[2353]=0x%x\n",buff[2352],buff[2353]);
 	//printk("Reading sector %2d SP and ret=%d asc=%d ascq=%d\n",sector,ret,(cgc.sense)->asc,(cgc.sense)->ascq);
 	return ret;
 }

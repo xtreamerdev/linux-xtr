@@ -75,6 +75,8 @@ void venus_hw0_irqdispatch(int irq, struct pt_regs *regs)
 	}
 #endif
 
+// This will have problem if some device uses IP7, too.
+// Try to fix it.
 #ifdef CONFIG_REALTEK_USE_EXTERNAL_TIMER_INTERRUPT
 	if (regs->cp0_status & STATUSF_IP7) {
 		/* if we open the oprofile function... */

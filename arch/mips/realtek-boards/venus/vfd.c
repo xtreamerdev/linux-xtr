@@ -11,6 +11,7 @@
 enum VFD_MODULE_TYPE {
 	FUTABA_11BT236,
 	FUTABA_11MT141,
+	HNV_11MS41T,              //for eln_1262
 };
 
 static const char __sleepdata letterTable_11bt236[][14] = {
@@ -41,6 +42,20 @@ static const char __sleepdata letterTable_11mt141[][14] = {
                {0, 1, 0, 0, 0, 0, 1, 1, 0, 0, 0, 1, 1, 1 },  // 9
 };
 
+static const char __sleepdata letterTable_11ms41t[][14] = {
+	//	For HNV-11MS41T
+/*     d  c  e  g  f  b  a */
+	{1, 1, 1, 0, 1, 1, 1 },  // 0
+	{0, 1, 0, 0, 0, 1, 0 },  // 1
+	{1, 0, 1, 1, 0, 1, 1 },  // 2
+	{1, 1, 0, 1, 0, 1, 1 },  // 3
+	{0, 1, 0, 1, 1, 1, 0 },  // 4
+	{1, 1, 0, 1, 1, 0, 1 },  // 5
+	{1, 1, 1, 1, 1, 0, 0 },  // 6
+	{0, 1, 0, 0, 0, 1, 1 },  // 7
+	{1, 1, 1, 1, 1, 1, 1 },  // 8
+	{0, 1, 0, 1, 1, 1, 1 },  // 9
+};
 static void __sleep writeAtOnce(unsigned int valueVFDO, unsigned int valueWRCTL) {
 	int i;
 	*(MIS_VFD_VFDO) = valueVFDO;
@@ -60,7 +75,6 @@ static void __sleep nodeOn(unsigned char digit, unsigned char segment, char *dis
 	displayRAM[addr] = displayRAM[addr] | ((0x1) << ((segment-1) % 8));
 }
 
-#if 0
 static void __sleep nodeOff(unsigned char digit, unsigned char segment, char *displayRAM) {
 	unsigned char addr = (digit-1) * 3 + (segment-1) / 8;
 
@@ -69,8 +83,6 @@ static void __sleep nodeOff(unsigned char digit, unsigned char segment, char *di
 
 	displayRAM[addr] = displayRAM[addr] & (~((0x1) << ((segment-1) % 8)));
 }
-#endif
-
 static void __sleep showSymbol(char *displayRAM, int offset, char num, enum VFD_MODULE_TYPE type) {
 	int i;
 
@@ -103,6 +115,14 @@ static void __sleep showSymbol(char *displayRAM, int offset, char num, enum VFD_
 					displayRAM[offset+1] &= (~(0x1 << (i-8)));
 			}
 			break;
+		case HNV_11MS41T:
+			for(i=1;i<=7;i++) {
+				if(letterTable_11ms41t[(int)num][7 - i] == 1)
+					displayRAM[offset] |= (0x1 << (i-1));
+				else
+					displayRAM[offset] &= (~(0x1 << (i-1)));
+			}
+			break;
 		default:
 			break;
 	}
@@ -116,6 +136,8 @@ int __sleep update_vfd(int hour, int minute, int second) {
 
 	if(platform_info.board_id == realtek_mk_board)
 		vfdType = FUTABA_11MT141;
+	else if (platform_info.board_id == C02_1262_Neptune_avhdd_board)
+		vfdType = HNV_11MS41T;
 	else
 		vfdType = FUTABA_11BT236;
 
@@ -131,17 +153,50 @@ int __sleep update_vfd(int hour, int minute, int second) {
 			nodeOn(6, 15, displayRAM);
 //			nodeOn(4, 15, displayRAM);
 			break;
+		case HNV_11MS41T:
+			//nodeOn(9, 8, displayRAM);
+			second = second >> 1;
+			//if(fgIsOn == 0)
+			if((second%2) == 0)
+			{
+				nodeOn(10, 8, displayRAM);
+				//fgIsOn = 1;
+			} else
+			{
+				nodeOff(10, 8, displayRAM);
+				//unsigned char addr = (10-1) * 3 + (8-1) / 8;
+
+				//fgIsOn = 0;
+				//if(displayRAM[addr] == (displayRAM[addr] & (~((0x1) << ((8-1) % 8)))))
+				//	break;
+				//displayRAM[addr] = displayRAM[addr] & (~((0x1) << ((8-1) % 8)));
+			}
+			break;
 		default:
 			break;
 	}
 
 	// for hour
+	if(vfdType == HNV_11MS41T)
+	{
+		showSymbol(displayRAM, 28, hour/10, vfdType);
+		showSymbol(displayRAM, 27, hour%10, vfdType);
+	} else
+	{
 	showSymbol(displayRAM, 18, hour/10, vfdType);
 	showSymbol(displayRAM, 15, hour%10, vfdType);
+	}
 
 	// for minute
+	if(vfdType == HNV_11MS41T)
+	{
+		showSymbol(displayRAM, 31, minute/10, vfdType);
+		showSymbol(displayRAM, 30, minute%10, vfdType);
+	} else
+	{
 	showSymbol(displayRAM, 12, minute/10, vfdType);
 	showSymbol(displayRAM, 9, minute%10, vfdType);
+	}
 
 	// for second
 	if (vfdType == FUTABA_11BT236)
@@ -184,5 +239,21 @@ int __sleep update_vfd(int hour, int minute, int second) {
 	wrctl_value = 0x00001330;
 	writeAtOnce(vfdo_value, wrctl_value);
 
+	if (vfdType == HNV_11MS41T) //set POWER led
+	{
+		vfdo_value = (0x41) | (0x1500); //1d -> 15
+		wrctl_value = 0x1130;
+		writeAtOnce(vfdo_value, wrctl_value);
+	}
 	return 0;
+}
+int __sleep update_power_led(void)
+{
+	unsigned int vfdo_value, wrctl_value;
+	
+        vfdo_value = (0x41) | (0xfc00);
+
+        wrctl_value = 0x1130;
+        writeAtOnce(vfdo_value, wrctl_value);
+	return 0;	
 }

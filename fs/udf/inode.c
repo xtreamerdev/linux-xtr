@@ -1345,6 +1345,10 @@ static void udf_fill_inode(struct inode *inode, struct buffer_head *bh)
 			inode->i_mode = S_IFLNK|S_IRWXUGO;
 			break;
 		}
+		case ICBTAG_FILE_TYPE_MAIN:
+		case ICBTAG_FILE_TYPE_MIRROR:
+		case ICBTAG_FILE_TYPE_BITMAP:
+			break;
 		default:
 		{
 			printk(KERN_ERR "udf: udf_fill_inode(ino %ld) failed unknown file type=%d\n",
@@ -2185,32 +2189,35 @@ void udf_ab_cut(struct inode *inode, struct file *filp, int from, int count)
 	int i=0, o=0, c;
 	int8_t etype;
 	unsigned int lba;
-	
+	long long size_temp = inode->i_size;	
 //lock_kernel();
 	invalidate_inode_pages(inode->i_mapping);
 	do {
 		bh = NULL;
 		etype = inode_bmap(inode, from, &bloc, &extoffset, &eloc, &elen, &offset, &bh);
 //		printk(KERN_DEBUG "block %d: extoffset:%d eloc:%d elen:%d\n", from+i, extoffset, eloc.logicalBlockNum, elen);
-		o = offset >> inode->i_sb->s_blocksize_bits;
-		c = (elen - offset) >> inode->i_sb->s_blocksize_bits;
+		o = offset + (inode->i_sb->s_blocksize-1) >> inode->i_sb->s_blocksize_bits;
+		c = (elen - offset + (inode->i_sb->s_blocksize-1)) >> inode->i_sb->s_blocksize_bits;
 		udf_delete_aext(inode, bloc, extoffset-16, eloc, elen, bh);
+		size_temp -= elen;
 		lba = eloc.logicalBlockNum;
 		if(c + i > count) {
 			c = count-i;
 			eloc.logicalBlockNum += (o+c);
 			udf_insert_aext(inode, bloc, extoffset-16, eloc, (elen - ((o+count-i) << inode->i_sb->s_blocksize_bits)) | (etype<<30), bh);
+			size_temp += (elen - ((o+count-i) << inode->i_sb->s_blocksize_bits)) | (etype<<30);
 		}
 		if(o) {
 			eloc.logicalBlockNum = lba;
 			udf_insert_aext(inode, bloc, extoffset-16, eloc, o << inode->i_sb->s_blocksize_bits | (etype<<30), bh);
+			size_temp += o << inode->i_sb->s_blocksize_bits | (etype<<30);
 		}
 		i+=c;
 		eloc.logicalBlockNum = lba;
 		udf_free_blocks(inode->i_sb, inode, eloc, o, c);
 	} while(i < count);
 	down(&filp->f_dentry->d_inode->i_sem);
-	inode->i_size -= count << inode->i_sb->s_blocksize_bits;
+	inode->i_size = size_temp;
 //	filp->f_pos -= count << inode->i_sb->s_blocksize_bits;
 	invalidate_inode_pages(inode->i_mapping);
 	up(&filp->f_dentry->d_inode->i_sem);

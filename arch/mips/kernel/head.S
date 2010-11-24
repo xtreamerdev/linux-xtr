@@ -154,6 +154,16 @@ NESTED(kernel_entry, 16, sp)			# kernel entry point
 	LONG_S		zero, (t0)
 	bne		t0, t1, 1b
 
+#ifdef CONFIG_REALTEK_SBSS_IN_DMEM
+	PTR_LA		t0, __dmem_start	# clear dmem
+	LONG_S		zero, (t0)
+	PTR_LA		t1, __dmem_stop - LONGSIZE
+2:
+	PTR_ADDIU	t0, LONGSIZE
+	LONG_S		zero, (t0)
+	bne		t0, t1, 2b
+#endif
+
 	LONG_S		a0, fw_arg0		# firmware arguments
 	LONG_S		a1, fw_arg1
 	LONG_S		a2, fw_arg2
@@ -199,8 +209,22 @@ NESTED(smp_bootstrap, 16, sp)
 
 	__FINIT
 
+#ifdef CONFIG_REALTEK_SBSS_IN_DMEM
+	.section	".sbss", "aw"
+	.globl	kernelsp
+kernelsp:
+	.rept	NR_CPUS
+	.dword	0
+	.endr
+	.globl	pgd_current
+pgd_current:
+	.rept	NR_CPUS
+	.dword	0
+	.endr
+#else
 	.comm	kernelsp,    NR_CPUS * 8, 8
 	.comm	pgd_current, NR_CPUS * 8, 8
+#endif
 
 	.comm	fw_arg0, SZREG, SZREG		# firmware arguments
 	.comm	fw_arg1, SZREG, SZREG

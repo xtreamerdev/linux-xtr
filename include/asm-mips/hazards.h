@@ -74,7 +74,8 @@
 #define irq_disable_hazard
 	_ehb
 
-#elif defined(CONFIG_CPU_R10000) || defined(CONFIG_CPU_RM9000)
+#elif defined(CONFIG_CPU_R10000) || defined(CONFIG_CPU_RM9000) || \
+      defined(CONFIG_CPU_SB1)
 
 /*
  * R10000 rocks - all hazards handled in hardware, so this becomes a nobrainer.
@@ -148,15 +149,13 @@ __asm__(
 #endif
 
 /*
- * mtc0->mfc0 hazard
- * The 24K has a 2 cycle mtc0/mfc0 execution hazard.
- * It is a MIPS32R2 processor so ehb will clear the hazard.
+ * Interrupt enable/disable hazards
+ * Some processors have hazards when modifying
+ * the status register to change the interrupt state
  */
 
 #ifdef CONFIG_CPU_MIPSR2
-/*
- * Use a macro for ehb unless explicit support for MIPSR2 is enabled
- */
+
 __asm__(
 	"	.macro\tirq_enable_hazard			\n\t"
 	"	_ehb						\n\t"
@@ -164,21 +163,26 @@ __asm__(
 	"							\n\t"
 	"	.macro\tirq_disable_hazard			\n\t"
 	"	_ehb						\n\t"
+	"	.endm						\n\t"
+	"							\n\t"
+	"	.macro\tback_to_back_c0_hazard			\n\t"
+	"	_ehb						\n\t"
 	"	.endm");
 
 #define irq_enable_hazard()						\
 	__asm__ __volatile__(						\
-	"_ehb\t\t\t\t# irq_enable_hazard")
+	"irq_enable_hazard")
 
 #define irq_disable_hazard()						\
 	__asm__ __volatile__(						\
-	"_ehb\t\t\t\t# irq_disable_hazard")
+	"irq_disable_hazard")
 
 #define back_to_back_c0_hazard()					\
 	__asm__ __volatile__(						\
-	"_ehb\t\t\t\t# back_to_back_c0_hazard")
+	"back_to_back_c0_hazard")
 
-#elif defined(CONFIG_CPU_R10000) || defined(CONFIG_CPU_RM9000)
+#elif defined(CONFIG_CPU_R10000) || defined(CONFIG_CPU_RM9000) || \
+      defined(CONFIG_CPU_SB1)
 
 /*
  * R10000 rocks - all hazards handled in hardware, so this becomes a nobrainer.
@@ -218,7 +222,7 @@ __asm__(
 #define irq_enable_hazard()	do { } while (0)
 #define irq_disable_hazard()						\
 	__asm__ __volatile__(						\
-	"_ssnop; _ssnop; _ssnop;\t\t# irq_disable_hazard")
+	"irq_disable_hazard")
 
 #define back_to_back_c0_hazard()					\
 	__asm__ __volatile__(						\
@@ -226,6 +230,32 @@ __asm__(
 	"	nop; nop; nop				\n"		\
 	"	.set reorder				\n")
 
+#endif
+
+#ifdef CONFIG_CPU_MIPSR2
+/*
+ * gcc has a tradition of misscompiling the previous construct using the
+ * address of a label as argument to inline assembler.  Gas otoh has the
+ * annoying difference between la and dla which are only usable for 32-bit
+ * rsp. 64-bit code, so can't be used without conditional compilation.
+ * The alterantive is switching the assembler to 64-bit code which happens
+ * to work right even for 32-bit code ...
+ */
+#define instruction_hazard()						\
+do {									\
+	unsigned long tmp;						\
+									\
+	__asm__ __volatile__(						\
+	"	.set	mips64r2				\n"	\
+	"	dla	%0, 1f					\n"	\
+	"	jr.hb	%0					\n"	\
+	"	.set	mips0					\n"	\
+	"1:							\n"	\
+	: "=r" (tmp));							\
+} while (0)
+
+#else
+#define instruction_hazard() do { } while (0)
 #endif
 
 #endif /* __ASSEMBLY__ */

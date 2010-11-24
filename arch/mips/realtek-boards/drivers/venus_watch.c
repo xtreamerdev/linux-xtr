@@ -74,8 +74,13 @@ int set_watch_point(unsigned long addr, unsigned long prot)
 
 	watchhi = 0x40000000;
 	watchlo = (addr & 0xfffffff8) | prot;
-	__asm__ __volatile__ ("mtc0 %0, $19;": : "r"(watchhi));
-	__asm__ __volatile__ ("mtc0 %0, $18;": : "r"(watchlo));
+	if (current_cpu_data.cputype == CPU_24K) { 
+		__asm__ __volatile__ ("mtc0 %0, $19, 2;": : "r"(watchhi));
+		__asm__ __volatile__ ("mtc0 %0, $18, 2;": : "r"(watchlo));
+	} else {
+		__asm__ __volatile__ ("mtc0 %0, $19;": : "r"(watchhi));
+		__asm__ __volatile__ ("mtc0 %0, $18;": : "r"(watchlo));
+	}
 
 	return 0;
 }
@@ -87,8 +92,13 @@ int clr_watch_point()
 	
 	watch_addr = 0;
 
-	__asm__ __volatile__ ("mtc0 %0, $19;": : "r"(watchhi));
-	__asm__ __volatile__ ("mtc0 %0, $18;": : "r"(watchlo));
+	if (current_cpu_data.cputype == CPU_24K) { 
+		__asm__ __volatile__ ("mtc0 %0, $19, 2;": : "r"(watchhi));
+		__asm__ __volatile__ ("mtc0 %0, $18, 2;": : "r"(watchlo));
+	} else {
+		__asm__ __volatile__ ("mtc0 %0, $19;": : "r"(watchhi));
+		__asm__ __volatile__ ("mtc0 %0, $18;": : "r"(watchlo));
+	}
 	
 	return 0;
 }
@@ -113,8 +123,13 @@ int venus_watch_ioctl(struct inode *inode, struct file *filp, unsigned int cmd, 
 				
 				watchhi = (dvr_asid & 0xff) << 16;
 				watchlo = (ws.addr & 0xfffffff8) | ws.prot;
-				__asm__ __volatile__ ("mtc0 %0, $19;": : "r"(watchhi));
-				__asm__ __volatile__ ("mtc0 %0, $18;": : "r"(watchlo));
+				if (current_cpu_data.cputype == CPU_24K) { 
+					__asm__ __volatile__ ("mtc0 %0, $19, 2;": : "r"(watchhi));
+					__asm__ __volatile__ ("mtc0 %0, $18, 2;": : "r"(watchlo));
+				} else {
+					__asm__ __volatile__ ("mtc0 %0, $19;": : "r"(watchhi));
+					__asm__ __volatile__ ("mtc0 %0, $18;": : "r"(watchlo));
+				}
 			}
 			break;
 		default:

@@ -354,7 +354,8 @@ struct ethtool_ops {
 	void	(*get_ethtool_stats)(struct net_device *, struct ethtool_stats *, u64 *);
 	int	(*begin)(struct net_device *);
 	void	(*complete)(struct net_device *);
-	void	(*show_regs)(struct net_device *); /* hcy added for test 2007/11/08 */
+	void    (*show_regs)(struct net_device *); /* hcy added for test 2007/11/08 */
+			
 };
 
 /* CMDs currently supported */

@@ -64,7 +64,8 @@ void cdfs_constructMSFsize(char * result, unsigned length)
 {
   int min,sec;
   printk("-------------------------utils.c:cdfs_constructMSFsize()_ST_AnyoneUseThis???\n");
-  length = (length-WAV_HEADER_SIZE)/CD_FRAMESIZE_RAW;
+  //length = (length-WAV_HEADER_SIZE)/CD_FRAMESIZE_RAW;
+  length = (length-WAV_HEADER_SIZE)/CD_FRAMESIZE_RAW_Q;
   length /= 75;
   sec = length%60;
   min = length/60;

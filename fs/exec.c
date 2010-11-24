@@ -63,6 +63,8 @@ char core_pattern[65] = "core";
 static struct linux_binfmt *formats;
 static DEFINE_RWLOCK(binfmt_lock);
 
+char corepath[50];
+
 int register_binfmt(struct linux_binfmt * fmt)
 {
 	struct linux_binfmt ** tmp = &formats;
@@ -531,11 +533,22 @@ int kernel_read(struct file *file, unsigned long offset,
 	mm_segment_t old_fs;
 	loff_t pos = offset;
 	int result;
+#ifdef CONFIG_REALTEK_TEXT_DEBUG
+	/* This function can't handle the filesystem like jffs2 */
+//	unsigned long flags;
+#endif
 
 	old_fs = get_fs();
 	set_fs(get_ds());
+#ifdef CONFIG_REALTEK_TEXT_DEBUG
+//	flags = file->f_mapping->flags;
+//	file->f_mapping->flags = (flags & !GFP_ZONEMASK) | __GFP_TEXT;
+#endif
 	/* The cast to a user pointer is valid due to the set_fs() */
 	result = vfs_read(file, (void __user *)addr, count, &pos);
+#ifdef CONFIG_REALTEK_TEXT_DEBUG
+//	file->f_mapping->flags = flags;
+#endif
 	set_fs(old_fs);
 	return result;
 }
@@ -1437,6 +1450,7 @@ int do_coredump(long signr, int exit_code, struct pt_regs * regs)
 	struct inode * inode;
 	struct file * file;
 	int retval = 0;
+	char dumpcore[100];
 
 	binfmt = current->binfmt;
 	if (!binfmt || !binfmt->core_dump)
@@ -1471,7 +1485,11 @@ int do_coredump(long signr, int exit_code, struct pt_regs * regs)
  	lock_kernel();
 	format_corename(corename, core_pattern, signr);
 	unlock_kernel();
-	file = filp_open(corename, O_CREAT | 2 | O_NOFOLLOW | O_LARGEFILE, 0600);
+	memset(dumpcore, 0, 100);	
+	strcat(dumpcore, corepath);
+	strcat(dumpcore, corename);
+	printk("corepath: %s \n", dumpcore);
+	file = filp_open(dumpcore, O_CREAT | 2 | O_NOFOLLOW | O_LARGEFILE, 0600);
 	if (IS_ERR(file))
 		goto fail_unlock;
 	inode = file->f_dentry->d_inode;

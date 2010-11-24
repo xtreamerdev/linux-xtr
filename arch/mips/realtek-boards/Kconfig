@@ -27,8 +27,15 @@ config REALTEK_SYSTEM_OWNS_SECOND_UART
 	help
 	  Sometimes the second UART is used by Audio or Video CPU.
 
+config REALTEK_SYSTEM_UART_BE_READONLY
+	bool "If SYSTEM uart be readonly"
+	depends on REALTEK_VENUS
+	default n
+	help
+	  If this is chosen, uart doesn't accept any char inputed by user.
+
 config REALTEK_USE_EXTERNAL_TIMER_INTERRUPT
-	bool "If yes, use external timer interrupt; if no, use internal timer interrupt."
+	bool "Y to use external timer interrupt; n to use internal timer interrupt."
 	depends on REALTEK_VENUS
 	default y
 	help
@@ -43,15 +50,11 @@ config REALTEK_COMPACT
 
 source "arch/mips/realtek-boards/drivers/Kconfig"
 
-config REALTEK_OPEN_CU0
-	bool "Allow userland application access cpu register directly."
-	depends on REALTEK_VENUS
-	default n
-	help
-	  Use this function allow application to use some kernel function.
+menu "Realtek performance facility"
+        depends on REALTEK_VENUS
 
 choice
-        prompt "Shadow Registers"
+        prompt "Shadow Registers or DMEM"
         default REALTEK_USE_SHADOW_REGISTERS
 
 config REALTEK_NO_SHADOW_REGISTERS
@@ -72,7 +75,28 @@ config REALTEK_USE_FAST_INTERRUPT
 	help
 	  Use fast interrupt to handle USB interrupt.
 
+config REALTEK_USE_DMEM
+	bool "DMEM"
+	depends on REALTEK_VENUS
+	help
+	  Use DMEM as stack to accelerate the interrupt handling.
+
 endchoice
+
+config REALTEK_DISABLE_BOOT_HOTPLUG
+	bool "Disable boot-up hotplug."
+	depends on REALTEK_VENUS
+	default y
+	help
+	  This will disable the hotplug during linux kernel boot-up. During 
+	  linux kernel boot-up, the root filesystem has not been mounted yet.
+
+config REALTEK_OPEN_CU0
+	bool "Allow userland application access cpu register directly."
+	depends on REALTEK_VENUS
+	default n
+	help
+	  Use this function allow application to use some kernel function.
 
 config REALTEK_MAP_IO_REGISTERS
 	bool "Map io registers into user space."
@@ -80,27 +104,6 @@ config REALTEK_MAP_IO_REGISTERS
 	default n
 	help
 	  Map io registers.
-
-config REALTEK_WATCHPOINT
-	bool "Use watch point to debug."
-	depends on REALTEK_VENUS
-	default n
-	help
-	  Use watch point.
-
-config REALTEK_WATCHDOG
-        bool "Use watchdog mechanism."
-        depends on REALTEK_VENUS
-        default n
-        help
-          System will automatically be rebooted if watchdog doesn't respond in 1.5 seconds.
-
-config REALTEK_SCHED_LOG
-	bool "Log the scheduling sequence."
-	depends on REALTEK_VENUS
-	default n
-	help
-	  Log the scheduling sequence.
 
 config REALTEK_RECLAIM_BOOT_MEM
 	bool "Reclaim the memory used by boot loader."
@@ -116,6 +119,13 @@ config REALTEK_ADVANCED_RECLAIM
 	help
 	  Buddy system will allocate memory more efficiently.
 
+config REALTEK_SCHED_LOG
+	bool "Log the scheduling sequence."
+	depends on REALTEK_VENUS
+	default n
+	help
+	  Log the scheduling sequence.
+
 config REALTEK_DETECT_OCCUPY
 	bool "Detect if one thread occupy CPU too long."
 	depends on REALTEK_VENUS
@@ -123,12 +133,69 @@ config REALTEK_DETECT_OCCUPY
 	help
 	  Detect if one thread occupy CPU too long.
 
-config REALTEK_MONITOR_PAGE
-	bool "Monitor all the ide actions operated on specified page."
+config REALTEK_SBSS_IN_DMEM
+	bool "Put the .sbss section in DMEM."
 	depends on REALTEK_VENUS
 	default n
 	help
-	  Monitor all the ide actions operated on specified page.
+	  Put the .sbss section in DMEM.
+
+config REALTEK_SBSS_IN_DMEM_ADVANCED
+	bool "Put more data in the .sbss section."
+	depends on REALTEK_SBSS_IN_DMEM
+	default n
+	help
+	  Put more data in .sbss section. This option should be opened only in Mars.
+endmenu
+
+menu "Realtek debug facility"
+        depends on REALTEK_VENUS
+
+choice
+	prompt "SB2 software debug mode"
+	default REALTEK_MEMORY_DEBUG_MODE
+
+config REALTEK_NO_SB2_DEBUG
+	bool "No Use"
+	depends on REALTEK_VENUS
+	help
+	  Don't use any shadow registers.
+
+config REALTEK_TEXT_DEBUG
+	bool "Protect all text segments from being trashed."
+	depends on REALTEK_VENUS
+	help
+	  Protect all text segments from being trashed.
+	  This will use software debug register 7.
+
+config REALTEK_TEXT_SIZE
+	int "Define the TEXT zone size."
+	depends on REALTEK_VENUS && REALTEK_TEXT_DEBUG
+	default 2
+	help
+	  This will define the zone size (in MBs) of TEXT.
+
+config REALTEK_MEMORY_DEBUG_MODE
+	bool "Enable the memory debug mode."
+	depends on REALTEK_VENUS 
+	help
+	  This mode is used to detect if there is memory trash.
+	  This will use software debug register 5, 6, 7.
+	  The memory should be 128MB or above.
+
+config REALTEK_USER_DEBUG
+	bool "User can define the protected sections by themself."
+	depends on REALTEK_VENUS
+	help
+	  User can define the protected sections by themself.
+endchoice
+
+config REALTEK_WATCHPOINT
+	bool "Use watchpoint to debug."
+	depends on REALTEK_VENUS
+	default n
+	help
+	  Use hardware watchpoint.
 
 config REALTEK_ENABLE_ADE
 	bool "Kernel won't handle automatically unaligned access."
@@ -137,17 +204,122 @@ config REALTEK_ENABLE_ADE
 	help
 	  Kernel won't handle automatically unaligned access.
 
-config REALTEK_SB2_DBG
-        bool "Enable the debug facility of SB2."
-        depends on REALTEK_VENUS
-        default n
-        help
-          Enable the debug facility of SB2.
-
 config REALTEK_SHOW_STACK
         bool "Enable the debug facility of showing task stack."
         depends on REALTEK_VENUS
         default n
         help
           Enable the debug facility of showing task stack.
+
+config REALTEK_SHOW_MALLOC_SIZE
+        bool "Enable the debug facility of showing the size of malloc()."
+        depends on REALTEK_VENUS
+        default n
+        help
+          Enable the debug facility of showing the size of malloc().
+
+config REALTEK_MONITOR_PAGE
+	bool "Monitor all the ide actions operated on specified page."
+	depends on REALTEK_VENUS
+	default n
+	help
+	  Monitor all the ide actions operated on specified page.
+
+config REALTEK_PROC_RAMFS
+	bool "List all the regular files in ramfs."
+	depends on REALTEK_VENUS
+	default n
+	help
+	  List all the regular files in ramfs.
+
+config REALTEK_PLI_DEBUG_MODE
+	bool "Dynamically map the memory allocated by PLI."
+	depends on REALTEK_VENUS
+	default n
+	help
+	  Dynamically map the memory allocated by PLI.
+endmenu
+
+config REALTEK_WATCHDOG
+        bool "Use watchdog mechanism."
+        depends on REALTEK_VENUS
+        default n
+        help
+          System will automatically be rebooted if watchdog doesn't respond in 1.5 seconds.
+
+config REALTEK_RESERVE_DVR
+        bool "Reserve the DVR zone after boot-up."
+        depends on REALTEK_VENUS
+        default n
+        help
+          Reserve the DVR zone after boot-up.
+
+config REALTEK_SUPPORT_BOOT_AV
+        bool "Reverse the DVR zone before enter power-off state."
+        depends on REALTEK_VENUS && REALTEK_RESERVE_DVR
+        default n
+        help
+          Reserve the DVR zone before enter power-off state. This function can support the boot-up audio & video.
+
+config REALTEK_PCI_SUPPORT
+        bool "Enable the PCI controller."
+        depends on REALTEK_VENUS
+        default n        
+        select HW_HAS_PCI
+	select REALTEK_PCI_2883
+        help
+          Enable the PCI functionarity of VENUS.	
+          
+config REALTEK_PCI_2883
+	bool         
+ 
+choice
+        prompt "Support the HDMI function for 1071"
+        default REALTEK_HDMI_NONE
+
+config REALTEK_HDMI_NONE
+        bool "Not support."
+        depends on REALTEK_VENUS
+        help
+          Not support.
+
+config REALTEK_HDMI_NXP
+	bool "Support NXP chip."
+	depends on REALTEK_VENUS
+	help
+	  Support NXP chip.
+
+config REALTEK_HDMI_CAT
+	bool "Support CAT chip."
+	depends on REALTEK_VENUS
+	help
+	  Support CAT chip.
+
+endchoice
+
+config REALTEK_PREVENT_DC_ALIAS
+	bool "Prevent the virtual alias problem."
+	depends on REALTEK_VENUS
+	default n
+	help
+	  If we need to prevent the virtual alias problem.
+
+config REALTEK_MARS_256MB
+	bool "Support the 256MB in Mars."
+	depends on REALTEK_VENUS
+	default n
+	help
+	  In order to support the 256MB in Mars.
+
+config REALTEK_SECURE_BOOT_PARTITION
+	bool "Secure partition support"
+	select REALTEK_MCP
+	default n
+	help
+	  Kernel will check if the hash value of some partition is matched
+	  with the value passed from bootloader before running init. If the
+	  partition is modified, kernel will know that.
+
+	  The format of the parameter will be like this:
+	  partition_hash="[partition num]:[partition size]:[hash value]
 

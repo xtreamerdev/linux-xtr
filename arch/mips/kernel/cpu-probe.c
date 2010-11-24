@@ -498,7 +498,11 @@ static inline void decode_configs(struct cpuinfo_mips *c)
 {
 	/* MIPS32 or MIPS64 compliant CPU.  */
 	c->options = MIPS_CPU_4KEX | MIPS_CPU_COUNTER | MIPS_CPU_DIVEC |
+#ifdef CONFIG_REALTEK_SBSS_IN_DMEM
+		     MIPS_CPU_MCHECK;
+#else
 		     MIPS_CPU_LLSC | MIPS_CPU_MCHECK;
+#endif
 
 	c->scache.flags = MIPS_CACHE_NOT_PRESENT;
 

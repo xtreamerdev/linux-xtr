@@ -196,8 +196,7 @@ cifs_reconnect(struct TCP_Server_Info *server)
 		}
 		if(rc) {
 			cFYI(1,("reconnect error %d",rc));
-			msleep(500);
-//js			msleep(3000);
+			msleep(3000);
 		} else {
 			atomic_inc(&tcpSesReconnectCount);
 			spin_lock(&GlobalMid_Lock);

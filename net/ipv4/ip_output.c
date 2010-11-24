@@ -301,7 +301,11 @@ int ip_queue_xmit(struct sk_buff *skb, int ipfragok)
 	struct ip_options *opt = inet->opt;
 	struct rtable *rt;
 	struct iphdr *iph;
+#ifdef NET_DEBUG
 
+	        printk("ip_queue_xmit \n");
+#endif
+		
 	/* Skip all of this if the packet is already routed,
 	 * f.e. by something like SCTP.
 	 */

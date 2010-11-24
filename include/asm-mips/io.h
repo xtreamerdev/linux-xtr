@@ -90,8 +90,11 @@
 # define mem_ioswabq(x)		cpu_to_le32(x)
 
 #endif
-
+#if 0 //cylee 20080310: extend IO space to all range
 #define IO_SPACE_LIMIT 0xffff
+#else
+#define IO_SPACE_LIMIT 0xffffffff
+#endif
 
 /*
  * On MIPS I/O ports are memory mapped, so we access them using normal

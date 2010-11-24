@@ -1464,6 +1464,20 @@ end:
 	return retval;
 }
 
+long wait_hotplug(struct task_struct *p)
+{
+	write_lock_irq(&tasklist_lock);
+	if (p->flags & PF_EXITING) {
+		// hotplug is being terminated...
+		write_unlock_irq(&tasklist_lock);
+		return 0;
+	}
+	p->real_parent = current;
+	reparent_thread(p, p->parent, 0);
+	write_unlock_irq(&tasklist_lock);
+	return do_wait(p->pid, WEXITED, NULL, NULL, NULL);
+}
+
 asmlinkage long sys_waitid(int which, pid_t pid,
 			   struct siginfo __user *infop, int options,
 			   struct rusage __user *ru)

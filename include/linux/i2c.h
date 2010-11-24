@@ -385,13 +385,14 @@ static inline int i2c_check_functionality(struct i2c_adapter *adap, u32 func)
 struct i2c_msg {
 	__u16 addr;	/* slave address			*/
  	__u16 flags;		
-#define I2C_M_TEN	0x10	/* we have a ten bit chip address	*/
-#define I2C_LOW_SPEED 0x20    /* I2C Low Speed - 33KHz for GemStar */
-#define I2C_M_RD	0x01
-#define I2C_M_NOSTART	0x4000
+#define I2C_M_TEN	        0x10	/* we have a ten bit chip address	*/
+#define I2C_LOW_SPEED       0x20    /* I2C Low Speed - 33KHz for GemStar */
+#define I2C_M_RD	        0x01
+#define I2C_M_NOSTART	    0x4000
 #define I2C_M_REV_DIR_ADDR	0x2000
 #define I2C_M_IGNORE_NAK	0x1000
 #define I2C_M_NO_RD_ACK		0x0800
+#define I2C_M_NO_ABORT_MSG	0x0400
  	__u16 len;		/* msg length				*/
  	__u8 *buf;		/* pointer to msg data			*/
 };
@@ -514,6 +515,7 @@ union i2c_smbus_data {
 #define I2C_FUNCS	0x0705	/* Get the adapter functionality */
 #define I2C_RDWR	0x0707	/* Combined R/W transfer (one stop only)*/
 #define I2C_PEC		0x0708	/* != 0 for SMBus PEC                   */
+#define I2C_SET_SPEED           0x791
 #if 0
 #define I2C_ACK_TEST	0x0710	/* See if a slave is at a specific address */
 #endif

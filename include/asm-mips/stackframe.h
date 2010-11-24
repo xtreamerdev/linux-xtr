@@ -120,6 +120,98 @@
 		.endm
 #endif
 
+#ifdef CONFIG_REALTEK_USE_DMEM
+		.macro	DMEM_SAVE_SOME
+		.set	push
+		.set	noat
+		.set	reorder
+		mfc0	k0, CP0_STATUS
+#ifdef CONFIG_REALTEK_OPEN_CU0
+		and	k0, 0x10	/* check um bit */ 
+		.set	noreorder
+		beqz	k0, 8f 
+#else
+		sll	k0, 3		/* extract cu0 bit */
+		.set	noreorder
+		bltz	k0, 8f
+#endif
+		move	k1, sp
+		.set	reorder
+		/* Called from user mode, new stack. */
+		get_saved_sp
+8:		move	k0, sp
+		PTR_SUBU sp, k1, PT_SIZE
+		li	k1, 0x1fff
+		and	sp, k1
+		lui	k1, 0x9000
+		or	sp, k1
+		/* From now on, sp points to DMEM */
+		LONG_S	k0, PT_R29(sp)
+		LONG_S	$3, PT_R3(sp)
+		LONG_S	$0, PT_R0(sp)
+		mfc0	v1, CP0_STATUS
+		LONG_S	$2, PT_R2(sp)
+		LONG_S	v1, PT_STATUS(sp)
+		LONG_S	$4, PT_R4(sp)
+		mfc0	v1, CP0_CAUSE
+		LONG_S	$5, PT_R5(sp)
+		LONG_S	v1, PT_CAUSE(sp)
+		LONG_S	$6, PT_R6(sp)
+		MFC0	v1, CP0_EPC
+		LONG_S	$7, PT_R7(sp)
+#ifdef CONFIG_MIPS64
+		LONG_S	$8, PT_R8(sp)
+		LONG_S	$9, PT_R9(sp)
+#endif
+		LONG_S	v1, PT_EPC(sp)
+		LONG_S	$25, PT_R25(sp)
+		LONG_S	$28, PT_R28(sp)
+		LONG_S	$31, PT_R31(sp)
+		get_saved_sp
+		ori	$28, k1, _THREAD_MASK
+		xori	$28, _THREAD_MASK
+		.set	pop
+		.endm
+
+		.macro	DMEM_SAVE_ON_DEMAND
+		.set	push
+		.set	noat
+		.set	reorder
+		li	k0, 0xffff
+		and	k0, sp		# k0 is the offset
+		add	k1, k0, $28	# k1 is the address in ddr
+
+		/* flush the cache */
+		li	t0, PT_SIZE
+		move	t1, k1
+1:
+		cache	0x11, 0(t1)	# invalidate cache
+		subu	t0, 16
+		addu	t1, 16
+		bnez	t0, 1b
+		nop
+		cache	0x15, 0(t1)	# writeback & invalidate cache
+		sync
+
+		/* move data from dmem to ddr */
+		li	k0, PT_SIZE
+		li	t0, 0xb8003000
+		li	t1, 0x7
+		sw	sp, 0(t0)	# dmem addr
+		sw	k1, 0x20(t0)	# ddr addr
+		sw	k0, 0x40(t0)	# dma size
+		sw	t1, 0x60(t0)
+2:
+		lw	t1, 0x80(t0)
+		and	t1, 0x4
+		beqz	t1, 2b
+
+		/* restore the sp value */
+		move	sp, k1
+		.set    pop
+		.endm
+#endif
+
 #ifdef CONFIG_REALTEK_USE_SHADOW_REGISTERS
                 .macro  MY_SAVE_ON_DEMAND
                 .set    push
@@ -439,10 +531,24 @@ normal_restore:
 		LONG_S	$25, PT_R25(sp)
 		LONG_S	$28, PT_R28(sp)
 		LONG_S	$31, PT_R31(sp)
+#ifdef CONFIG_REALTEK_USE_DMEM
+		get_saved_sp
+		ori	$28, k1, _THREAD_MASK
+#else
 		ori	$28, sp, _THREAD_MASK
+#endif
 		xori	$28, _THREAD_MASK
 		.set	pop
 		.endm
+
+#ifdef CONFIG_REALTEK_USE_DMEM
+		.macro	DMEM_SAVE_ALL
+		DMEM_SAVE_SOME
+		SAVE_AT
+		SAVE_TEMP
+		SAVE_STATIC
+		.endm
+#endif
 
 		.macro	SAVE_ALL
 		SAVE_SOME

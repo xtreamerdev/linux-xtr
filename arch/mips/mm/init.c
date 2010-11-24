@@ -35,8 +35,15 @@
 #include <asm/pgalloc.h>
 #include <asm/tlb.h>
 
-#define DMA_ZONE_SIZE_32 16 
-#define DVR_ZONE_SIZE_64 32 
+#define DMA_ZONE_SIZE_A		24
+#define DMA_ZONE_SIZE_B		32
+#ifdef CONFIG_REALTEK_MARS_256MB
+#define DMA_ZONE_SIZE_C		16
+
+#define MARS_ZONE_LIMIT		128
+#else
+#define DMA_ZONE_SIZE_C		128
+#endif
 
 DEFINE_PER_CPU(struct mmu_gather, mmu_gathers);
 
@@ -167,12 +174,37 @@ void __init paging_init(void)
 	}
 #else 
 //	zones_size[ZONE_DMA] = low;
-	if (low > 32*256) {
-		zones_size[ZONE_DMA] = low-(DVR_ZONE_SIZE_64*256);
-		zones_size[ZONE_DVR] = DVR_ZONE_SIZE_64*256;
+#ifdef CONFIG_REALTEK_MARS_256MB
+	if (low > 128*256) {
+		zones_size[ZONE_DMA] = DMA_ZONE_SIZE_C*256;
+		zones_size[ZONE_NORMAL] = low-MARS_ZONE_LIMIT*256;
+#ifdef CONFIG_REALTEK_TEXT_DEBUG
+		zones_size[ZONE_DVR] = low-MARS_ZONE_LIMIT*256-(DMA_ZONE_SIZE_C*256)-CONFIG_REALTEK_TEXT_SIZE*256;
+		zones_size[ZONE_TEXT] = CONFIG_REALTEK_TEXT_SIZE*256;
+#else
+		zones_size[ZONE_DVR] = low-MARS_ZONE_LIMIT*256-(DMA_ZONE_SIZE_C*256);
+#endif
+#else
+	if (low > 128*256) {
+		zones_size[ZONE_DMA] = DMA_ZONE_SIZE_C*256;
+#ifdef CONFIG_REALTEK_TEXT_DEBUG
+		zones_size[ZONE_DVR] = low-(DMA_ZONE_SIZE_C*256)-CONFIG_REALTEK_TEXT_SIZE*256;
+		zones_size[ZONE_TEXT] = CONFIG_REALTEK_TEXT_SIZE*256;
+#else
+		zones_size[ZONE_DVR] = low-(DMA_ZONE_SIZE_C*256);
+#endif
+#endif
+	} else if (low > 64*256) {
+		zones_size[ZONE_DMA] = DMA_ZONE_SIZE_B*256;
+#ifdef CONFIG_REALTEK_TEXT_DEBUG
+		zones_size[ZONE_DVR] = low-(DMA_ZONE_SIZE_B*256)-CONFIG_REALTEK_TEXT_SIZE*256;
+		zones_size[ZONE_TEXT] = CONFIG_REALTEK_TEXT_SIZE*256;
+#else
+		zones_size[ZONE_DVR] = low-(DMA_ZONE_SIZE_B*256);
+#endif
 	} else {
-		zones_size[ZONE_DMA] = DMA_ZONE_SIZE_32*256;
-		zones_size[ZONE_DVR] = low-(DMA_ZONE_SIZE_32*256);
+		zones_size[ZONE_DMA] = DMA_ZONE_SIZE_A*256;
+		zones_size[ZONE_DVR] = low-(DMA_ZONE_SIZE_A*256);
 	}
 #endif
 #ifdef CONFIG_HIGHMEM

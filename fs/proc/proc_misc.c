@@ -44,12 +44,17 @@
 #include <linux/jiffies.h>
 #include <linux/sysrq.h>
 #include <linux/vmalloc.h>
+#include <linux/writeback.h>
 #include <asm/uaccess.h>
 #include <asm/pgtable.h>
 #include <asm/io.h>
 #include <asm/tlb.h>
 #include <asm/div64.h>
 #include "internal.h"
+
+#ifdef CONFIG_REALTEK_PROC_RAMFS
+#define RAMFS_MAGIC     0x858458f6
+#endif
 
 #define LOAD_INT(x) ((x) >> FSHIFT)
 #define LOAD_FRAC(x) LOAD_INT(((x) & (FIXED_1-1)) * 100)
@@ -204,6 +209,63 @@ static int meminfo_read_proc(char *page, char **start, off_t off,
 	return proc_calc_metrics(page, start, off, count, eof, len);
 #undef K
 }
+
+#ifdef CONFIG_REALTEK_PROC_RAMFS
+/*
+ * ramfs_info - generates /proc/ramfsinfo
+ */
+
+static int show_file_info(struct super_block *sb, char *page, int *file_count, int *size_total)
+{
+	struct inode *inode;
+	int len = 0;
+
+	spin_lock(&inode_lock);
+	list_for_each_entry(inode, &sb->s_inodes, i_sb_list) {
+		if (S_ISREG(inode->i_mode)) {
+			*file_count = *file_count + 1;
+			*size_total = *size_total + inode->i_mapping->nrpages;
+			if (inode->i_mapping->nrpages > 10) {
+				struct dentry *dentry;
+	
+				dentry = list_entry(inode->i_dentry.next, struct dentry, d_alias);
+				len += sprintf(page+len, "inode %2d %2d name: %20s size: %d KB\n", 
+						MAJOR(inode->i_sb->s_dev), MINOR(inode->i_sb->s_dev), 
+						dentry->d_iname, inode->i_mapping->nrpages*4);
+			}
+		}
+	}
+	spin_unlock(&inode_lock);
+
+	return len;
+}
+
+static int ramfsinfo_read_proc(char *page, char **start, off_t off,
+		int count, int *eof, void *data)
+{
+	struct super_block *sb;
+	int len = 0;
+	int file_count = 0, size_total = 0;
+
+	spin_lock(&sb_lock);
+restart:
+	list_for_each_entry(sb, &super_blocks, s_list) {
+		sb->s_count++;
+		spin_unlock(&sb_lock);
+		down_read(&sb->s_umount);
+		if ((sb->s_root) && (sb->s_magic == RAMFS_MAGIC))
+			len += show_file_info(sb, page+len, &file_count, &size_total);
+		up_read(&sb->s_umount);
+		spin_lock(&sb_lock);
+		if (__put_super_and_need_restart(sb))
+			goto restart;
+	}
+	spin_unlock(&sb_lock);
+	len += sprintf(page+len, "file count: %d\nsize total: %d KB\n", file_count, size_total*4);
+
+	return proc_calc_metrics(page, start, off, count, eof, len);
+}
+#endif
 
 extern struct seq_operations fragmentation_op;
 static int fragmentation_open(struct inode *inode, struct file *file)
@@ -559,6 +621,9 @@ void __init proc_misc_init(void)
 		{"loadavg",     loadavg_read_proc},
 		{"uptime",	uptime_read_proc},
 		{"meminfo",	meminfo_read_proc},
+#ifdef CONFIG_REALTEK_PROC_RAMFS
+		{"ramfsinfo",	ramfsinfo_read_proc},
+#endif
 		{"version",	version_read_proc},
 #ifdef CONFIG_PROC_HARDWARE
 		{"hardware",	hardware_read_proc},

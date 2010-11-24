@@ -41,6 +41,9 @@
 #include <prom.h>
 
 unsigned long cpu_khz;
+#ifdef CONFIG_REALTEK_SCHED_LOG
+unsigned int time_scale;
+#endif
 
 #ifdef CONFIG_REALTEK_USE_EXTERNAL_TIMER_INTERRUPT
 #define ALLINTS (IE_SW0 | IE_SW1 | IE_IRQ0 | IE_IRQ1 | IE_IRQ2 | IE_IRQ3 | IE_IRQ4)
@@ -88,7 +91,7 @@ void mips_timer_interrupt(struct pt_regs *regs)
 static unsigned int __init estimate_cpu_frequency(void)
 {
 	unsigned int count;
-	unsigned int sec1, sec2;
+//	unsigned int sec1, sec2;
 	int cause;
 //	unsigned int flags;
 
@@ -97,6 +100,26 @@ static unsigned int __init estimate_cpu_frequency(void)
 	/* Start counter exactly on falling edge of update flag */
 //	while (CMOS_READ(RTC_REG_A) & RTC_UIP);
 //	while (!(CMOS_READ(RTC_REG_A) & RTC_UIP));
+#if 1
+	cause = read_c0_cause();
+	write_c0_cause(cause & ~0x08000000);
+	outl(0x0, VENUS_MIS_TC2CR);
+	outl(0x80000000, VENUS_MIS_TC2CR);
+	/* Start r4k counter. */
+	write_c0_count(0);
+
+// Count the ticks in 1/100 second.
+	while(inl(VENUS_MIS_TC2CVR)<27000000/HZ) ;
+	count = read_c0_count();
+	count = count*2*100;
+	count += 5000;
+	count -= count % 10000;
+
+	write_c0_cause(cause);
+	outl(0x0, VENUS_MIS_TC2CR);
+#else
+	unsigned int sec1, sec2;
+	
 	cause = read_c0_cause();
 	write_c0_cause(cause & ~0x08000000);
 	sec1 = inl(VENUS_MIS_RTCSEC);
@@ -119,6 +142,7 @@ static unsigned int __init estimate_cpu_frequency(void)
 	count *= 4;
 	count += 5000;
 	count -= count % 10000;
+#endif
 //	if ((prid != (PRID_COMP_MIPS | PRID_IMP_20KC)) &&
 //	    (prid != (PRID_COMP_MIPS | PRID_IMP_25KF)))
 //		count *= 2;
@@ -131,7 +155,7 @@ static unsigned int __init estimate_cpu_frequency(void)
 #endif
 
 //unsigned long __init mips_rtc_get_time(void)
-unsigned long mips_rtc_get_time(void)
+unsigned long venus_rtc_get_time(void)
 {
 	unsigned int day, hour, min, sec;
 	
@@ -144,7 +168,7 @@ unsigned long mips_rtc_get_time(void)
 	return ((((day+10957)*24 + hour)*60 + min)*60 + sec);
 }
 
-int mips_rtc_set_time(unsigned long second)
+int venus_rtc_set_time(unsigned long second)
 {
 	unsigned int day, hour, min, sec, hms;
 	
@@ -158,11 +182,11 @@ int mips_rtc_set_time(unsigned long second)
 
 	if(day < 0) {
 		printk("RTC set time error! The time cannot be set to the date before year 2000.\n");
-		return 0;
+		return -EINVAL;
 	}
 	if(day > 16383) {
 		printk("RTC day field overflow. I am so surprised that the Realtek product has been used for over 40 years. Is it still workable? Hahaha...\n");
-		return 0;
+		return -EINVAL;
 	}
 
 	outl(sec, VENUS_MIS_RTCSEC);
@@ -172,6 +196,62 @@ int mips_rtc_set_time(unsigned long second)
 	outl((day&0x3f00)>>8, VENUS_MIS_RTCDATE2);
 
 	return 0;
+}
+
+unsigned long venus_rtc_alarm_get_time(void)
+{
+	unsigned int day, hour, min;
+	
+	if(inl(VENUS_MIS_RTCCR) && 0x10) {
+		min = inl(VENUS_MIS_ALMMIN);
+		hour = inl(VENUS_MIS_ALMHR);
+		day = inl(VENUS_MIS_ALMDATE1);
+		day += inl(VENUS_MIS_ALMDATE2)<<8;
+	} else {
+		min = 0;
+		hour = 0;
+		day = 0;
+	}
+
+	return (((day+10957)*24 + hour)*60 + min)*60;
+}
+
+int venus_rtc_alarm_set_time(unsigned long second)
+{
+	unsigned int day, hour, min, hms;
+	
+	day = second / (24*60*60);
+	hms = second % (24*60*60);
+	hour = hms / 3600;
+	min = (hms % 3600) / 60;
+
+	day -= 10957;
+
+	if(day < 0) {
+		printk("RTC alarm set time error! The time cannot be set to the date before year 2000.\n");
+		return -EINVAL;
+	}
+	if(day > 16383) {
+		printk("RTC alarm day field overflow.\n");
+		return -EINVAL;
+	}
+
+	outl(min, VENUS_MIS_ALMMIN);
+	outl(hour, VENUS_MIS_ALMHR);
+	outl(day&0x00ff, VENUS_MIS_ALMDATE1);
+	outl((day&0x3f00)>>8, VENUS_MIS_ALMDATE2);
+	outl(0x10, VENUS_MIS_RTCCR);
+	outl(0x3E00, VENUS_MIS_ISR);
+
+	return 0;
+}
+
+void venus_rtc_set_default_funcs(void)
+{
+	rtc_get_time = venus_rtc_get_time;
+        rtc_set_time = venus_rtc_set_time;
+        rtc_alarm_get_time = venus_rtc_alarm_get_time;
+	rtc_alarm_set_time = venus_rtc_alarm_set_time;
 }
 
 #ifdef CONFIG_REALTEK_USE_EXTERNAL_TIMER_INTERRUPT
@@ -219,6 +299,9 @@ void __init mips_time_init(void)
 	       (est_freq%1000000)*100/1000000);
 
         cpu_khz = est_freq / 1000;
+#ifdef CONFIG_REALTEK_SCHED_LOG
+	time_scale = cpu_khz/190000;
+#endif
 
 	local_irq_restore(flags);
 
@@ -230,8 +313,8 @@ void __init mips_time_init(void)
 #else
 	mips_hpt_frequency = est_freq/2;
 #endif
-	rtc_get_time = mips_rtc_get_time;
-        rtc_set_time = mips_rtc_set_time;
+	rtc_set_default_funcs = venus_rtc_set_default_funcs;
+	rtc_set_default_funcs();
 }
 
 void __init mips_timer_setup(struct irqaction *irq)

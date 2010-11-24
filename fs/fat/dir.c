@@ -439,6 +439,7 @@ static int fat_readdirx(struct inode *inode, struct file *filp, void *dirent,
 	int chi, chl, i, i2, j, last, last_u, dotoffset = 0;
 	loff_t cpos;
 	int ret = 0;
+	unsigned long start_cluster;
 
 	lock_kernel();
 
@@ -467,6 +468,13 @@ GetNew:
 	long_slots = 0;
 	if (fat_get_entry(inode, &cpos, &bh, &de) == -1)
 		goto EODir;
+	if ((inode->i_ino != MSDOS_ROOT_INO) && (filp->f_pos == 0)) {
+		/* The first entry should be . */
+		if (de->name[0] != '.') {
+			printk("[FAT INFO] corrupted directory...\n");
+			goto FillFailed;
+		}
+	}
 	/* Check for long filename entry */
 	if (isvfat) {
 		if (de->name[0] == DELETED_FLAG)
@@ -654,6 +662,23 @@ ParseLong:
 			fill_name = NULL;
 			fill_len = 0;
 		}
+	}
+	/* filter out the unreasonable entries */ 
+	if ((de->lcase & 0xe7) != 0) {
+//		printk("unreasonable entry...\n");
+		goto RecEnd;
+	}
+//	if (de->attr & ATTR_HIDDEN) {
+//		printk("hidden [%s] \n", fill_name);
+//		goto RecEnd;
+//	}
+	/* get the start cluster of this entry */
+	start_cluster = le16_to_cpu(de->start);
+	if (sbi->fat_bits == 32)
+		start_cluster |= (le16_to_cpu(de->starthi) << 16);
+	if (sbi->max_cluster <= start_cluster) {
+//		printk("start cluster is out of range...\n");
+		goto RecEnd;
 	}
 	if (filldir(dirent, fill_name, fill_len, *furrfu, inum,
 		    (de->attr & ATTR_DIR) ? DT_DIR : DT_REG) < 0)

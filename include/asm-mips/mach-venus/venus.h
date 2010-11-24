@@ -38,6 +38,25 @@
 
 #define VENUS_IO_PORT_BASE	0x18010000
 
+
+
+/*
+ * Venus Ethernet Phy registers.
+ */
+#define VENUS_ETN_MII_AR			0x605C
+
+/*
+ * Venus TV encoder registers.
+ */
+#define VENUS_TVE_VIDEO_DAC_CTRL0		0x80D0
+#define VENUS_TVE_VIDEO_DAC_CTRL1		0x80D4
+
+/*
+ * Venus TV decoder registers.
+ */
+#define VENUS_TVD_VIDEO_ADC_DIGITAL_CTRL0	0x90FC
+
+
 /*
  * Venus SB2 registers.
  */
@@ -50,6 +69,41 @@
 #define VENUS_SB2_CHIP_INFO			0xA204
 
 
+/*
+ * Software Debug registers
+ */
+#define SB2_DGB_START_REG0		0xA458
+#define SB2_DGB_START_REG1		0xA45c
+#define SB2_DGB_START_REG2		0xA460
+#define SB2_DGB_START_REG3		0xA464
+#define SB2_DGB_START_REG4		0xA468
+#define SB2_DGB_START_REG5		0xA46c
+#define SB2_DGB_START_REG6		0xA470
+#define SB2_DGB_START_REG7		0xA474
+
+#define SB2_DGB_END_REG0		0xA478
+#define SB2_DGB_END_REG1		0xA47c
+#define SB2_DGB_END_REG2		0xA480
+#define SB2_DGB_END_REG3		0xA484
+#define SB2_DGB_END_REG4		0xA488
+#define SB2_DGB_END_REG5		0xA48c
+#define SB2_DGB_END_REG6		0xA490
+#define SB2_DGB_END_REG7		0xA494
+
+#define SB2_DGB_CTRL_REG0		0xA498
+#define SB2_DGB_CTRL_REG1		0xA49c
+#define SB2_DGB_CTRL_REG2		0xA4a0
+#define SB2_DGB_CTRL_REG3		0xA4a4
+#define SB2_DGB_CTRL_REG4		0xA4a8
+#define SB2_DGB_CTRL_REG5		0xA4ac
+#define SB2_DGB_CTRL_REG6		0xA4b0
+#define SB2_DGB_CTRL_REG7		0xA4b4
+
+#define SB2_DGB_ADDR_ADUIO		0xA4b8
+#define SB2_DGB_ADDR_VIDEO		0xA4bc
+#define SB2_DGB_ADDR_SYSTEM		0xA4c0
+
+#define SB2_DGB_INT			0xA4e0
 
 /*
  * Venus MISC registers.
@@ -259,5 +313,13 @@
 #define VENUS_INT_RTC		(VENUS_INT_BASE+5)
 
 
+/* Define for Venus Ethernet MAC. */
+#define VENUS_ETH_BASE		0xb8016000
+#define VENUS_ETH_CR		((volatile unsigned char *)(VENUS_ETH_BASE + 0x3B))
+#define VENUS_ETH_IMR		((volatile unsigned short *)(VENUS_ETH_BASE + 0x3C))
+#define VENUS_ETH_RCR		((volatile unsigned int *)(VENUS_ETH_BASE + 0x44))
+#define VENUS_ETH_MIIAR		((volatile unsigned int *)(VENUS_ETH_BASE + 0x5C))
+
+#define VENUS_0_SYS_DEBUG	0xB80000AC
 
 #endif /* !(_MACH_VENUS_H) */

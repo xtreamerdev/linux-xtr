@@ -150,6 +150,32 @@ asmlinkage void do_IRQ(int irq, struct pt_regs * regs)
 					irq, retval);
 			} else {
 				printk("irq %d: nobody cared\n", irq);
+				// add by cfyeh : debug for irq 2: nobody cared +++
+				if(irq == 2) {
+					u32 regs;
+					int i;
+					int regs_num;
+
+					#define HCS_N_PORTS(p)          (((p)>>0)&0xf)  /* bits 3:0, ports on HC */
+					regs_num= 21 + HCS_N_PORTS(inl(VENUS_USB_EHCI_HCSPARAMS)); 
+
+					udev = to_usb_device (dev);
+					actconfig = udev->actconfig;
+
+					printk("\n EHCI regs\n");
+					regs=VENUS_USB_EHCI_USBBASE;
+					for(i=0;i<regs_num;i++)
+					{
+						if((i%4)==0)
+							printk("0x%.8x : ", regs);
+						printk("%.8x ", inl(regs));
+						regs+=4;
+						if((i%4)==3)
+							printk("\n");		
+					}
+					printk("\n");		
+				}
+				// add by cfyeh : debug for irq 2: nobody cared ---
 			}
 		}
 

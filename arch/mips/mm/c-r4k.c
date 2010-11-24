@@ -529,6 +529,7 @@ static void r4k_flush_icache_range(unsigned long __user start,
 	args.end = end;
 
 	on_each_cpu(local_r4k_flush_icache_range, &args, 1, 1);
+	instruction_hazard();
 }
 
 /*
@@ -694,7 +695,13 @@ static void r4k_dma_cache_inv(unsigned long addr, unsigned long size)
 		a = addr & ~(dc_lsize - 1);
 		end = (addr + size - 1) & ~(dc_lsize - 1);
 		while (1) {
+#ifdef CONFIG_REALTEK_PREVENT_DC_ALIAS
+			/* EJ: we should use invalidate_dcache_line, but... */
+//			invalidate_dcache_line(a);
 			flush_dcache_line(a);	/* Hit_Writeback_Inv_D */
+#else
+			flush_dcache_line(a);	/* Hit_Writeback_Inv_D */
+#endif
 			if (a == end)
 				break;
 			a += dc_lsize;
@@ -985,7 +992,9 @@ static void __init probe_pcache(void)
 		              c->dcache.linesz;
 		c->dcache.waybit = ffs(dcache_size/c->dcache.ways) - 1;
 
+		/* EJ: disable prefetch to ensure the correction of DMA
 		c->options |= MIPS_CPU_PREFETCH;
+		*/
 		break;
 	}
 

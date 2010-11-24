@@ -84,24 +84,46 @@ static const uch bl_order[BL_CODES]
  * Local data. These are initialized only once.
  */
 
+#ifdef CONFIG_REALTEK_SBSS_IN_DMEM
+static ct_data static_ltree[L_CODES+2] __attribute__ ((section(".sbss")));
+#else
 static ct_data static_ltree[L_CODES+2];
+#endif
 /* The static literal tree. Since the bit lengths are imposed, there is no
  * need for the L_CODES extra codes used during heap construction. However
  * The codes 286 and 287 are needed to build a canonical tree (see zlib_tr_init
  * below).
  */
 
+#ifdef CONFIG_REALTEK_SBSS_IN_DMEM_ADVANCED
+static ct_data static_dtree[D_CODES] __attribute__ ((section(".sbss")));
+#else
 static ct_data static_dtree[D_CODES];
+#endif
 /* The static distance tree. (Actually a trivial tree since all codes use
  * 5 bits.)
  */
 
+#ifdef CONFIG_REALTEK_SBSS_IN_DMEM
+static uch dist_code[512] __attribute__ ((section(".sbss")));
+#else
 static uch dist_code[512];
+#endif
 /* distance codes. The first 256 values correspond to the distances
  * 3 .. 258, the last 256 values correspond to the top 8 bits of
  * the 15 bit distances.
  */
 
+#ifdef CONFIG_REALTEK_SBSS_IN_DMEM_ADVANCED
+static uch length_code[MAX_MATCH-MIN_MATCH+1] __attribute__ ((section(".sbss")));
+/* length code for each normalized match length (0 == MIN_MATCH) */
+
+static int base_length[LENGTH_CODES] __attribute__ ((section(".sbss")));
+/* First normalized length for each code (0 = MIN_MATCH) */
+
+static int base_dist[D_CODES] __attribute__ ((section(".sbss")));
+/* First normalized distance for each code (0 = distance of 1) */
+#else
 static uch length_code[MAX_MATCH-MIN_MATCH+1];
 /* length code for each normalized match length (0 == MIN_MATCH) */
 
@@ -110,6 +132,7 @@ static int base_length[LENGTH_CODES];
 
 static int base_dist[D_CODES];
 /* First normalized distance for each code (0 = distance of 1) */
+#endif
 
 struct static_tree_desc_s {
     const ct_data *static_tree;  /* static tree or NULL */

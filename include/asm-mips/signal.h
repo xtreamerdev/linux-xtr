@@ -64,7 +64,7 @@ typedef unsigned long old_sigset_t;		/* at least 32 bits */
 #define SIGUSR_RTC_ALARM	50	/* The system is woken up by RTC alarm when in power saving mode. This will be sent to RootApp */
 
 /* These should not be considered constants from userland.  */
-#define SIGRTMIN	51
+#define SIGRTMIN	32
 #define SIGRTMAX	_NSIG
 
 /*

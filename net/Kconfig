@@ -20,6 +20,11 @@ config NET
 	  recommended to read the NET-HOWTO, available from
 	  <http://www.tldp.org/docs.html#howto>.
 
+config NET_DEBUG
+	bool "Networking debug message"
+	---help---
+	  hcy built this at 06/16/2009 
+
 menu "Networking options"
 	depends on NET
 

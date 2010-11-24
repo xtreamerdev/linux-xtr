@@ -9,22 +9,24 @@
  * Please read the COPYING file for all license details.
  */
 
-#include <linux/spinlock.h>
+//#include <linux/spinlock.h>
 
 #include <asm/rtc.h>
 #include <asm/time.h>
 
-static DEFINE_SPINLOCK(mips_rtc_lock);
+// Replace spinlock with mutex because I2C transation will take a longer time to complete.
+//static DEFINE_SPINLOCK(mips_rtc_lock);
+static DECLARE_MUTEX(mips_rtc_lock);
 
 unsigned int get_rtc_time(struct rtc_time *time)
 {
 	unsigned long nowtime;
 
-	spin_lock(&mips_rtc_lock);
+	down(&mips_rtc_lock);
 	nowtime = rtc_get_time();
 	to_tm(nowtime, time);
 	time->tm_year -= 1900;
-	spin_unlock(&mips_rtc_lock);
+	up(&mips_rtc_lock);
 
 	return RTC_24H;
 }
@@ -34,12 +36,12 @@ int set_rtc_time(struct rtc_time *time)
 	unsigned long nowtime;
 	int ret;
 
-	spin_lock(&mips_rtc_lock);
+	down(&mips_rtc_lock);
 	nowtime = mktime(time->tm_year+1900, time->tm_mon+1,
 			time->tm_mday, time->tm_hour, time->tm_min,
 			time->tm_sec);
 	ret = rtc_set_time(nowtime);
-	spin_unlock(&mips_rtc_lock);
+	up(&mips_rtc_lock);
 
 	return ret;
 }
@@ -50,6 +52,34 @@ unsigned int get_rtc_ss(void)
 
 	get_rtc_time(&h);
 	return h.tm_sec;
+}
+
+unsigned int get_rtc_alarm_time(struct rtc_time *time)
+{
+	unsigned long nowtime;
+
+	down(&mips_rtc_lock);
+	nowtime = rtc_alarm_get_time();
+	to_tm(nowtime, time);
+	time->tm_year -= 1900;
+	up(&mips_rtc_lock);
+
+	return RTC_24H;
+}
+
+int set_rtc_alarm_time(struct rtc_time *time)
+{
+	unsigned long nowtime;
+	int ret;
+
+	down(&mips_rtc_lock);
+	nowtime = mktime(time->tm_year+1900, time->tm_mon+1,
+			time->tm_mday, time->tm_hour, time->tm_min,
+			time->tm_sec);
+	ret = rtc_alarm_set_time(nowtime);
+	up(&mips_rtc_lock);
+
+	return ret;
 }
 
 int get_rtc_pll(struct rtc_pll_info *pll)

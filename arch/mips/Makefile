@@ -436,6 +436,7 @@ core-$(CONFIG_REALTEK_BOARDS_GEN)       += arch/mips/realtek-boards/generic/
 # Realtek Venus board
 #
 core-$(CONFIG_REALTEK_VENUS)    += arch/mips/realtek-boards/venus/
+core-$(CONFIG_REALTEK_VENUS)    += arch/mips/realtek-boards/mars/
 core-$(CONFIG_REALTEK_VENUS)    += arch/mips/realtek-boards/drivers/
 cflags-$(CONFIG_REALTEK_VENUS)  += -Iinclude/asm-mips/mach-venus
 load-$(CONFIG_REALTEK_VENUS)    += 0xffffffff80100000

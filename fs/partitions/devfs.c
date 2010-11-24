@@ -119,6 +119,9 @@ void devfs_add_disk(struct gendisk *disk)
 
 void devfs_remove_disk(struct gendisk *disk)
 {
+	char devfs_name[64];
+	int len = 0, i = 0, dir_num = 0;
+
 	if (disk->minors != 1) {
 		devfs_remove("discs/disc%d", disk->number);
 		devfs_remove("%s", disk->disk_name);
@@ -130,6 +133,18 @@ void devfs_remove_disk(struct gendisk *disk)
 		dealloc_unique_number(&cdrom_numspace, disk->number);
 	}
 	devfs_remove(disk->devfs_name);
+
+	len = strlen(disk->devfs_name);
+	sprintf(devfs_name, "%s", disk->devfs_name);
+	for(i = 0; i < len; i++){
+		if(devfs_name[i] == '/')
+			dir_num++;
+		if(dir_num == 2) {
+			devfs_name[i] = 0;
+			devfs_remove(devfs_name);
+			break;
+		}
+	}
 }
 
 

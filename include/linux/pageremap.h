@@ -6,12 +6,6 @@
 
 #ifdef __KERNEL__
 
-struct page_va_list {
-        struct mm_struct *mm;
-        unsigned long addr;
-        struct list_head list;
-};
-
 struct remap_operations {
         struct page * (*remap_alloc_page)(unsigned int);
         int (*remap_delete_page)(struct page *);

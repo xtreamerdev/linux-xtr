@@ -7,7 +7,6 @@
 
 #define USB_MAJOR			180
 
-
 #ifdef __KERNEL__
 
 #include <linux/config.h>

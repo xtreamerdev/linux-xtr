@@ -88,7 +88,11 @@ static inline void set_running_timer(tvec_base_t *base,
 }
 
 /* Fake initialization */
+#ifdef CONFIG_REALTEK_SBSS_IN_DMEM
+static DEFINE_PER_CPU(tvec_base_t, tvec_bases) __attribute__ ((section(".sbss"))) = { SPIN_LOCK_UNLOCKED };
+#else
 static DEFINE_PER_CPU(tvec_base_t, tvec_bases) = { SPIN_LOCK_UNLOCKED };
+#endif
 
 static void check_timer_failed(struct timer_list *timer)
 {

@@ -6,7 +6,9 @@
 #define PRDEBUGM
 */
 
-
+/*
+#define USE_CDDA_SUBCHANNEL
+*/
 
 #ifndef CONFIG_CDFS_VERSION
 #define CONFIG_CDFS_VERSION "2.6.12"
@@ -23,6 +25,12 @@
 #define FSNAME_proc   "proc"
 #define FSNAME_mem    "mem"
 #define VERSION CONFIG_CDFS_VERSION
+
+#ifdef CONFIG_USE_CDDA_SUBCHANNEL
+#define CD_FRAMESIZE_RAW_Q   2368 /* CD_FRAMESIZE_RAW(2352) + Q-channel data(16) */
+#else
+#define CD_FRAMESIZE_RAW_Q   2352 /* CD_FRAMESIZE_RAW(2352) */
+#endif
 
 #ifdef PRDEBUGM
 # define PRINTM(format, arg...) printk(FSNAME_mem "->" format, ## arg)

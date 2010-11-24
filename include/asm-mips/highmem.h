@@ -48,6 +48,11 @@ extern pte_t *pkmap_page_table;
 extern void * kmap_high(struct page *page);
 extern void kunmap_high(struct page *page);
 
+#ifdef CONFIG_REALTEK_PREVENT_DC_ALIAS
+extern void *kmap_coherent(struct page *page, unsigned long *flags);
+extern void kunmap_coherent(unsigned long *flags);
+#endif
+
 /*
  * CONFIG_LIMITED_DMA is for systems with DMA limitations such as Momentum's
  * Jaguar ATX.  This option exploits the highmem code in the kernel so is

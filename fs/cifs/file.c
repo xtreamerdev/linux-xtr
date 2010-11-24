@@ -30,7 +30,9 @@
 #include <linux/smp_lock.h>
 #include <linux/writeback.h>
 #include <linux/delay.h>
+#include <linux/mpage.h>
 #include <asm/div64.h>
+#include <asm/r4kcache.h>
 #include "cifsfs.h"
 #include "cifspdu.h"
 #include "cifsglob.h"
@@ -178,6 +180,14 @@ int cifs_open(struct inode *inode, struct file *file)
 
 	cifs_sb = CIFS_SB(inode->i_sb);
 	pTcon = cifs_sb->tcon;
+/*
+       cWARN(1, (__FILE__ " Jason R: %d \n" ,__LINE__));    
+
+	if (file->f_flags & O_DIRECT)
+            printk(KERN_WARNING " " __FILE__ ": %d cifs_open direct io uid = %ld \n\n \n" ,__LINE__,file->f_uid);
+      else
+            printk(KERN_WARNING " " __FILE__ ": %d cifs_open buffer io uid = %ld \n\n \n" ,__LINE__,file->f_uid);
+*/
 
 	if (file->f_flags & O_CREAT) {
 		/* search inode for this file and fill in file->private_data */
@@ -474,7 +484,12 @@ int cifs_close(struct inode *inode, struct file *file)
 	struct cifsTconInfo *pTcon;
 	struct cifsFileInfo *pSMBFile =
 		(struct cifsFileInfo *)file->private_data;
-
+/*
+	if (file->f_flags & O_DIRECT)
+            printk(KERN_WARNING " " __FILE__ ": %d cifs_close direct io uid = %ld \n\n \n" ,__LINE__,file->f_uid);
+      else
+            printk(KERN_WARNING " " __FILE__ ": %d cifs_close buffer io uid = %ld \n\n \n" ,__LINE__,file->f_uid);
+*/
 	xid = GetXid();
 
 	cifs_sb = CIFS_SB(inode->i_sb);
@@ -529,6 +544,7 @@ int cifs_close(struct inode *inode, struct file *file)
 	} else
 		rc = -EBADF;
 
+       read_lock(&GlobalSMBSeslock);
 	if (list_empty(&(CIFS_I(inode)->openFileList))) {
 		cFYI(1, ("closing last open instance for inode %p", inode));
 		/* if the file is not open we do not know if we can cache info
@@ -536,6 +552,7 @@ int cifs_close(struct inode *inode, struct file *file)
 		CIFS_I(inode)->clientCanCacheRead = FALSE;
 		CIFS_I(inode)->clientCanCacheAll  = FALSE;
 	}
+       read_unlock(&GlobalSMBSeslock);
 	if ((rc ==0) && CIFS_I(inode)->write_behind_rc)
 		rc = CIFS_I(inode)->write_behind_rc;
 	FreeXid(xid);
@@ -883,18 +900,19 @@ ssize_t cifs_user_write(struct file *file, const char __user *write_data,
 	cifs_stats_bytes_written(pTcon, total_written);
 
 	/* since the write may have blocked check these pointers again */
-	if (file->f_dentry) {
-		if (file->f_dentry->d_inode) {
-			struct inode *inode = file->f_dentry->d_inode;
-			inode->i_ctime = inode->i_mtime =
-				current_fs_time(inode->i_sb);
-			if (total_written > 0) {
-				if (*poffset > file->f_dentry->d_inode->i_size)
-					i_size_write(file->f_dentry->d_inode,
+	if ((file->f_dentry) && (file->f_dentry->d_inode)) {
+		struct inode *inode = file->f_dentry->d_inode;
+/* Do not update local mtime - server will set its actual value on write               
+ *             inode->i_ctime = inode->i_mtime = 
+ *                     current_fs_time(inode->i_sb);*/
+		if (total_written > 0) {
+			spin_lock(&inode->i_lock);
+			if (*poffset > file->f_dentry->d_inode->i_size)
+				i_size_write(file->f_dentry->d_inode,
 					*poffset);
-			}
-			mark_inode_dirty_sync(file->f_dentry->d_inode);
+			spin_unlock(&inode->i_lock);
 		}
+		mark_inode_dirty_sync(file->f_dentry->d_inode);            
 	}
 	FreeXid(xid);
 	return total_written;
@@ -987,6 +1005,7 @@ static ssize_t cifs_write(struct file *file, const char *write_data,
 				iov[1].iov_base = (char *)write_data +
 						  total_written;
 				iov[1].iov_len = len;
+                
 				rc = CIFSSMBWrite2(xid, pTcon,
 						open_file->netfid, len,
 						*poffset, &bytes_written,
@@ -1016,17 +1035,17 @@ static ssize_t cifs_write(struct file *file, const char *write_data,
 	cifs_stats_bytes_written(pTcon, total_written);
 
 	/* since the write may have blocked check these pointers again */
-	if (file->f_dentry) {
-		if (file->f_dentry->d_inode) {
-			file->f_dentry->d_inode->i_ctime = 
-			file->f_dentry->d_inode->i_mtime = CURRENT_TIME;
-			if (total_written > 0) {
-				if (*poffset > file->f_dentry->d_inode->i_size)
-					i_size_write(file->f_dentry->d_inode, 
-						     *poffset);
-			}
-			mark_inode_dirty_sync(file->f_dentry->d_inode);
+	if ((file->f_dentry) && (file->f_dentry->d_inode)) {    
+/*		file->f_dentry->d_inode->i_ctime =
+		file->f_dentry->d_inode->i_mtime = CURRENT_TIME;*/
+		if (total_written > 0) {
+			spin_lock(&file->f_dentry->d_inode->i_lock);
+			if (*poffset > file->f_dentry->d_inode->i_size)
+				i_size_write(file->f_dentry->d_inode,
+					*poffset);
+			spin_unlock(&file->f_dentry->d_inode->i_lock);
 		}
+		mark_inode_dirty_sync(file->f_dentry->d_inode);
 	}
 	FreeXid(xid);
 	return total_written;
@@ -1138,7 +1157,6 @@ static int cifs_partialpagewrite(struct page *page, unsigned from, unsigned to)
 	kunmap(page);
 	return rc;
 }
-#if 0   //js 
 static int cifs_writepages(struct address_space *mapping,
 			   struct writeback_control *wbc)
 {
@@ -1147,9 +1165,11 @@ static int cifs_writepages(struct address_space *mapping,
 	unsigned int bytes_written;
 	struct cifs_sb_info *cifs_sb;
 	int done = 0;
-	pgoff_t end;
+//	pgoff_t end;
+	pgoff_t end=-1;
 	pgoff_t index;
- 	int range_whole = 0;
+// 	int range_whole = 0;
+ 	int is_range = 0;
 	struct kvec iov[32];
 	int len;
 	int n_iov = 0;
@@ -1190,14 +1210,20 @@ static int cifs_writepages(struct address_space *mapping,
 	xid = GetXid();
 
 	pagevec_init(&pvec, 0);
-	if (wbc->range_cyclic) {
+//	if (wbc->range_cyclic) {
+	if (wbc->sync_mode == WB_SYNC_NONE) {
 		index = mapping->writeback_index; /* Start from prev offset */
-		end = -1;
+//		end = -1;
 	} else {
-		index = wbc->range_start >> PAGE_CACHE_SHIFT;
-		end = wbc->range_end >> PAGE_CACHE_SHIFT;
-		if (wbc->range_start == 0 && wbc->range_end == LLONG_MAX)
-			range_whole = 1;
+	       index=0;
+              scanned=1;
+       }
+       if(wbc->start||wbc->end) {
+		index = wbc->start >> PAGE_CACHE_SHIFT;
+		end = wbc->end >> PAGE_CACHE_SHIFT;
+              is_range=1;
+//		if (wbc->start == 0 && wbc->end == LLONG_MAX)
+//			range_whole = 1;
 		scanned = 1;
 	}
 retry:
@@ -1233,7 +1259,8 @@ retry:
 				break;
 			}
 
-			if (!wbc->range_cyclic && page->index > end) {
+//			if (!wbc->range_cyclic && page->index > end) {
+			if (unlikely(is_range) && (page->index > end)) {
 				done = 1;
 				unlock_page(page);
 				break;
@@ -1337,20 +1364,14 @@ retry:
 		index = 0;
 		goto retry;
 	}
-	if (wbc->range_cyclic || (range_whole && wbc->nr_to_write > 0))
+//	if (wbc->range_cyclic || (range_whole && wbc->nr_to_write > 0))
+	if (!is_range)
 		mapping->writeback_index = index;
 
 	FreeXid(xid);
 
 	return rc;
 }
-#else
-static int cifs_writepages(struct address_space *mapping,
-			   struct writeback_control *wbc)
-{
-    return -1;
-}
-#endif 
 static int cifs_writepage(struct page* page, struct writeback_control *wbc)
 {
 	int rc = -EFAULT;
@@ -1383,6 +1404,8 @@ static int cifs_commit_write(struct file *file, struct page *page,
 	xid = GetXid();
 	cFYI(1, ("commit write for page %p up to position %lld for %d", 
 		 page, position, to));
+
+	spin_lock(&inode->i_lock);
 	if (position > inode->i_size) {
 		i_size_write(inode, position);
 		/* if (file->private_data == NULL) {
@@ -1412,6 +1435,7 @@ static int cifs_commit_write(struct file *file, struct page *page,
 			cFYI(1, (" SetEOF (commit write) rc = %d", rc));
 		} */
 	}
+	spin_unlock(&inode->i_lock);    
 	if (!PageUptodate(page)) {
 		position =  ((loff_t)page->index << PAGE_CACHE_SHIFT) + offset;
 		/* can not rely on (or let) writepage write this data */
@@ -1967,7 +1991,8 @@ int is_size_safe_to_change(struct cifsInodeInfo *cifsInode)
 			we can change size safely */
 			return 1;
 		}
-
+              if(open_file->pfile->f_flags & O_DIRECT)
+                  return 1;
 		return 0;
 	} else
 		return 1;
@@ -2007,17 +2032,61 @@ static int cifs_prepare_write(struct file *file, struct page *page,
 	   e.g. if we do not have read access to the file */
 	return 0;
 }
+static ssize_t cifs_direct_IO(int rw, struct kiocb *iocb,
+                             const struct iovec *iov, loff_t offset, unsigned long nr_segs)
+{
+    struct file *file = iocb->ki_filp;
+    if(rw == READ)
+    {
+        int total = 0;
+        int ret;
+//        int read_nums = 0;
+        int read_size;
+        unsigned long addr;
+        unsigned long dc_lsize = current_cpu_data.dcache.linesz;
+
+        int err=0;
+        err = !access_ok(VERIFY_READ, (void __user*)iov->iov_base, iov->iov_len);
+        if (err)
+        {
+                printk("access error : %d\n", err);
+                return -EFAULT;
+        }
+//        read_size = min ((int)(file->f_dentry->d_inode->i_size - offset), (int)iov->iov_len);
+        read_size = (int)iov->iov_len;
+
+//        if (read_size % (int)PAGE_SIZE == 0)
+//                read_nums = read_size / (int)PAGE_SIZE;
+//        else    
+//                read_nums = read_size / (int)PAGE_SIZE + 1;
+
+
+        char *buffer = iov->iov_base;
+//        ret = total = cifs_read(file, buffer, PAGE_CACHE_SIZE*read_nums, &offset);
+        ret = total = cifs_read(file, buffer, read_size, &offset);
+        addr = (unsigned long)buffer;
+        while (total > 0) {
+            flush_dcache_line(addr);
+            addr += dc_lsize;   
+            total -= dc_lsize;
+        }
+        return ret;
+    }
+    else
+        return cifs_user_write(file, (char __user *) (iov->iov_base), iov->iov_len, &offset);
+}
 
 const struct address_space_operations cifs_addr_ops = {
 	.readpage = cifs_readpage,
 	.readpages = cifs_readpages,
 	.writepage = cifs_writepage,
-//	.writepages = cifs_writepages,
+	.writepages = cifs_writepages,
 	.prepare_write = cifs_prepare_write,
 	.commit_write = cifs_commit_write,
 	.set_page_dirty = __set_page_dirty_nobuffers,
 	/* .sync_page = cifs_sync_page, */
 	/* .direct_IO = */
+	.direct_IO = cifs_direct_IO
 };
 
 /*
@@ -2028,10 +2097,11 @@ const struct address_space_operations cifs_addr_ops = {
 const struct address_space_operations cifs_addr_ops_smallbuf = {
 	.readpage = cifs_readpage,
 	.writepage = cifs_writepage,
-//	.writepages = cifs_writepages,
+	.writepages = cifs_writepages,
 	.prepare_write = cifs_prepare_write,
 	.commit_write = cifs_commit_write,
 	.set_page_dirty = __set_page_dirty_nobuffers,
 	/* .sync_page = cifs_sync_page, */
 	/* .direct_IO = */
+	.direct_IO = cifs_direct_IO
 };

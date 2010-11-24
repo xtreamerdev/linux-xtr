@@ -122,9 +122,10 @@ int cdfs_toc_read_cd( struct super_block *sb , int mounting_acd)
 	    }
 	    else	//BAD DISC
 	    {       //david0821 added to check if someone goes the wrong way.....
-		    PRINTT("BAD_DISC\n");
-		    CD_TYPE=BAD_DISC;
-		    return -1;
+		    PRINTT("BAD_DISC => ACD for Verona test disc\n");
+		    //CD_TYPE=BAD_DISC;
+		    CD_TYPE=ACD_DISC;
+		    //return -1;
 	    }
     }
     else if ((DataType==PureVCD)&&(SESSION_NO==1)&&(this_cd->tracks>1)&&(no_data>1))	//VCD

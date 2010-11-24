@@ -31,6 +31,9 @@ enum kobject_action {
 	KOBJ_ONLINE	= (__force kobject_action_t) 0x07,	/* online event for hotplug devices */
 	KOBJ_OVERCUR	= (__force kobject_action_t) 0x08,	/* over-current event for hotplug devices */
 	KOBJ_TIER	= (__force kobject_action_t) 0x09,	/* tier event for hotplug devices */
+	KOBJ_UNKNOWN	= (__force kobject_action_t) 0x0a,	/* usb unknown device */
+	KOBJ_LINKUP	= (__force kobject_action_t) 0x0b,      /* MII link up event */
+        KOBJ_LINKDOWN	= (__force kobject_action_t) 0x0c,      /* MII link down event */	
 };
 
 

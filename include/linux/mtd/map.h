@@ -467,6 +467,22 @@ static inline void inline_map_write_data(struct map_info *map, const map_word da
 
 static inline void inline_map_copy_from(struct map_info *map, void *to, unsigned long from, ssize_t len)
 {
+#ifdef CONFIG_REALTEK_VENUS
+// The Venus series CPUs have bug on instructions of lwl, lwr, swl, and swr while they are working on NOR Flash.
+// Therefore, we should prevent from using memcpy function if the memory address is non-alignment.
+// It seems that only the memcpy in this function will be used.
+	if((unsigned long)to%4 || from%4) {
+		char *tmp = (char *) to, *s;
+		
+		if(map->cached)
+			s = (char *) map->cached+from;
+		else
+			s = (char *) map->virt+from;
+		while (len--)
+			*tmp++ = *s++;
+		return;
+	}
+#endif
 	if (map->cached)
 		memcpy(to, (char *)map->cached + from, len);
 	else

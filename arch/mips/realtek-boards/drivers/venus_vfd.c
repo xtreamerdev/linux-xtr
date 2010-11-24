@@ -337,6 +337,8 @@ restart:
 }
 
 unsigned int venus_vfd_keypad_poll(struct file *filp, poll_table *wait) {
+	poll_wait(filp, &venus_vfd_keypad_read_wait, wait);
+
 	if(__kfifo_len(vfd_keypad_fifo) > 0)
 		return POLLIN | POLLRDNORM;
 	else
@@ -376,9 +378,6 @@ int venus_vfd_init_module(void) {
 		printk(KERN_WARNING "Venus VFD: can't register device number.\n");
 		goto fail_alloc_dev_vfd;
 	}
-
-	/* Hardware Registers Initialization */
-	Venus_VFD_Init();
 
 	/* Initialize kfifo */
 	vfd_keypad_fifo = kfifo_alloc(FIFO_DEPTH, GFP_KERNEL, &venus_vfd_lock);
@@ -435,6 +434,9 @@ int venus_vfd_init_module(void) {
 	devfs_mk_cdev(MKDEV(VENUS_VFD_MAJOR, VENUS_VFD_MINOR_VFDO), S_IFCHR|S_IRUSR|S_IWUSR, VENUS_VFD_VFDO_DEVICE);
 	devfs_mk_cdev(MKDEV(VENUS_VFD_MAJOR, VENUS_VFD_MINOR_WRCTL), S_IFCHR|S_IRUSR|S_IWUSR, VENUS_VFD_WRCTL);
 	devfs_mk_cdev(MKDEV(VENUS_VFD_MAJOR, VENUS_VFD_MINOR_KEYPAD), S_IFCHR|S_IRUSR|S_IWUSR, VENUS_VFD_KEYPAD);
+
+	/* Hardware Registers Initialization */
+	Venus_VFD_Init();
 
 	return 0;	/* succeed ! */
 

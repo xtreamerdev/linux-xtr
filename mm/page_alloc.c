@@ -38,6 +38,15 @@
 #include <asm/tlbflush.h>
 #include "internal.h"
 
+#ifdef CONFIG_REALTEK_RESERVE_DVR
+#include <asm/mips-boards/prom.h>
+
+extern struct prom_pmemblock	mdesc[PROM_MAX_PMEMBLOCKS];
+
+void start_remap(void);			// in mm/pageremap.c...
+void end_remap(void);			// in mm/pageremap.c...
+#endif
+
 /*
  * MCD - HACK: Find somewhere to initialize this EARLY, or make this
  * initializer cleaner
@@ -51,6 +60,12 @@ unsigned long totalram_pages;
 unsigned long totalhigh_pages;
 long nr_swap_pages;
 
+extern struct list_head ramfs_lru_list;
+extern spinlock_t ramfs_lru_lock;
+extern struct list_head dvrfs_lru_list;
+extern spinlock_t dvrfs_lru_lock;
+
+
 /*
  * results with 256, 32 in the lowmem_reserve sysctl:
  *	1G machine -> (16M dma, 800M-16M normal, 1G-800M high)
@@ -59,7 +74,7 @@ long nr_swap_pages;
  *	HIGHMEM allocation will leave 224M/32 of ram reserved in ZONE_NORMAL
  *	HIGHMEM allocation will (224M+784M)/256 of ram reserved in ZONE_DMA
  */
-int sysctl_lowmem_reserve_ratio[MAX_NR_ZONES-1] = { 256, 32 };
+int sysctl_lowmem_reserve_ratio[MAX_NR_ZONES-1] = { 1024, 256, 64 };
 
 EXPORT_SYMBOL(totalram_pages);
 EXPORT_SYMBOL(nr_swap_pages);
@@ -70,8 +85,16 @@ EXPORT_SYMBOL(nr_swap_pages);
  */
 struct zone *zone_table[1 << (ZONES_SHIFT + NODES_SHIFT)];
 EXPORT_SYMBOL(zone_table);
+/* disable pli_zonelist...
+struct zonelist pli_zonelist = {0};
+EXPORT_SYMBOL(pli_zonelist);
+*/
 
+#ifdef CONFIG_REALTEK_TEXT_DEBUG
+static char *zone_names[MAX_NR_ZONES] = { "DMA", "Normal", "HighMem", "DVR", "TEXT" };
+#else
 static char *zone_names[MAX_NR_ZONES] = { "DMA", "Normal", "HighMem", "DVR" };
+#endif
 int min_free_kbytes = 1024;
 
 unsigned long __initdata nr_kernel_pages;
@@ -617,6 +640,18 @@ static void fastcall free_hot_cold_page(struct page *page, int cold)
 	struct per_cpu_pages *pcp;
 	unsigned long flags;
 
+	if (PageRamfs(page)) {
+		spin_lock_irqsave(&ramfs_lru_lock, flags);
+		list_add(&page->lru, &ramfs_lru_list);
+		spin_unlock_irqrestore(&ramfs_lru_lock, flags);
+		return;
+	}
+	if (PageDvrfs(page)) {
+		spin_lock_irqsave(&dvrfs_lru_lock, flags);
+		list_add(&page->lru, &dvrfs_lru_list);
+		spin_unlock_irqrestore(&dvrfs_lru_lock, flags);
+		return;
+	}
 	arch_free_page(page, 0);
 
 	kernel_map_pages(page, 1, 0);
@@ -664,6 +699,10 @@ buffered_rmqueue(struct zone *zone, int order, unsigned int __nocast gfp_flags)
 	unsigned long flags;
 	struct page *page = NULL;
 	int cold = !!(gfp_flags & __GFP_COLD);
+
+	/* Check if this zone is disabled... */
+	if ((zone->flags & ZN_DISABLE) && !(gfp_flags & __GFP_EXHAUST))
+		return NULL;
 
 	if (order == 0) {
 		struct per_cpu_pages *pcp;
@@ -773,8 +812,13 @@ __alloc_pages(unsigned int __nocast gfp_mask, unsigned int order,
  restart:
 	/* Go through the zonelist once, looking for a zone with enough free */
 	for (i = 0; (z = zones[i]) != NULL; i++) {
+#ifdef CONFIG_REALTEK_RESERVE_DVR
+		/* reserve the DVR zone during the power saving mode */
+		if ((console_loglevel == 10) && (z == zone_table[ZONE_DVR]))
+			continue;
+#endif
 
-		if ((gfp_mask & __GFP_EXHAUST) && (z->exhaustable)) {
+		if ((gfp_mask & __GFP_EXHAUST) && (z->flags & ZN_EXHAUSTABLE)) {
 			// Don't care the watermarks...
 			min = 1<<order;
 			if (z->free_pages < min)
@@ -892,6 +936,8 @@ rebalance:
 				goto got_pg;
 		}
 
+		printk("### caller: %s, order: %d, mode: 0x%x ###\n", current->comm, order, gfp_mask);
+		show_free_areas();
 		out_of_memory(gfp_mask);
 		goto restart;
 	}
@@ -920,7 +966,8 @@ nopage:
 		printk(KERN_WARNING "%s: page allocation failure."
 			" order:%d, mode:0x%x\n",
 			p->comm, order, gfp_mask);
-		dump_stack();
+//		show_free_areas();
+//		dump_stack();
 	}
 	return NULL;
 got_pg:
@@ -992,6 +1039,46 @@ fastcall void free_pages(unsigned long addr, unsigned int order)
 
 EXPORT_SYMBOL(free_pages);
 
+#ifdef CONFIG_REALTEK_RESERVE_DVR
+int DVR_zone_disable(void)
+{
+	unsigned long flags;
+	struct zone *zone = zone_table[ZONE_DVR];
+
+retry:
+	spin_lock_irqsave(&zone->lock, flags);
+	if ((zone) && (zone->free_pages == 0)) {
+		/* DVR zone has been reserved already */
+		spin_unlock_irqrestore(&zone->lock, flags);
+		return 0;
+	}
+	if ((zone) && (zone->free_pages == zone->present_pages - (mdesc[3].size>>12))) {
+		zone->free_pages = 0;
+		spin_unlock_irqrestore(&zone->lock, flags);
+		return 1;
+	}
+	spin_unlock_irqrestore(&zone->lock, flags);
+	start_remap();
+	end_remap();
+	goto retry;
+}
+
+int DVR_zone_enable(void)
+{
+	unsigned long flags;
+	struct zone *zone = zone_table[ZONE_DVR];
+
+	spin_lock_irqsave(&zone->lock, flags);
+	if (zone) {
+		zone->free_pages = zone->present_pages;
+		spin_unlock_irqrestore(&zone->lock, flags);
+		return 1;
+	}
+	spin_unlock_irqrestore(&zone->lock, flags);
+	return 0;
+}
+#endif
+
 /*
  * Total amount of free (allocatable) RAM:
  */
@@ -1055,7 +1142,11 @@ unsigned int nr_free_buffer_pages(void)
 unsigned int nr_free_pagecache_pages(void)
 {
 //	return nr_free_zone_pages(GFP_HIGHUSER & GFP_ZONEMASK);
+#ifdef CONFIG_REALTEK_TEXT_DEBUG
+	return nr_free_zone_pages(GFP_TEXTUSER & GFP_ZONEMASK);
+#else
 	return nr_free_zone_pages(GFP_DVRUSER & GFP_ZONEMASK);
+#endif
 }
 
 #ifdef CONFIG_HIGHMEM
@@ -1345,14 +1436,21 @@ void show_free_areas(void)
  */
 static int __init build_zonelists_node(pg_data_t *pgdat, struct zonelist *zonelist, int j, int k)
 {
+	struct zone *zone;
+
 	switch (k) {
-		struct zone *zone;
 	default:
 		BUG();
-        case ZONE_DVR:
-                zone = pgdat->node_zones + ZONE_DVR;
+#ifdef CONFIG_REALTEK_TEXT_DEBUG
+        case ZONE_TEXT:
+                zone = pgdat->node_zones + ZONE_TEXT;
                 if (zone->present_pages)
                         zonelist->zones[j++] = zone;
+#endif
+        case ZONE_DVR:
+		zone = pgdat->node_zones + ZONE_DVR;
+		if (zone->present_pages)
+			zonelist->zones[j++] = zone;
 	case ZONE_HIGHMEM:
 		zone = pgdat->node_zones + ZONE_HIGHMEM;
 		if (zone->present_pages) {
@@ -1370,6 +1468,12 @@ static int __init build_zonelists_node(pg_data_t *pgdat, struct zonelist *zoneli
 		if (zone->present_pages)
 			zonelist->zones[j++] = zone;
 	}
+
+//	if (k == ZONE_DVR) {
+//		zone = pgdat->node_zones + ZONE_DVR;
+//		if (zone->present_pages)
+//			zonelist->zones[j++] = zone;
+//	}
 
 	return j;
 }
@@ -1503,6 +1607,11 @@ static void __init build_zonelists(pg_data_t *pgdat)
 			k = ZONE_DMA;
 */
                 switch (i) {
+#ifdef CONFIG_REALTEK_TEXT_DEBUG
+                        case __GFP_TEXT:
+                                k = ZONE_TEXT;
+                                break;
+#endif
                         case __GFP_DVR:
                                 k = ZONE_DVR;
                                 break;
@@ -1535,7 +1644,38 @@ static void __init build_zonelists(pg_data_t *pgdat)
 		}
 
 		zonelist->zones[j] = NULL;
+//		printk("zone name: %s \n\tlist: ", pgdat->node_zones[k].name);
+//		for (k = 0; k < j; k++) {
+//			if (zonelist->zones[k] == 0)
+//				break;
+//			printk("%s ", zonelist->zones[k]->name);
+//		}
+//		printk("\n");
 	}
+/* disable pli_zonelist...
+	{
+		struct zone *zone;
+
+		zone = pgdat->node_zones + ZONE_DVR;
+		if (zone->present_pages) {
+			pli_zonelist.zones[0] = zone;
+#ifdef CONFIG_REALTEK_MARS_256MB
+			j = 1;
+#else
+			j = build_zonelists_node(pgdat, &pli_zonelist, 1, ZONE_HIGHMEM);
+#endif
+		} else 
+			j = build_zonelists_node(pgdat, &pli_zonelist, 0, ZONE_HIGHMEM);
+
+//		printk("zone name: pli \n\tlist: ");
+//		for (k = 0; k < j; k++) {
+//			if (pli_zonelist.zones[k] == 0)
+//				break;
+//			printk("%s ", pli_zonelist.zones[k]->name);
+//		}
+//		printk("\n");
+	}
+*/
 }
 
 #endif	/* CONFIG_NUMA */
@@ -1689,9 +1829,9 @@ static void __init free_area_init_core(struct pglist_data *pgdat,
 		zone->spanned_pages = size;
 		zone->present_pages = realsize;
                 if (j == ZONE_DVR)
-                        zone->exhaustable = 1;
+                        zone->flags = ZN_EXHAUSTABLE;
                 else
-                        zone->exhaustable = 0;
+                        zone->flags = 0;
 		zone->name = zone_names[j];
 		spin_lock_init(&zone->lock);
 		spin_lock_init(&zone->lru_lock);
@@ -1770,6 +1910,19 @@ static void __init free_area_init_core(struct pglist_data *pgdat,
 
 		pgdat->nr_zones = j+1;
 
+#ifdef CONFIG_REALTEK_MARS_256MB 
+		if (j == ZONE_NORMAL) {
+			unsigned long normal_start_pfn;
+			normal_start_pfn = max_low_pfn-size;
+			zone->zone_mem_map = pfn_to_page(normal_start_pfn);
+			zone->zone_start_pfn = normal_start_pfn;
+
+			if ((normal_start_pfn) & (zone_required_alignment-1))
+				printk(KERN_CRIT "BUG: wrong zone alignment, it will crash\n");
+
+			memmap_init(size, nid, j, normal_start_pfn);
+		} else {
+#endif
 		zone->zone_mem_map = pfn_to_page(zone_start_pfn);
 		zone->zone_start_pfn = zone_start_pfn;
 
@@ -1779,6 +1932,10 @@ static void __init free_area_init_core(struct pglist_data *pgdat,
 		memmap_init(size, nid, j, zone_start_pfn);
 
 		zone_start_pfn += size;
+#ifdef CONFIG_REALTEK_MARS_256MB 
+	 	}
+		printk("ZONE: %s, PFN: %d \n", zone->name, zone->zone_start_pfn);
+#endif
 
 		zone_init_free_lists(pgdat, zone, zone->spanned_pages);
 	}
@@ -1903,32 +2060,39 @@ static char *vmstat_text[] = {
 	"pgpgout",
 	"pswpin",
 	"pswpout",
-	"pgalloc_high",
 
+	"pgalloc_high",
 	"pgalloc_normal",
 	"pgalloc_dma",
+	"pgalloc_dvr",
+
 	"pgfree",
 	"pgactivate",
 	"pgdeactivate",
-
 	"pgfault",
 	"pgmajfault",
+
 	"pgrefill_high",
 	"pgrefill_normal",
 	"pgrefill_dma",
+	"pgrefill_dvr",
 
 	"pgsteal_high",
 	"pgsteal_normal",
 	"pgsteal_dma",
+	"pgsteal_dvr",
+
 	"pgscan_kswapd_high",
 	"pgscan_kswapd_normal",
-
 	"pgscan_kswapd_dma",
+	"pgscan_kswapd_dvr",
+
 	"pgscan_direct_high",
 	"pgscan_direct_normal",
 	"pgscan_direct_dma",
-	"pginodesteal",
+	"pgscan_direct_dvr",
 
+	"pginodesteal",
 	"slabs_scanned",
 	"kswapd_steal",
 	"kswapd_inodesteal",
@@ -2107,8 +2271,8 @@ static void setup_per_zone_pages_min(void)
 		 * When interpreting these watermarks, just keep in mind that:
 		 * zone->pages_min == (zone->pages_min * 4) / 4;
 		 */
-		zone->pages_low   = (zone->pages_min * 5) / 4;
-		zone->pages_high  = (zone->pages_min * 6) / 4;
+		zone->pages_low   = (zone->pages_min * 6) / 4;
+		zone->pages_high  = (zone->pages_min * 8) / 4;
 		spin_unlock_irqrestore(&zone->lru_lock, flags);
 	}
 }
@@ -2279,7 +2443,9 @@ void drain_pcp_pages(unsigned int cpu)
 {
         struct zone *zone;
         int i;
+	unsigned long flags;
 
+	local_irq_save(flags);
         for_each_zone(zone) {
                 struct per_cpu_pageset *pset;
 
@@ -2292,6 +2458,7 @@ void drain_pcp_pages(unsigned int cpu)
                                                 &pcp->list, 0);
                 }
         }
+	local_irq_restore(flags);
 }
 EXPORT_SYMBOL(drain_pcp_pages);
 

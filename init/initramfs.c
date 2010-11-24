@@ -7,6 +7,10 @@
 #include <linux/string.h>
 #include <linux/syscalls.h>
 
+#ifdef CONFIG_REALTEK_DISABLE_BOOT_HOTPLUG
+int	hotplug_flag = 0;
+#endif
+
 static __initdata char *message;
 static void __init error(char *x)
 {
@@ -248,6 +252,11 @@ static int __init do_name(void)
 	}
 	if (dry_run)
 		return 0;
+#ifdef CONFIG_REALTEK_DISABLE_BOOT_HOTPLUG
+	if (strstr(collected, "hotplug")) {
+		hotplug_flag = 1;
+	}
+#endif
 	if (S_ISREG(mode)) {
 		if (maybe_link() >= 0) {
 			wfd = sys_open(collected, O_WRONLY|O_CREAT, mode);

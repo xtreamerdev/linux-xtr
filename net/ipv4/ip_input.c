@@ -160,7 +160,10 @@ int ip_call_ra_chain(struct sk_buff *skb)
 	struct ip_ra_chain *ra;
 	u8 protocol = skb->nh.iph->protocol;
 	struct sock *last = NULL;
-
+#ifdef NET_DEBUG
+       printk(" %s:%s:%u\n", __FUNCTION__, __FILE__, __LINE__);
+#endif
+			
 	read_lock(&ip_ra_lock);
 	for (ra = ip_ra_chain; ra; ra = ra->next) {
 		struct sock *sk = ra->sk;
@@ -199,7 +202,10 @@ int ip_call_ra_chain(struct sk_buff *skb)
 static inline int ip_local_deliver_finish(struct sk_buff *skb)
 {
 	int ihl = skb->nh.iph->ihl*4;
-
+#ifdef NET_DEBUG
+        printk(" %s:%s:%u\n", __FUNCTION__, __FILE__, __LINE__);
+#endif
+			
 #ifdef CONFIG_NETFILTER_DEBUG
 	nf_debug_ip_local_deliver(skb);
 #endif /*CONFIG_NETFILTER_DEBUG*/
@@ -271,7 +277,10 @@ int ip_local_deliver(struct sk_buff *skb)
 	/*
 	 *	Reassemble IP fragments.
 	 */
-
+#ifdef NET_DEBUG
+        printk(" %s:%s:%u\n", __FUNCTION__, __FILE__, __LINE__);
+#endif
+			
 	if (skb->nh.iph->frag_off & htons(IP_MF|IP_OFFSET)) {
 		skb = ip_defrag(skb, IP_DEFRAG_LOCAL_DELIVER);
 		if (!skb)
@@ -290,8 +299,16 @@ static inline int ip_rcv_finish(struct sk_buff *skb)
 	/*
 	 *	Initialise the virtual path cache for the packet. It describes
 	 *	how the packet travels inside Linux networking.
-	 */ 
+	 */
+#ifdef NET_DEBUG
+        printk(" %s:%s:%u\n", __FUNCTION__, __FILE__, __LINE__);
+#endif
+		
 	if (skb->dst == NULL) {
+#ifdef NET_DEBUG
+                printk(" %s:%s:%u\n", __FUNCTION__, __FILE__, __LINE__);
+#endif
+		
 		if (ip_route_input(skb, iph->daddr, iph->saddr, iph->tos, dev))
 			goto drop; 
 	}
@@ -306,7 +323,10 @@ static inline int ip_rcv_finish(struct sk_buff *skb)
 		st[(idx>>16)&0xFF].i_bytes+=skb->len;
 	}
 #endif
-
+#ifdef NET_DEBUG
+        printk(" %s:%s:%u\n", __FUNCTION__, __FILE__, __LINE__);
+#endif
+			
 	if (iph->ihl > 5) {
 		struct ip_options *opt;
 
@@ -317,19 +337,32 @@ static inline int ip_rcv_finish(struct sk_buff *skb)
 		   and running sniffer is extremely rare condition.
 		                                      --ANK (980813)
 		*/
-
+#ifdef NET_DEBUG
+                printk(" %s:%s:%u\n", __FUNCTION__, __FILE__, __LINE__);
+#endif
+				
 		if (skb_cow(skb, skb_headroom(skb))) {
 			IP_INC_STATS_BH(IPSTATS_MIB_INDISCARDS);
 			goto drop;
 		}
 		iph = skb->nh.iph;
-
+#ifdef NET_DEBUG
+                printk(" %s:%s:%u\n", __FUNCTION__, __FILE__, __LINE__);
+#endif
+				
 		if (ip_options_compile(NULL, skb))
 			goto inhdr_error;
-
+#ifdef NET_DEBUG
+                printk(" %s:%s:%u\n", __FUNCTION__, __FILE__, __LINE__);
+#endif
+				
 		opt = &(IPCB(skb)->opt);
 		if (opt->srr) {
 			struct in_device *in_dev = in_dev_get(dev);
+#ifdef NET_DEBUG
+                        printk(" %s:%s:%u\n", __FUNCTION__, __FILE__, __LINE__);
+#endif
+		
 			if (in_dev) {
 				if (!IN_DEV_SOURCE_ROUTE(in_dev)) {
 					if (IN_DEV_LOG_MARTIANS(in_dev) && net_ratelimit())
@@ -339,17 +372,35 @@ static inline int ip_rcv_finish(struct sk_buff *skb)
 					goto drop;
 				}
 				in_dev_put(in_dev);
+#ifdef NET_DEBUG
+                        printk(" %s:%s:%u\n", __FUNCTION__, __FILE__, __LINE__);
+#endif
+		
 			}
+#ifdef NET_DEBUG
+                        printk(" %s:%s:%u\n", __FUNCTION__, __FILE__, __LINE__);
+#endif
+		
 			if (ip_options_rcv_srr(skb))
 				goto drop;
 		}
 	}
-
+#ifdef NET_DEBUG
+        printk("Input from network to transport skb=0x%x\n", skb);
+#endif	
 	return dst_input(skb);
 
 inhdr_error:
+#ifdef NET_DEBUG
+        printk(" %s:%s:%u\n", __FUNCTION__, __FILE__, __LINE__);
+#endif
+		
 	IP_INC_STATS_BH(IPSTATS_MIB_INHDRERRORS);
 drop:
+#ifdef NET_DEBUG
+        printk(" %s:%s:%u\n", __FUNCTION__, __FILE__, __LINE__);
+#endif
+		
         kfree_skb(skb);
         return NET_RX_DROP;
 }
@@ -364,6 +415,10 @@ int ip_rcv(struct sk_buff *skb, struct net_device *dev, struct packet_type *pt)
 	/* When the interface is in promisc. mode, drop all the crap
 	 * that it receives, do not try to analyse it.
 	 */
+#ifdef NET_DEBUG
+	printk("Entering ip_rcv skb=0x%x , dev->name=%s  , pt->type =0x%x \n",
+			skb, dev->name, pt->type);
+#endif	
 	if (skb->pkt_type == PACKET_OTHERHOST)
 		goto drop;
 
@@ -415,7 +470,10 @@ int ip_rcv(struct sk_buff *skb, struct net_device *dev, struct packet_type *pt)
 			goto drop;
 		}
 	}
-
+#ifdef NET_DEBUG
+        printk(" %s:%s:%u\n", __FUNCTION__, __FILE__, __LINE__);
+#endif
+			
 	return NF_HOOK(PF_INET, NF_IP_PRE_ROUTING, skb, dev, NULL,
 		       ip_rcv_finish);
 

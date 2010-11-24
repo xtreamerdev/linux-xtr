@@ -25,6 +25,7 @@
  */
 extern unsigned long pgd_current[];
 extern unsigned long dvr_asid;
+extern unsigned long dvr_task;
 
 #define TLBMISS_HANDLER_SETUP_PGD(pgd) \
 	pgd_current[smp_processor_id()] = (unsigned long)(pgd)
@@ -126,7 +127,7 @@ static inline void switch_mm(struct mm_struct *prev, struct mm_struct *next,
 	local_irq_save(flags);
 
 	/* Check if our ASID is of an older version and thus invalid */
-	if ((cpu_context(cpu, next) & ASID_MASK) != dvr_asid)
+	if ((dvr_task == 0) || (next != ((struct task_struct *)dvr_task)->mm))
 	if ((cpu_context(cpu, next) ^ asid_cache(cpu)) & ASID_VERSION_MASK)
 		get_new_mmu_context(next, cpu);
 

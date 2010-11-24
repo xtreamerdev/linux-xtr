@@ -135,11 +135,7 @@ small_smb_init(int smb_command, int wct, struct cifsTconInfo *tcon,
 				   timeout which is 7 seconds */
 			while(tcon->ses->server->tcpStatus == CifsNeedReconnect) {
 				wait_event_interruptible_timeout(tcon->ses->server->response_q,
-					(tcon->ses->server->tcpStatus == CifsGood), 4 * HZ);
-/* js                
-				wait_event_interruptible_timeout(tcon->ses->server->response_q,
 					(tcon->ses->server->tcpStatus == CifsGood), 10 * HZ);
-*/					
 				if(tcon->ses->server->tcpStatus == CifsNeedReconnect) {
 					/* on "soft" mounts we wait once */
 					if((tcon->retry == FALSE) || 
@@ -278,11 +274,7 @@ smb_init(int smb_command, int wct, struct cifsTconInfo *tcon,
 				   timeout which is 7 seconds */
 			while(tcon->ses->server->tcpStatus == CifsNeedReconnect) {
 				wait_event_interruptible_timeout(tcon->ses->server->response_q,
-					(tcon->ses->server->tcpStatus == CifsGood), 4 * HZ);
-/* js                
-				wait_event_interruptible_timeout(tcon->ses->server->response_q,
 					(tcon->ses->server->tcpStatus == CifsGood), 10 * HZ);
-*/					
 				if(tcon->ses->server->tcpStatus == 
 						CifsNeedReconnect) {
 					/* on "soft" mounts we wait once */
@@ -1074,6 +1066,7 @@ CIFSSMBOpen(const int xid, struct cifsTconInfo *tcon,
 	int bytes_returned;
 	int name_len;
 	__u16 count;
+       int try_count=0;
 
 openRetry:
 	rc = smb_init(SMB_COM_NT_CREATE_ANDX, 24, tcon, (void **) &pSMB,
@@ -1160,7 +1153,11 @@ openRetry:
 
 	cifs_buf_release(pSMB);
 	if (rc == -EAGAIN)
-		goto openRetry;
+	{ 
+		try_count++;
+		if(try_count < 160)
+			goto openRetry;
+	}
 	return rc;
 }
 
@@ -1295,7 +1292,10 @@ CIFSSMBWrite(const int xid, struct cifsTconInfo *tcon,
 		return rc;
 	/* tcon and ses pointer are checked in smb_init */
 	if (tcon->ses->server == NULL)
-		return -ECONNABORTED;
+      {
+              rc=-ECONNABORTED;
+              goto write_err_exit;
+       }
 
 	pSMB->AndXCommand = 0xFF;	/* none */
 	pSMB->Fid = netfid;
@@ -1303,7 +1303,10 @@ CIFSSMBWrite(const int xid, struct cifsTconInfo *tcon,
 	if(wct == 14) 
 		pSMB->OffsetHigh = cpu_to_le32(offset >> 32);
 	else if((offset >> 32) > 0) /* can not handle this big offset for old */
-		return -EIO;
+      {
+              rc=-EIO;
+              goto write_err_exit;
+       }
 	
 	pSMB->Reserved = 0xFFFFFFFF;
 	pSMB->WriteMode = 0;
@@ -1328,13 +1331,13 @@ CIFSSMBWrite(const int xid, struct cifsTconInfo *tcon,
 	    memcpy(pSMB->Data,buf,bytes_sent);
 	else if(ubuf) {
 		if(copy_from_user(pSMB->Data,ubuf,bytes_sent)) {
-			cifs_buf_release(pSMB);
-			return -EFAULT;
+                  rc=-EFAULT;
+                  goto write_err_exit;
 		}
 	} else if (count != 0) {
 		/* No buffer */
-		cifs_buf_release(pSMB);
-		return -EINVAL;
+              rc=-EINVAL;
+              goto write_err_exit;
 	} /* else setting file size with write of zero bytes */
 	if(wct == 14)
 		byte_count = bytes_sent + 1; /* pad */
@@ -1364,7 +1367,7 @@ CIFSSMBWrite(const int xid, struct cifsTconInfo *tcon,
 		*nbytes = (*nbytes) << 16;
 		*nbytes += le16_to_cpu(pSMBr->Count);
 	}
-
+write_err_exit:	
 	cifs_buf_release(pSMB);
 
 	/* Note: On -EAGAIN error only caller can retry on handle based calls 
@@ -3835,10 +3838,6 @@ SMBOldQFSInfo(const int xid, struct cifsTconInfo *tcon, struct kstatfs *FSData)
 oldQFSInfoRetry:
 	rc = smb_init(SMB_COM_TRANSACTION2, 15, tcon, (void **) &pSMB,
 		(void **) &pSMBr);
-	if (rc)
-		return rc;
-	rc = smb_init(SMB_COM_TRANSACTION2, 15, tcon, (void **) &pSMB,
-		      (void **) &pSMBr);
 	if (rc)
 		return rc;
 

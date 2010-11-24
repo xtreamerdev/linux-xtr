@@ -31,3 +31,8 @@ obj-$(CONFIG_IP_ROUTE_MULTIPATH_CACHED) += multipath.o
 
 obj-$(CONFIG_XFRM) += xfrm4_policy.o xfrm4_state.o xfrm4_input.o \
 		      xfrm4_output.o
+
+ifeq ($(CONFIG_NET_DEBUG),y)
+EXTRA_CFLAGS += -DNET_DEBUG
+endif
+

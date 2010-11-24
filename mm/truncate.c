@@ -76,6 +76,9 @@ invalidate_complete_page(struct address_space *mapping, struct page *page)
 	if (PagePrivate(page) && !try_to_release_page(page, 0))
 		return 0;
 
+	if (page_count(page) > 2)
+		return 0;
+
 	write_lock_irq(&mapping->tree_lock);
 	if (PageDirty(page)) {
 		write_unlock_irq(&mapping->tree_lock);
