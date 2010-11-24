@@ -126,10 +126,10 @@ static __inline__ int ylist_empty(struct ylist_head *entry)
 #define ylist_for_each(itervar, list) \
         for (itervar = (list)->next; itervar != (list); itervar = itervar->next )
 
-#define ylist_for_each_safe(itervar,saveVar, list) \
-        for (itervar = (list)->next, saveVar = (list)->next->next; itervar != (list); \
-         itervar = saveVar, saveVar = saveVar->next)
-
+#define ylist_for_each_safe(itervar, saveVar, list) \
+	for (itervar = (list)->next, saveVar = (list)->next->next; \
+		itervar != (list); itervar = saveVar, saveVar = saveVar->next)
+		
 
 #if !(defined __KERNEL__)
 
@@ -185,7 +185,6 @@ struct iattr {
 #endif
 
 
-#define KERN_DEBUG
 
 #else
 

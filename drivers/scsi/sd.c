@@ -1167,8 +1167,10 @@ sd_spinup_disk(struct scsi_disk *sdkp, char *diskname,
 	}
 }
 
+#if defined(CONFIG_LBD) || defined (CONFIG_EFI_PARTITION) || defined(CONFIG_MSDOS_PARTITION)
 #include "../../fs/partitions/msdos.h"
 #include "../../fs/partitions/efi.h"
+#endif /* defined(CONFIG_LBD) || defined (CONFIG_EFI_PARTITION) || defined(CONFIG_MSDOS_PARTITION) */
 
 /*
  * read disk capacity
@@ -1255,14 +1257,24 @@ repeat:
 		       host_byte(the_result),
 		       driver_byte(the_result));
 
+#if defined(CONFIG_LBD) || defined (CONFIG_EFI_PARTITION) || defined(CONFIG_MSDOS_PARTITION)
 		// for test read efi partition
 		{
-		unsigned char table[0x1000];
-		legacy_mbr *legacymbr = (legacy_mbr *)table;
-		gpt_header *gpt = (gpt_header *) &table[0x200];
+		unsigned char *table;
+		legacy_mbr *legacymbr;
+		gpt_header *gpt;
 		int good_mbr = 0;
 		int i;
+		int size = 0x1000;
 		
+		table = (unsigned char *)kmalloc(size, GFP_KERNEL);
+		if(table == NULL) {
+			printk("%s(%d) kmalloc memory fail\n", __func__, __LINE__);
+			goto check_efi_fail;
+		}
+
+		legacymbr = (legacy_mbr *)table;
+		gpt = (gpt_header *) &table[0x200];
 		memset((void *) cmd, 0, 16);
 		cmd[0] = READ_10;
 		cmd[8] = 8;
@@ -1273,10 +1285,12 @@ repeat:
 		SRpnt->sr_data_direction = DMA_FROM_DEVICE;
 
 		scsi_wait_req(SRpnt, (void *) cmd, (void *) table,
-			      sizeof(table), SD_TIMEOUT, SD_MAX_RETRIES);
+			      size, SD_TIMEOUT, SD_MAX_RETRIES);
 
-		if (media_not_present(sdkp, SRpnt))
-			return;
+		if (media_not_present(sdkp, SRpnt)) {
+			kfree(table);
+			goto check_efi_fail;
+		}
 
 		the_result = SRpnt->sr_result;
 		if (the_result)
@@ -1284,8 +1298,10 @@ repeat:
 								   &sshdr);
 
 		// check mbr is msdos type and part is efi format from is_pmbr_valid()
-		if(le16_to_cpu(legacymbr->signature) != MSDOS_MBR_SIGNATURE)
+		if(le16_to_cpu(legacymbr->signature) != MSDOS_MBR_SIGNATURE) {
+			kfree(table);
 			goto check_efi_fail;
+		}
 		for (i = 0; i < 4; i++) {
 			if (legacymbr->partition_record[i].sys_ind == EFI_PMBR_OSTYPE_EFI_GPT &&
 				le32_to_cpu(legacymbr->partition_record[i].start_sect) == 1UL) {
@@ -1293,8 +1309,10 @@ repeat:
 					break;
 			}
 		}
-		if(!good_mbr)
+		if(!good_mbr) {
+			kfree(table);
 			goto check_efi_fail;
+		}
 
 		// check gpt header from is_gpt_valid()
 		/* Check the GUID Partition Table signature */
@@ -1303,15 +1321,18 @@ repeat:
 				"%lld != %lld\n",
 				(unsigned long long)le64_to_cpu(gpt->signature),
 				(unsigned long long)GPT_HEADER_SIGNATURE);
+			kfree(table);
 			goto check_efi_fail;
 		}
 
 		le64_to_cpu(gpt->last_usable_lba);
 		// for seondary partition table size
 		sdkp->capacity = 33 + (sector_t) gpt->last_usable_lba;
+		kfree(table);
 		goto got_data;
 		}
 check_efi_fail:
+#endif /* defined(CONFIG_LBD) || defined (CONFIG_EFI_PARTITION) || defined(CONFIG_MSDOS_PARTITION) */
 
 		printk(KERN_NOTICE "%s : use 0xffffffff as device size\n",
 		       diskname);

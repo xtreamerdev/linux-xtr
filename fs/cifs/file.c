@@ -1623,6 +1623,7 @@ ssize_t cifs_user_read(struct file *file, char __user *read_data,
 }
 
 
+
 static ssize_t cifs_read(struct file *file, char *read_data, size_t read_size,
 	loff_t *poffset)
 {
@@ -1636,6 +1637,12 @@ static ssize_t cifs_read(struct file *file, char *read_data, size_t read_size,
 	char *current_offset;
 	struct cifsFileInfo *open_file;
 	int buf_type = CIFS_NO_BUFFER;
+	
+#ifdef CONFIG_CIFS_READ_PIPELINEING	
+
+	unsigned long mid = 0;	
+		
+#endif	
 
 	xid = GetXid();
 	cifs_sb = CIFS_SB(file->f_dentry->d_sb);
@@ -1648,11 +1655,13 @@ static ssize_t cifs_read(struct file *file, char *read_data, size_t read_size,
 	open_file = (struct cifsFileInfo *)file->private_data;
 
 	if ((file->f_flags & O_ACCMODE) == O_WRONLY)
-		cFYI(1, ("attempting read on write only file instance"));
-
+		cFYI(1, ("attempting read on write only file instance"));    
+    
 	for (total_read = 0, current_offset = read_data; 
 	     read_size > total_read;
-	     total_read += bytes_read, current_offset += bytes_read) {
+	     total_read += bytes_read, current_offset += bytes_read) 
+    {
+	        
 		current_read_size = min_t(const int, read_size - total_read,
 					  cifs_sb->rsize);
 		/* For windows me and 9x we do not want to request more
@@ -1670,13 +1679,25 @@ static ssize_t cifs_read(struct file *file, char *read_data, size_t read_size,
 					file, TRUE);
 				if (rc != 0)
 					break;
-			}
+			}	
+	        
+#ifdef CONFIG_CIFS_READ_PIPELINEING                        
+                    
+            rc = CIFSSMBAsynRead(xid, pTcon,
+					 open_file->netfid,
+					 current_read_size, *poffset,
+					 &bytes_read, &current_offset,
+					 &buf_type, &mid);     					 					        
+					                 					 
+#else
 			rc = CIFSSMBRead(xid, pTcon,
 					 open_file->netfid,
 					 current_read_size, *poffset,
 					 &bytes_read, &current_offset,
-					 &buf_type);
+					 &buf_type);					             
+#endif					 
 		}
+		
 		if (rc || (bytes_read == 0)) {
 			if (total_read) {
 				break;
@@ -1689,6 +1710,13 @@ static ssize_t cifs_read(struct file *file, char *read_data, size_t read_size,
 			*poffset += bytes_read;
 		}
 	}
+	
+#ifdef CIFS_READ_PIPELINEING    
+
+    CIFSSMBAsynReadSync(mid);    
+
+#endif	
+		
 	FreeXid(xid);
 	return total_read;
 }

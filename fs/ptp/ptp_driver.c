@@ -169,6 +169,7 @@ struct inode *ptpfs_get_inode(struct super_block *sb, int mode, int dev, int ino
 static void ptpfs_put_super (struct super_block * sb)
 {
     //printk(KERN_INFO "%s\n",  __FUNCTION__);
+    printk("<ptp module> umount ptp device ST\n");
 
     ptp_free_device_info(PTPFSSB(sb)->deviceinfo);
     kfree(PTPFSSB(sb)->deviceinfo);
@@ -184,6 +185,7 @@ static void ptpfs_put_super (struct super_block * sb)
 	//disconnect will check that unmount is done.
 	if (PTPFSSB(sb)->usb_device->close_type == 0)
 	{
+		PTPFSSB(sb)->usb_device->fs_already_mount = 0;
 		PTPFSSB(sb)->usb_device->close_type = 1; 
 	}	
 	else if (PTPFSSB(sb)->usb_device->close_type == 2)  //disconnect is done , free it 
@@ -210,8 +212,11 @@ static void ptpfs_put_super (struct super_block * sb)
 
 		kfree(PTPFSSB(sb)); 
 		PTPFSSB(sb) = NULL; 
-	}	
+	}
+	else	
+		PTPFSSB(sb)->usb_device->fs_already_mount = 0;
 
+    printk("<ptp module> umount ptp device SP\n");
 
 }
 //static int ptpfs_statfs(struct super_block *sb, struct statfs *buf)
@@ -343,6 +348,7 @@ static int ptpfs_parse_options(char *options, uid_t *uid, gid_t *gid)
 
 int ptp_probe(struct usb_interface *interface, const struct usb_device_id *id)
 {
+	printk("<ptp module> ptp_probe ST\n");
 	struct ptpfs_usb_device_info *pdev = NULL;
 	int N_endpoints;
 	int i;
@@ -460,6 +466,7 @@ int ptp_probe(struct usb_interface *interface, const struct usb_device_id *id)
 	if (pdev == NULL)
 	{
 		printk("Too many PTP devices plugged in, can not handle this device.\n");
+		printk("<ptp module> ptp_probe SP fail\n");
 		return -1;
 	}
 	else
@@ -474,6 +481,7 @@ int ptp_probe(struct usb_interface *interface, const struct usb_device_id *id)
 
 		ptp_devices[x]->kobj_name = 	interface->dev.kobj.k_name;
 		printk("==== kobj_name : %s ====\n",ptp_devices[x]->kobj_name);		
+		printk("<ptp module> ptp_probe SP\n");
 
 		return 0;   	
 	}
@@ -482,12 +490,14 @@ int ptp_probe(struct usb_interface *interface, const struct usb_device_id *id)
 static int ptp_disconnect(struct usb_interface *intf)
 {
 	int x;
+	printk("<ptp module> ptp_disconnect ST\n");
 
 	if ( ptp_devices[intf->minor]->fs_already_mount == 0)  
 	{
 		kfree(ptp_devices[intf->minor]);
 		ptp_devices[intf->minor]=NULL;
 		usb_set_intfdata(intf, NULL);
+		printk("<ptp module> ptp_disconnect SP 1\n");
 		return 0;
 	}
 	
@@ -502,6 +512,7 @@ static int ptp_disconnect(struct usb_interface *intf)
 		ptp_devices[intf->minor]=NULL;
 	}	
 	usb_set_intfdata(intf, NULL);
+	printk("<ptp module> ptp_disconnect SP 2\n");
 	return 0;
 }
 
@@ -529,6 +540,7 @@ static long ptp_fill_super(struct super_block *sb, void *data, int silent)
     uid_t uid = 0;
     gid_t gid = 0;
     int x;
+	printk("<ptp module> mount ptp device ST\n");
 
 	for (x = 0; x < MAX_DEVICES; x++)
 	{
@@ -617,6 +629,7 @@ static long ptp_fill_super(struct super_block *sb, void *data, int silent)
 	
 	
 	//	fs/super.c  =>error return minus number, ex: -1~-34
+    printk("<ptp module> mount ptp device SP and OK\n");
     return 0;			
 
 	// suspend.. 	change mount type
@@ -625,6 +638,7 @@ static long ptp_fill_super(struct super_block *sb, void *data, int silent)
     PTPFSSB(sb)->usb_device->open_count--;
     up(&PTPFSSB(sb)->usb_device->sem);
     up(&ptp_devices_mutex);
+    printk("<ptp module> mount ptp device SP and fails\n");
     return -ENXIO;
 
 }
@@ -644,8 +658,10 @@ static struct super_block *ptp_get_sb(struct file_system_type *fst, int flags, c
 }
 
 static void ptp_kill_sb(struct super_block *sb){
+	/*
 	if (sb->s_root)
 		d_genocide(sb->s_root);
+	*/
 	kill_anon_super(sb);	
 }
 
@@ -662,9 +678,9 @@ static int init_ptp_driver(void)
 {
 	int driver_result;
 	int fs_result;
+	printk("<ptp module> insert ptp module ST\n");
 
     /* register this driver with the USB subsystem */
-	printk("<ptp module> install ptp module 1\n");
 
 	driver_result = usb_register(&ptpfs_usb_driver);
 	if (driver_result < 0)
@@ -679,14 +695,16 @@ static int init_ptp_driver(void)
 		printk("register_filesystem failed for the ptpfs driver. Error number %d\n", fs_result);
 		return -1;
 	}
+	printk("<ptp module> insert ptp module OK\n");
 
 	return 0;
 }
 static void exit_ptp_driver(void)
 {
+	printk("<ptp module> remove ptp module ST\n");
 	unregister_filesystem(&ptpfs_fs_type);
 	usb_deregister(&ptpfs_usb_driver);
-	printk(KERN_ALERT "ptp exit!!\n");
+	printk("<ptp module> remove ptp module SP\n");
 }
 
 

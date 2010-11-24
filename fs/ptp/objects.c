@@ -40,6 +40,10 @@
 } while (0)
 #endif
 
+#define PASSPORT_FREE 0xff
+static DECLARE_MUTEX (ptp_passport_mutex);
+static unsigned char passport=PASSPORT_FREE;
+
 static int ptpfs_get_dir_data(struct inode *inode)
 {
     int x;
@@ -284,6 +288,24 @@ static int ptpfs_file_readpage(struct file *filp, struct page *page)
 {
 	int flag = 0;	// buffer IO
 	char *buffer_d = NULL;
+
+checkagain1:
+        down(&ptp_passport_mutex);
+        if(passport==PASSPORT_FREE)
+        {
+                passport=flag;
+                up(&ptp_passport_mutex);
+        }
+        else if(passport!=flag)
+        {
+                up(&ptp_passport_mutex);
+                msleep(1000);
+                goto checkagain1;
+        }
+        else
+                up(&ptp_passport_mutex);
+
+
 	return ptpfs_file_readpages(filp, page, NULL, 0, flag);
 }
 
@@ -299,6 +321,24 @@ static ssize_t ptp_direct_IO(int rw, struct kiocb *iocb,
 		int read_size;
 
 		int err=0;
+
+checkagain:
+        down(&ptp_passport_mutex);
+        if(passport==PASSPORT_FREE)
+        {
+                passport=flag;
+                up(&ptp_passport_mutex);
+        }
+        else if(passport!=flag)
+        {
+                up(&ptp_passport_mutex);
+                msleep(1000);
+                goto checkagain;
+        }
+        else
+                up(&ptp_passport_mutex);
+
+
 		err = !access_ok(VERIFY_READ, (void __user*)iov->iov_base, iov->iov_len);
 		if (err)
 		{
@@ -343,6 +383,23 @@ static int ptpfs_file_readpages
 	int offset_same = 0;
 
 	int offset;
+/*
+checkagain:
+	down(&ptp_passport_mutex);
+	if(passport==PASSPORT_FREE)
+	{
+		passport=flag;
+		up(&ptp_passport_mutex);
+	}
+	else if(passport!=flag)
+	{
+		up(&ptp_passport_mutex);
+		msleep(1000);
+		goto checkagain;
+	}
+	else
+		up(&ptp_passport_mutex);
+*/	
 	if (flag == 0){
 		offset = page->index << PAGE_CACHE_SHIFT;		// PAGE_CACHE_SHIFT = 4KB	
 		if (!PageLocked(page))
@@ -719,7 +776,7 @@ static int ptpfs_file_readpages
 
 
     error:
-	sb_info->error_transmit = 1;
+	//sb_info->error_transmit = 1;
 	if (flag == 0)
 	{
 		SetPageError(page);
@@ -750,6 +807,9 @@ static ssize_t ptpfs_write(struct file *filp, const char *buf, size_t count, lof
 
 static int ptpfs_release(struct inode *ino, struct file *filp)
 {
+	down(&ptp_passport_mutex);
+	passport=PASSPORT_FREE;
+	up(&ptp_passport_mutex);
     //printk(KERN_INFO "%s    object:%X    dcount: %d\n",  __FUNCTION__,ino->i_ino, filp->f_dentry->d_count);
 	/*
 	if (data)

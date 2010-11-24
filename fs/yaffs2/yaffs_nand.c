@@ -12,7 +12,7 @@
  */
 
 const char *yaffs_nand_c_version =
-    "$Id: yaffs_nand.c,v 1.9 2008-05-05 07:58:58 charles Exp $";
+    "$Id: yaffs_nand.c,v 1.10 2009-03-06 17:20:54 wookey Exp $";
 
 #include "yaffs_nand.h"
 #include "yaffs_tagscompat.h"
@@ -20,25 +20,13 @@ const char *yaffs_nand_c_version =
 
 #include "yaffs_getblockinfo.h"
 
-#define RTK_DEBUG 0
-#if RTK_DEBUG
-      #define debug_nand(fmt, arg...)  printk(fmt, ##arg);
-#else
-      #define debug_nand(fmt, arg...)
-#endif
-
-
 int yaffs_ReadChunkWithTagsFromNAND(yaffs_Device * dev, int chunkInNAND,
 					   __u8 * buffer, yaffs_ExtendedTags * tags)
 {
-debug_nand("---------[%s]----------\n", __FUNCTION__);
 	int result;
 	yaffs_ExtendedTags localTags;
 
 	int realignedChunkInNAND = chunkInNAND - dev->chunkOffset;
-	//printk("realignedChunkInNAND=%d, dev->chunkOffset=%d\n", 
-			//realignedChunkInNAND, dev->chunkOffset);
-debug_nand("[%s] buffer=%p\n", __FUNCTION__, buffer);
 	/* If there are no tags provided, use local tags to get prioritised gc working */
 	if(!tags)
 		tags = &localTags;
@@ -64,7 +52,6 @@ int yaffs_WriteChunkWithTagsToNAND(yaffs_Device * dev,
 						   const __u8 * buffer,
 						   yaffs_ExtendedTags * tags)
 {
-debug_nand("---------[%s]----------\n", __FUNCTION__);
 	chunkInNAND -= dev->chunkOffset;
 
 	if (tags) {
@@ -96,7 +83,6 @@ debug_nand("---------[%s]----------\n", __FUNCTION__);
 
 int yaffs_MarkBlockBad(yaffs_Device * dev, int blockNo)
 {
-debug_nand("---------[%s]----------\n", __FUNCTION__);
 	blockNo -= dev->blockOffset;
 
 	if (dev->markNANDBlockBad)
@@ -110,7 +96,6 @@ int yaffs_QueryInitialBlockState(yaffs_Device * dev,
 						 yaffs_BlockState * state,
 						 __u32 *sequenceNumber)
 {
-debug_nand("---------[%s]----------\n", __FUNCTION__);
 	blockNo -= dev->blockOffset;
 
 	if (dev->queryNANDBlock)
@@ -125,7 +110,6 @@ debug_nand("---------[%s]----------\n", __FUNCTION__);
 int yaffs_EraseBlockInNAND(struct yaffs_DeviceStruct *dev,
 				  int blockInNAND)
 {
-debug_nand("---------[%s]----------\n", __FUNCTION__);
 	int result;
 
 	blockInNAND -= dev->blockOffset;
@@ -138,7 +122,6 @@ debug_nand("---------[%s]----------\n", __FUNCTION__);
 
 int yaffs_InitialiseNAND(struct yaffs_DeviceStruct *dev)
 {
-	debug_nand("---------[%s]----------\n", __FUNCTION__);
 	return dev->initialiseNAND(dev);
 }
 

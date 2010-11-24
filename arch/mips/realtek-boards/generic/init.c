@@ -495,6 +495,7 @@ void __init prom_init(void)
 	platform_info.modelconfig_len=parse_series_variable("modelconfig_", platform_info.modelconfig,MODEL_CONFIG_LEN,1,1,1);
 	prom_printf("\tModel Config length=%d\n",platform_info.modelconfig_len);
 
+	platform_info.secure_boot=0;
 /*
 // These lines are for debugging when you encounter "irq 3: nobody cared!"
 	prom_printf("Registers: VENUS_MIS_UMSK_ISR: 0x%08X\tVENUS_MIS_ISR: 0x%08X\n", inl(VENUS_MIS_UMSK_ISR), inl(VENUS_MIS_ISR));

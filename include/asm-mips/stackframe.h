@@ -220,6 +220,7 @@
                 .word   0x40806002      # mtc0 $0, $12, 2
                 la      k0, bbb
                 mtc0    k0, CP0_EPC
+                ehb
                 eret
 bbb:            li      k0, 0x40
                 .word   0x409a6002      # mtc0 k0, $12, 2
@@ -319,6 +320,7 @@ bbb:            li      k0, 0x40
                 .word   0x409a6002      # mtc0 k0, $12, 2
                 la      k0, aaa
                 mtc0    k0, CP0_EPC
+                ehb
                 eret
 aaa:            li      k0, 0x1000
                 .word   0x409a6002      # mtc0 k0, $12, 2
@@ -409,6 +411,7 @@ use_shadow:     PTR_SUBU k1, k1, PT_SIZE
                 .word   0x409a6002      # mtc0 k0, $12, 2
                 la      k0, aaa
                 mtc0    k0, CP0_EPC
+                ehb
                 eret
 aaa:            li      k0, 0x1000
                 .word   0x409a6002      # mtc0 k0, $12, 2

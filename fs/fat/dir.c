@@ -211,9 +211,10 @@ int fat_search_long(struct inode *inode, const unsigned char *name,
 	struct nls_table *nls_io = sbi->nls_io;
 	struct nls_table *nls_disk = sbi->nls_disk;
 	wchar_t bufuname[14];
-	unsigned char xlate_len, nr_slots;
+	unsigned char nr_slots;
 	wchar_t *unicode = NULL;
 	unsigned char work[8], bufname[260];	/* 256 + 4 */
+	int xlate_len;
 	int uni_xlate = sbi->options.unicode_xlate;
 	int utf8 = sbi->options.utf8;
 	int anycase = (sbi->options.name_check != 's');
@@ -373,13 +374,15 @@ parse_long:
 				goto Found;
 
 		if (nr_slots) {
+			void *longname = unicode + 261;
+			int buf_size = PAGE_SIZE - (261 * sizeof(unicode[0]));
 			xlate_len = utf8
-				?utf8_wcstombs(bufname, unicode, sizeof(bufname))
-				:uni16_to_x8(bufname, unicode, uni_xlate, nls_io);
+				? utf8_wcstombs(longname, unicode, buf_size)
+				: uni16_to_x8(longname, unicode, uni_xlate, nls_io);
 			if (xlate_len != name_len)
 				continue;
-			if ((!anycase && !memcmp(name, bufname, xlate_len)) ||
-			    (anycase && !nls_strnicmp(nls_io, name, bufname,
+			if ((!anycase && !memcmp(name, longname, xlate_len)) ||
+			    (anycase && !nls_strnicmp(nls_io, name, longname,
 								xlate_len)))
 				goto Found;
 		}

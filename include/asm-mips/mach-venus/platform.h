@@ -12,8 +12,11 @@
 #define SYSTEM_PARAMETERS_LEN 640
 #define MODEL_CONFIG_LEN 64//20 for libra 10bytes now we support 32byes for sutomer extra use
 
-
-
+typedef struct {
+	int     mode;           // 0: NTSC, 1: PAL
+	int     size;
+	int     color[4];
+} logo_info_struct;
 
 /* The format of "bootrev" is like "00.00.26c". The second byte of it stands for board id, and the upper half byte of board id stands for CPU id */
 /* The new format of "bootrev" is extended to be "xxxx.xxxx.xx". We support both "xx.xx.xx" and "xxxx.xxxx.xx".  */
@@ -129,6 +132,7 @@ typedef struct {
 	char signature[129];
 	unsigned char modelconfig[MODEL_CONFIG_LEN];
 	int modelconfig_len;
+	int secure_boot;
 } platform_info_t;
 
 extern platform_info_t platform_info;

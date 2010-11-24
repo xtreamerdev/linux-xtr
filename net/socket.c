@@ -760,6 +760,8 @@ ssize_t sock_sendpage(struct file *file, struct page *page,
 	
 #endif
 	sock = SOCKET_I(file->f_dentry->d_inode);
+	// EJ: wait for connection in 5 seconds at most... 
+	sock->sk->sk_sndtimeo = 5*HZ;
 
 	flags = !(file->f_flags & O_NONBLOCK) ? 0 : MSG_DONTWAIT;
 	if (more)

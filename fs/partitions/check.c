@@ -369,7 +369,7 @@ void add_partition(struct gendisk *disk, int part, sector_t start, sector_t len)
 }
 
 /*  2009/06/15 cfyeh : partiton serial */
-void add_partition_for_part_serial(struct gendisk *disk, int part, sector_t start, sector_t len, int part_serial)
+void add_partition_for_part_serial(struct gendisk *disk, int part, sector_t start, sector_t len, int part_serial, int is_efi)
 {
 	struct hd_struct *p;
 	char part_disc[64], symlink[16];
@@ -383,6 +383,7 @@ void add_partition_for_part_serial(struct gendisk *disk, int part, sector_t star
 	p->nr_sects = len;
 	p->partno = part;
 	p->part_serial = part_serial; /*  2009/06/15 cfyeh : partiton serial */
+	p->is_efi_system_partition = is_efi;
 
 	devfs_mk_bdev(MKDEV(disk->major, disk->first_minor + part),
 			S_IFBLK|S_IRUSR|S_IWUSR,
@@ -427,13 +428,13 @@ void register_disk(struct gendisk *disk)
 	if ((err = kobject_add(&disk->kobj)))
 		return;
 	disk_sysfs_symlinks(disk);
-	kobject_hotplug(&disk->kobj, KOBJ_ADD);
+	//kobject_hotplug(&disk->kobj, KOBJ_ADD); // commented out by cfyeh 2009/10/22
 
 	/* No minors to use for partitions */
 	if (disk->minors == 1) {
 		if (disk->devfs_name[0] != '\0')
 			devfs_add_disk(disk);
-		return;
+		goto out;
 	}
 
 	/* always add handle for the whole disk */
@@ -441,16 +442,19 @@ void register_disk(struct gendisk *disk)
 
 	/* No such device (e.g., media were just removed) */
 	if (!get_capacity(disk))
-		return;
+		goto out;
 
 	bdev = bdget_disk(disk, 0);
 	if (!bdev)
-		return;
+		goto out;
 
 	bdev->bd_invalidated = 1;
 	if (blkdev_get(bdev, FMODE_READ, 0) < 0)
-		return;
+		goto out;
 	blkdev_put(bdev);
+
+out:
+	kobject_hotplug(&disk->kobj, KOBJ_ADD); // add by cfyeh 2009/10/22
 }
 
 int rescan_partitions(struct gendisk *disk, struct block_device *bdev)
@@ -488,7 +492,6 @@ int rescan_partitions(struct gendisk *disk, struct block_device *bdev)
 /*  2009/06/15 cfyeh : partiton extended serial */
 			disk->part_extended_serial = num;
 /*  2009/06/15 cfyeh : partiton extended serial */
-
 		}
 		// by cfyeh 2007/11/13 -
 	}
@@ -504,7 +507,7 @@ int rescan_partitions(struct gendisk *disk, struct block_device *bdev)
 #if 0
 		add_partition(disk, p, from, size);
 #else
-		add_partition_for_part_serial(disk, p, from, size, state->parts[p].part_serial);
+		add_partition_for_part_serial(disk, p, from, size, state->parts[p].part_serial, state->parts[p].is_efi_system_partition);
 #endif
 /*  2009/06/15 cfyeh : partiton serial */
 

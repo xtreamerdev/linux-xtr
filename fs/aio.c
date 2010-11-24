@@ -82,6 +82,17 @@ static void aio_free_ring(struct kioctx *ctx)
 	struct aio_ring_info *info = &ctx->ring_info;
 	long i;
 
+#ifdef CONFIG_USB_FILE_STORAGE_ASYNC_IO_MODE
+	if (current->flags & PF_ASYNC_IO) {
+		// kernel thread case
+		for (i = 0; i < info->nr_pages; i++) {
+			if (info->ring_pages[i] != 0) {
+//				printk("PAGE COUNT: %d \n", page_count(info->ring_pages[i]));
+				put_page(info->ring_pages[i]);
+			}
+		}
+	} else {
+#endif // CONFIG_USB_FILE_STORAGE_ASYNC_IO_MODE
 	for (i=0; i<info->nr_pages; i++)
 		put_page(info->ring_pages[i]);
 
@@ -90,6 +101,9 @@ static void aio_free_ring(struct kioctx *ctx)
 		do_munmap(ctx->mm, info->mmap_base, info->mmap_size);
 		up_write(&ctx->mm->mmap_sem);
 	}
+#ifdef CONFIG_USB_FILE_STORAGE_ASYNC_IO_MODE
+	}
+#endif // CONFIG_USB_FILE_STORAGE_ASYNC_IO_MODE
 
 	if (info->ring_pages && info->ring_pages != info->internal_pages)
 		kfree(info->ring_pages);
@@ -126,6 +140,25 @@ static int aio_setup_ring(struct kioctx *ctx)
 		memset(info->ring_pages, 0, sizeof(struct page *) * nr_pages);
 	}
 
+#ifdef CONFIG_USB_FILE_STORAGE_ASYNC_IO_MODE
+	if (current->flags & PF_ASYNC_IO) {
+		// kernel thread case
+		int i;
+
+		memset(info->ring_pages, 0, sizeof(struct page *) * nr_pages);
+		info->nr_pages = nr_pages;
+		for (i = 0; i < info->nr_pages; i++) {
+			info->ring_pages[i] = alloc_page(GFP_KERNEL);
+//			printk("KERNEL THREAD %x...\n", info->ring_pages[i]);
+			if (!info->ring_pages[i]) {
+				aio_free_ring(ctx);
+				return -ENOMEM;
+			}
+		}
+
+		ctx->user_id = (unsigned long)ctx;
+	} else {
+#endif // CONFIG_USB_FILE_STORAGE_ASYNC_IO_MODE
 	info->mmap_size = nr_pages * PAGE_SIZE;
 	dprintk("attempting mmap of %lu bytes\n", info->mmap_size);
 	down_write(&ctx->mm->mmap_sem);
@@ -152,6 +185,9 @@ static int aio_setup_ring(struct kioctx *ctx)
 	}
 
 	ctx->user_id = info->mmap_base;
+#ifdef CONFIG_USB_FILE_STORAGE_ASYNC_IO_MODE
+	}
+#endif // CONFIG_USB_FILE_STORAGE_ASYNC_IO_MODE
 
 	info->nr = nr_events;		/* trusted copy */
 
@@ -1696,6 +1732,114 @@ asmlinkage long sys_io_getevents(aio_context_t ctx_id,
 
 	return ret;
 }
+
+#ifdef CONFIG_USB_FILE_STORAGE_ASYNC_IO_MODE
+long setup_kernel_aio()
+{
+	struct kioctx *ioctx = NULL;
+
+	current->flags |= PF_ASYNC_IO;
+	ioctx = ioctx_alloc(3);
+	current->flags &= ~PF_ASYNC_IO;
+	if (IS_ERR(ioctx)) {
+		return 0;
+	}
+
+	return ioctx->user_id;
+}
+EXPORT_SYMBOL(setup_kernel_aio);
+
+unsigned long submit_kernel_aio(unsigned long ctx_id, struct file *file, struct iocb *iocb)
+{
+	struct kioctx *ctx;
+	struct kiocb *req;
+	ssize_t ret;
+
+	ctx = lookup_ioctx(ctx_id);
+	if (unlikely(!ctx)) {
+		pr_debug("EINVAL: submit_kernel_aio: invalid context id\n");
+		return -EINVAL;
+	}
+
+	req = aio_get_req(ctx);         /* returns with 2 references to req */
+	if (unlikely(!req)) {
+		put_ioctx(ctx);
+		return -EAGAIN;
+	}
+
+	req->ki_filp = file;
+	get_file(file);
+
+	req->ki_obj.user = iocb;
+	req->ki_user_data = iocb->aio_data;
+	req->ki_pos = iocb->aio_offset;
+
+	req->ki_buf = (char __user *)(unsigned long)iocb->aio_buf;
+	req->ki_left = req->ki_nbytes = iocb->aio_nbytes;
+	req->ki_opcode = iocb->aio_lio_opcode;
+	init_waitqueue_func_entry(&req->ki_wait, aio_wake_function);
+	INIT_LIST_HEAD(&req->ki_wait.task_list);
+	req->ki_retried = 0;
+
+	ret = aio_setup_iocb(req);
+
+	if (ret)
+		goto out_put_req;
+
+	spin_lock_irq(&ctx->ctx_lock);
+	if (likely(list_empty(&ctx->run_list))) {
+		aio_run_iocb(req);
+	} else {
+		list_add_tail(&req->ki_run_list, &ctx->run_list);
+		/* drain the run list */
+		while (__aio_run_iocbs(ctx))
+			;
+	}
+	spin_unlock_irq(&ctx->ctx_lock);
+	aio_put_req(req);       /* drop extra ref to req */
+	put_ioctx(ctx);
+	return 0;
+
+out_put_req:
+	aio_put_req(req);       /* drop extra ref to req */
+	aio_put_req(req);       /* drop i/o ref to req */
+	put_ioctx(ctx);
+	return ret;
+}
+EXPORT_SYMBOL(submit_kernel_aio);
+
+long suspend_kernel_aio(unsigned long ctx_id)
+{
+	struct kioctx *ioctx = lookup_ioctx(ctx_id);
+	struct io_event ent;
+	long ret = -EINVAL;
+
+	if (likely(ioctx)) {
+		ret = read_events(ioctx, 1, 1, &ent, 0);
+		put_ioctx(ioctx);
+	}
+
+	if (ret <= 0)
+		return ret;
+	else
+		return ent.res;
+}
+EXPORT_SYMBOL(suspend_kernel_aio);
+
+long destroy_kernel_aio(unsigned long ctx_id)
+{
+	struct kioctx *ioctx = lookup_ioctx(ctx_id);
+	if (likely(NULL != ioctx)) {
+		current->flags |= PF_ASYNC_IO;
+		io_destroy(ioctx);
+		current->flags &= ~PF_ASYNC_IO;
+		return 0;
+	}
+	pr_debug("EINVAL: destroy_kernel_aio: invalid context id\n");
+	return -EINVAL;
+}
+EXPORT_SYMBOL(destroy_kernel_aio);
+#endif // CONFIG_USB_FILE_STORAGE_ASYNC_IO_MODE
 
 __initcall(aio_setup);
 

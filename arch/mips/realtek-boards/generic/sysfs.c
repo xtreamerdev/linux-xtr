@@ -15,9 +15,15 @@
 #include <platform.h>
 
 extern char corepath[100];
+#ifdef CONFIG_PM
+extern logo_info_struct logo_info;
+#endif
 
 int add_dvrfs_buffer(unsigned int addr, unsigned int size);
 int free_dvrfs_buffer();
+
+void setup_boot_image(void);
+void setup_boot_image_mars(void);
 
 #ifdef CONFIG_REALTEK_SHOW_STACK 
 void show_trace(struct task_struct *task, unsigned long *stack);
@@ -300,9 +306,18 @@ static struct attribute_group realtek_boards_attr_group = {
 	.attrs = realtek_boards_attrs,
 };
 
+#define __LOGO_ATTR_RO(_name) { .name = __stringify(_name), .mode = 0444, .owner = THIS_MODULE } 
 
+#define LOGO_ATTR_RO(_name) \
+	static struct attribute _name##_attr = __LOGO_ATTR_RO(_name)
 
+LOGO_ATTR_RO(showup);
 
+#ifdef CONFIG_PM
+static struct attribute * logo_attrs[] = {
+	&showup_attr,
+	NULL
+};
 
 /* This section is for updating logo image and parameters. */
 #define LOGO_TARGET_ADDRESS	0xa00f0000
@@ -338,37 +353,81 @@ static ssize_t logo_param_read(struct kobject *kobj,
 		ret_count = 0;
 		goto out;
 	}
+	if (is_mars_cpu()) {
+		unsigned char *pcolor = (unsigned char *)(*(unsigned int *)0xb80054a4 | 0xa0000000);
 
-	logo_param.logo_reg_5370 = *(volatile unsigned int *)0xb8005370;
-	logo_param.logo_reg_5374 = *(volatile unsigned int *)0xb8005374;
-	logo_param.logo_reg_5378 = *(volatile unsigned int *)0xb8005378;
-	logo_param.logo_reg_537c = *(volatile unsigned int *)0xb800537c;
-	logo_param.logo_len = (*(volatile unsigned int *)0xb8005534) - 0xf0000;
-
-	memset(buffer, 0, count);
-	len = snprintf(buffer, count-1,
-				"target, length, reg5370, reg5374, reg5378, reg537c\n");
-	len = snprintf(buffer+len, count-len-1, "0x%x 0x%x 0x%x 0x%x 0x%x 0x%x\n",
-				logo_param.logo_target_addr,
-				logo_param.logo_len,
-				logo_param.logo_reg_5370,
-				logo_param.logo_reg_5374,
-				logo_param.logo_reg_5378,
-				logo_param.logo_reg_537c);
-	ret_count = strlen(buffer);
-
+		len = snprintf(buffer, count-1,
+					"mode, target, length, color array\n");
+		len = snprintf(buffer+len, count-len-1, "%d 0x%x 0x%x %x %x %x %x %x %x %x %x %x %x %x %x\n",
+					logo_info.mode,
+					*(volatile unsigned int *)0xb80054ac,
+					*(volatile unsigned int *)0xb80054b0 - *(volatile unsigned int *)0xb80054ac,
+					(unsigned int)pcolor[0], (unsigned int)pcolor[1], (unsigned int)pcolor[2],
+					(unsigned int)pcolor[3], (unsigned int)pcolor[4], (unsigned int)pcolor[5],
+					(unsigned int)pcolor[6], (unsigned int)pcolor[7], (unsigned int)pcolor[8],
+					(unsigned int)pcolor[9], (unsigned int)pcolor[10], (unsigned int)pcolor[11]);
+		ret_count = strlen(buffer);
+	} else {
+		logo_param.logo_reg_5370 = *(volatile unsigned int *)0xb8005370;
+		logo_param.logo_reg_5374 = *(volatile unsigned int *)0xb8005374;
+		logo_param.logo_reg_5378 = *(volatile unsigned int *)0xb8005378;
+		logo_param.logo_reg_537c = *(volatile unsigned int *)0xb800537c;
+		logo_param.logo_len = (*(volatile unsigned int *)0xb8005534) - 0xf0000;
+	
+		memset(buffer, 0, count);
+		len = snprintf(buffer, count-1,
+					"mode, target, length, reg5370, reg5374, reg5378, reg537c\n");
+		len = snprintf(buffer+len, count-len-1, "%d 0x%x 0x%x 0x%x 0x%x 0x%x 0x%x\n",
+					logo_info.mode,
+					logo_param.logo_target_addr,
+					logo_param.logo_len,
+					logo_param.logo_reg_5370,
+					logo_param.logo_reg_5374,
+					logo_param.logo_reg_5378,
+					logo_param.logo_reg_537c);
+		ret_count = strlen(buffer);
+	}
 out:
 	up(&logo_param_lock);
 
 	return ret_count;
 }
 
+static void LOGO_decode_CLUT(unsigned long logo_reg_537X, unsigned char *clut_addr)
+{
+	unsigned char y, cb, cr;
+
+	y  = logo_reg_537X & 0xff;
+	cb = (logo_reg_537X >> 8) & 0xff;
+	cr = (logo_reg_537X >> 16) & 0xff;
+
+	*(volatile unsigned char *)(clut_addr + 0) = y;
+	*(volatile unsigned char *)(clut_addr + 1) = cr;
+	*(volatile unsigned char *)(clut_addr + 2) = cb;
+}
+
+static unsigned long SWAPEND32(unsigned long data)
+{
+//	printk("input data: %x \n", data);
+#ifdef CONFIG_CPU_MIPS32_R2
+	asm ("wsbh %0, %0; rotr %0, %0, 16;" : : "r"(data));
+	return data;
+#else
+#define CPU_TO_LE32( value ) ( (                ((unsigned int)value)  << 24) |   \
+                               ((0x0000FF00UL & ((unsigned int)value)) <<  8) |   \
+                               ((0x00FF0000UL & ((unsigned int)value)) >>  8) |   \
+                               (                ((unsigned int)value)  >> 24)   )
+
+	return CPU_TO_LE32(data);
+#endif
+}
+
 static void update_logo_param(logo_param_t *logo_param) {
-	*(volatile unsigned int *)0xb8005370 = logo_param->logo_reg_5370;
-	*(volatile unsigned int *)0xb8005374 = logo_param->logo_reg_5374;
-	*(volatile unsigned int *)0xb8005378 = logo_param->logo_reg_5378;
-	*(volatile unsigned int *)0xb800537c = logo_param->logo_reg_537c;
-	*(volatile unsigned int *)0xb8005534 = 0xf0000 + logo_param->logo_len;
+	logo_info.color[0] = logo_param->logo_reg_5370;
+	logo_info.color[1] = logo_param->logo_reg_5374;
+	logo_info.color[2] = logo_param->logo_reg_5378;
+	logo_info.color[3] = logo_param->logo_reg_537c;
+	logo_info.size = logo_param->logo_len;
 	return;
 }
 
@@ -376,39 +435,53 @@ static ssize_t logo_param_write(struct kobject *kobj,
 			char *buffer, loff_t offset, size_t count) {
 	char *p;
 	ssize_t ret_count = 0;
+	ssize_t img_count = 0;
+	int i;
+	unsigned long *addr_base = (unsigned long *)0xa0004008;
+	unsigned char *clut_base = (unsigned long *)0xa0001880;
+	unsigned long image_addr = 0xa0005170;
+	unsigned long logo_offset;
 
 	down(&logo_param_lock);
-	if((p = strsep(&buffer, " ")) == NULL) {
+	if((p = strsep(&buffer, " \n")) == NULL) {
 		ret_count = 0;
 		goto out;
 	}
-	//logo_param.logo_target_addr = simple_strtoll(p, NULL, 0);
+	if (is_mars_cpu()) {
+		img_count = simple_strtoll(p, NULL, 0); 
+		if ((img_count != 1) && (*(unsigned long *)0xa0001800 == 0x00801a3c)) {
+			printk("handle boot-up video...\n");
+			goto video;
+		}
+	} else {
+		//logo_param.logo_target_addr = simple_strtoll(p, NULL, 0);
+	}
 
-	if((p = strsep(&buffer, " ")) == NULL) {
+	if((p = strsep(&buffer, " \n")) == NULL) {
 		ret_count = 0;
 		goto out;
 	}
 	logo_param.logo_len = simple_strtoll(p, NULL, 0);
 
-	if((p = strsep(&buffer, " ")) == NULL) {
+	if((p = strsep(&buffer, " \n")) == NULL) {
 		ret_count = 0;
 		goto out;
 	}
 	logo_param.logo_reg_5370 = simple_strtoll(p, NULL, 0);
 
-	if((p = strsep(&buffer, " ")) == NULL) {
+	if((p = strsep(&buffer, " \n")) == NULL) {
 		ret_count = 0;
 		goto out;
 	}
 	logo_param.logo_reg_5374 = simple_strtoll(p, NULL, 0);
 
-	if((p = strsep(&buffer, " ")) == NULL) {
+	if((p = strsep(&buffer, " \n")) == NULL) {
 		ret_count = 0;
 		goto out;
 	}
 	logo_param.logo_reg_5378 = simple_strtoll(p, NULL, 0);
 
-	if((p = strsep(&buffer, " ")) == NULL) {
+	if((p = strsep(&buffer, " \n")) == NULL) {
 		ret_count = 0;
 		goto out;
 	}
@@ -416,12 +489,94 @@ static ssize_t logo_param_write(struct kobject *kobj,
 
 	ret_count = count;
 
+	if (is_mars_cpu()) {
+		/* notify that we have only one image */
+		*(unsigned char *)0xa0004080 = 0;
 
-	update_logo_param(&logo_param);
+		/* transform logo color lookup table from ext_para_ptr */
+		LOGO_decode_CLUT(logo_param.logo_reg_5370, (unsigned char *)(0xa00017e0 + 0));
+		LOGO_decode_CLUT(logo_param.logo_reg_5374, (unsigned char *)(0xa00017e0 + 3));
+		LOGO_decode_CLUT(logo_param.logo_reg_5378, (unsigned char *)(0xa00017e0 + 6));
+		LOGO_decode_CLUT(logo_param.logo_reg_537c, (unsigned char *)(0xa00017e0 + 9));
 
+		logo_info.size = logo_param.logo_len;
+	} else {
+		update_logo_param(&logo_param);
+	}
 out:
 	up(&logo_param_lock);
 	return ret_count;
+
+video:
+	for (i = 0; i < img_count; i++) {
+		if((p = strsep(&buffer, " \n")) == NULL) {
+			ret_count = 0;
+			goto out;
+		}
+		logo_offset = simple_strtoll(p, NULL, 0);
+//		printk("#%d# offset = %x \n", i, logo_offset);
+	
+		if((p = strsep(&buffer, " \n")) == NULL) {
+			ret_count = 0;
+			goto out;
+		}
+		logo_param.logo_reg_5370 = simple_strtoll(p, NULL, 0);
+//		printk("#%d# reg5370 = %x \n", i, logo_param.logo_reg_5370);
+	
+		if((p = strsep(&buffer, " \n")) == NULL) {
+			ret_count = 0;
+			goto out;
+		}
+		logo_param.logo_reg_5374 = simple_strtoll(p, NULL, 0);
+//		printk("#%d# reg5374 = %x \n", i, logo_param.logo_reg_5374);
+	
+		if((p = strsep(&buffer, " \n")) == NULL) {
+			ret_count = 0;
+			goto out;
+		}
+		logo_param.logo_reg_5378 = simple_strtoll(p, NULL, 0);
+//		printk("#%d# reg5378 = %x \n", i, logo_param.logo_reg_5378);
+	
+		if((p = strsep(&buffer, " \n")) == NULL) {
+			ret_count = 0;
+			goto out;
+		}
+		logo_param.logo_reg_537c = simple_strtoll(p, NULL, 0);
+//		printk("#%d# reg537c = %x \n", i, logo_param.logo_reg_537c);
+
+		if((p = strsep(&buffer, " \n")) == NULL) {
+			ret_count = 0;
+			goto out;
+		}
+		logo_param.logo_len = simple_strtoll(p, NULL, 0);
+//		printk("#%d# len = %x \n", i, logo_param.logo_len);
+
+		addr_base[2*i+0] = SWAPEND32(image_addr);
+		addr_base[2*i+1] = SWAPEND32(image_addr+logo_offset);
+		image_addr += logo_param.logo_len;
+
+		/* transform logo color lookup table from ext_para_ptr */
+		LOGO_decode_CLUT(logo_param.logo_reg_5370, (unsigned char *)(&clut_base[i*16+0]));
+		LOGO_decode_CLUT(logo_param.logo_reg_5374, (unsigned char *)(&clut_base[i*16+3]));
+		LOGO_decode_CLUT(logo_param.logo_reg_5378, (unsigned char *)(&clut_base[i*16+6]));
+		LOGO_decode_CLUT(logo_param.logo_reg_537c, (unsigned char *)(&clut_base[i*16+9]));
+
+		if (i == 0) {
+			/* transform logo color lookup table from ext_para_ptr */
+			LOGO_decode_CLUT(logo_param.logo_reg_5370, (unsigned char *)(0xa00017e0 + 0));
+			LOGO_decode_CLUT(logo_param.logo_reg_5374, (unsigned char *)(0xa00017e0 + 3));
+			LOGO_decode_CLUT(logo_param.logo_reg_5378, (unsigned char *)(0xa00017e0 + 6));
+			LOGO_decode_CLUT(logo_param.logo_reg_537c, (unsigned char *)(0xa00017e0 + 9));
+	
+			logo_info.size = logo_offset;
+		}
+	}
+
+	ret_count = count;
+	/* notify that we have many images */
+	*(unsigned char *)0xa0004080 = 0x78beadde;
+
+	goto out;
 }
 
 static struct bin_attribute logo_param_attr = {
@@ -446,12 +601,19 @@ static ssize_t logo_image_write(struct kobject *kobj,
 	unsigned int *p = (unsigned int*)(logo_param.logo_target_addr+(u32)offset);
 
 	down(&logo_param_lock);
+	if (is_mars_cpu()) {
+		unsigned char *pimage = (unsigned char *)(0xa0005170+(u32)offset);
 
-	//printk("%s:%d p=%p, offset=%u, count=%u\n",
-	//		__FUNCTION__, __LINE__, p, (u32)offset, count);
-	memcpy(p, buffer, count);
-	ret_count = count;
-
+		//printk("%s:%d p=%p, offset=%u, count=%u\n",
+		//		__FUNCTION__, __LINE__, pimage, (u32)offset, count);
+		memcpy(pimage, buffer, count);
+		ret_count = count;
+	} else {
+		//printk("%s:%d p=%p, offset=%u, count=%u\n",
+		//		__FUNCTION__, __LINE__, p, (u32)offset, count);
+		memcpy(p, buffer, count);
+		ret_count = count;
+	}
 	up(&logo_param_lock);
 	return ret_count;
 }
@@ -471,9 +633,14 @@ static void logo_param_release(struct kobject *kobj) {
 	return;
 }
 
-/*
 static ssize_t logo_param_show(struct kobject * kobj,
 			struct attribute * attr, char * buffer) {
+	if (attr == &showup_attr) {
+		if (is_mars_cpu())
+			setup_boot_image_mars();
+		else
+			setup_boot_image();
+	}
 	return 0;
 }
 
@@ -481,19 +648,16 @@ static ssize_t logo_param_store(struct kobject * kobj,
 			struct attribute * attr, const char * buffer, size_t count) {
 	return 0;
 }
-*/
-
 
 static struct sysfs_ops logo_param_sysfs_ops = {
-/*
-        .show = logo_param_show,
-        .store = logo_param_store,
-*/
+	.show = logo_param_show,
+	.store = logo_param_store,
 };
 
 static struct kobj_type logo_param_ktype = {
 	.sysfs_ops = &logo_param_sysfs_ops,
 	.release = logo_param_release,
+	.default_attrs = logo_attrs,
 };
 
 static int __init realtek_sysfs_logo_param_init(struct kobject *parent_kobj) {
@@ -519,6 +683,7 @@ static int __init realtek_sysfs_logo_param_init(struct kobject *parent_kobj) {
 
 	return err;
 }
+#endif
 
 static int __init realtek_boards_sysfs_init(void)
 {
@@ -528,7 +693,9 @@ static int __init realtek_boards_sysfs_init(void)
 		error = sysfs_create_group(&realtek_boards_subsys.kset.kobj,
 					   &realtek_boards_attr_group);
 
+#ifdef CONFIG_PM
 	realtek_sysfs_logo_param_init(&realtek_boards_subsys.kset.kobj);
+#endif
 
 //	platform_info.vout_interface[0] = 0;
 

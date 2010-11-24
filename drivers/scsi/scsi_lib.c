@@ -899,6 +899,14 @@ void scsi_io_completion(struct scsi_cmnd *cmd, unsigned int good_bytes,
 		scsi_requeue_command(q, cmd);
 		return;
 	}
+
+	if (host_byte(result) == DID_BUS_BUSY) {
+		cmd->request->flags |= REQ_SCSI_NOT_READY;
+		set_bit(BIO_SCSI_NOT_READY, &cmd->request->bio->bi_flags);
+		cmd = scsi_end_request(cmd, 0, this_count, 0);
+		return;
+	}
+
 	if (result) {
 		printk(KERN_INFO "SCSI error : <%d %d %d %d> return code "
 		       "= 0x%x\n", cmd->device->host->host_no,
@@ -1066,8 +1074,10 @@ static int scsi_prep_fn(struct request_queue *q, struct request *req)
 		if (sdev->sdev_state == SDEV_DEL) {
 			/* Device is fully deleted, no commands
 			 * at all allowed down */
+#if 0 // reduce log msg if ap keep reading dead device
 			printk(KERN_ERR "scsi%d (%d:%d): rejecting I/O to dead device\n",
 			       sdev->host->host_no, sdev->id, sdev->lun);
+#endif
 			return BLKPREP_KILL;
 		}
 		/* OK, we only allow special commands (i.e. not

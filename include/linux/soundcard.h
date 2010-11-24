@@ -697,6 +697,15 @@ typedef struct buffmem_desc {
 #define SOUND_PCM_MAPINBUF		SNDCTL_DSP_MAPINBUF
 #define SOUND_PCM_MAPOUTBUF		SNDCTL_DSP_MAPOUTBUF
 
+typedef struct { 
+		int cmd;
+		int size;
+		unsigned int sample[32];
+	} valid_sample_info;
+#define SNDCTL_DSP_VALID_SAMPLE		_SIOWR('P', 24, valid_sample_info)
+#define	VALID_SAMPLE_INPUT	0
+#define VALID_SAMPLE_OUTPUT	1
+
 /*
  * ioctl calls to be used in communication with coprocessors and
  * DSP chips.

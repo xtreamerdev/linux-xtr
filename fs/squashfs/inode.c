@@ -41,6 +41,8 @@
 #include <linux/vmalloc.h>
 #include <asm/uaccess.h>
 #include <asm/semaphore.h>
+#include <mcp.h>
+#include <platform.h>
 
 #include "squashfs.h"
 
@@ -117,39 +119,51 @@ static struct buffer_head *get_block_length(struct super_block *s,
 	struct squashfs_sb_info *msblk = s->s_fs_info;
 	unsigned short temp;
 	struct buffer_head *bh;
+	unsigned char dec_tmp[2*BLOCK_SIZE];
+	unsigned char *buffer_ptr;
 
 	if (!(bh = sb_bread(s, *cur_index)))
 		goto out;
 
+	if(platform_info.secure_boot) {
+		MCP_AES_ECB_Decryption(NULL, bh->b_data, dec_tmp, bh->b_size);
+		buffer_ptr = dec_tmp;
+	} else
+		buffer_ptr = bh->b_data;
 	if (msblk->devblksize - *offset == 1) {
 		if (msblk->swap)
 			((unsigned char *) &temp)[1] = *((unsigned char *)
-				(bh->b_data + *offset));
+				(buffer_ptr + *offset));
 		else
 			((unsigned char *) &temp)[0] = *((unsigned char *)
-				(bh->b_data + *offset));
+				(buffer_ptr + *offset));
 		brelse(bh);
 		if (!(bh = sb_bread(s, ++(*cur_index))))
 			goto out;
+		if(platform_info.secure_boot) {
+			MCP_AES_ECB_Decryption(NULL, bh->b_data, dec_tmp, bh->b_size);
+			buffer_ptr = dec_tmp;
+		} else
+			buffer_ptr = bh->b_data;
 		if (msblk->swap)
 			((unsigned char *) &temp)[0] = *((unsigned char *)
-				bh->b_data); 
+				buffer_ptr); 
 		else
 			((unsigned char *) &temp)[1] = *((unsigned char *)
-				bh->b_data); 
+				buffer_ptr); 
 		*c_byte = temp;
 		*offset = 1;
 	} else {
 		if (msblk->swap) {
 			((unsigned char *) &temp)[1] = *((unsigned char *)
-				(bh->b_data + *offset));
+				(buffer_ptr + *offset));
 			((unsigned char *) &temp)[0] = *((unsigned char *)
-				(bh->b_data + *offset + 1)); 
+				(buffer_ptr + *offset + 1)); 
 		} else {
 			((unsigned char *) &temp)[0] = *((unsigned char *)
-				(bh->b_data + *offset));
+				(buffer_ptr + *offset));
 			((unsigned char *) &temp)[1] = *((unsigned char *)
-				(bh->b_data + *offset + 1)); 
+				(buffer_ptr + *offset + 1)); 
 		}
 		*c_byte = temp;
 		*offset += 2;
@@ -160,9 +174,14 @@ static struct buffer_head *get_block_length(struct super_block *s,
 			brelse(bh);
 			if (!(bh = sb_bread(s, ++(*cur_index))))
 				goto out;
+			if(platform_info.secure_boot) {
+				MCP_AES_ECB_Decryption(NULL, bh->b_data, dec_tmp, bh->b_size);
+				buffer_ptr = dec_tmp;
+			} else
+				buffer_ptr = bh->b_data;
 			*offset = 0;
 		}
-		if (*((unsigned char *) (bh->b_data + *offset)) !=
+		if (*((unsigned char *) (buffer_ptr + *offset)) !=
 						SQUASHFS_MARKER_BYTE) {
 			ERROR("Metadata block marker corrupt @ %x\n",
 						*cur_index);
@@ -235,13 +254,21 @@ SQSH_EXTERN unsigned int squashfs_read_data(struct super_block *s, char *buffer,
 		down(&msblk->read_data_mutex);
 
 	for (bytes = 0, k = 0; k < b; k++) {
+		unsigned char dec_tmp[2*BLOCK_SIZE];
+		unsigned char *buffer_ptr;
+		
 		avail_bytes = (c_byte - bytes) > (msblk->devblksize - offset) ?
 					msblk->devblksize - offset :
 					c_byte - bytes;
 		wait_on_buffer(bh[k]);
 		if (!buffer_uptodate(bh[k]))
 			goto block_release;
-		memcpy(c_buffer + bytes, bh[k]->b_data + offset, avail_bytes);
+		if(platform_info.secure_boot) {
+			MCP_AES_ECB_Decryption(NULL, bh[k]->b_data, dec_tmp, bh[k]->b_size);
+			buffer_ptr = dec_tmp;
+		} else
+			buffer_ptr = bh[k]->b_data;
+		memcpy(c_buffer + bytes, buffer_ptr + offset, avail_bytes);
 		bytes += avail_bytes;
 		offset = 0;
 		brelse(bh[k]);
@@ -977,7 +1004,7 @@ static int squashfs_fill_super(struct super_block *s, void *data, int silent)
 	}
 	sblk = &msblk->sblk;
 	
-	msblk->devblksize = sb_min_blocksize(s, BLOCK_SIZE);
+	msblk->devblksize = sb_min_blocksize(s, 2*BLOCK_SIZE);
 	msblk->devblksize_log2 = ffz(~msblk->devblksize);
 
 	init_MUTEX(&msblk->read_data_mutex);

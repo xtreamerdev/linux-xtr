@@ -311,6 +311,13 @@ config REALTEK_MARS_256MB
 	help
 	  In order to support the 256MB in Mars.
 
+config REALTEK_MARS_RESERVE_LAST_48MB
+	bool "Reserve the last 48MB for AVC high-level 5.1."
+	depends on REALTEK_VENUS && REALTEK_MARS_256MB
+	default n
+	help
+	  Video firmware can use the last 48MB to decode the high-level 5.1.
+
 config REALTEK_SECURE_BOOT_PARTITION
 	bool "Secure partition support"
 	select REALTEK_MCP

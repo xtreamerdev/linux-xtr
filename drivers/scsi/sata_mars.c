@@ -16,36 +16,43 @@
 #include "sata_mars.h"
 #include "sata_mars_cp.h"
 
-
 #define DRV_NAME            "SATA_DRV"
 #define DRV_VERSION         "0.7"
 #define MARS_SATA_IRQ       2
 
 #define MARS_SATA_REG_RANGE 0x100
 
-static int mars_sata_match(struct device *dev, struct device_driver *drv);
+static unsigned int PortStatus[SATA_PORT_COUNT] = {MARS_SATA_DEV_ONLINE, MARS_SATA_DEV_ONLINE};
+static unsigned int mod_state=0;
+static struct device *dev_addr=0;
+
+static u8 mars_ata_check_err(struct ata_port *ap);
 static u8 mars_ata_check_status(struct ata_port *ap);
+static u8 mars_chk_online(struct ata_port *ap,u8 show);
+
+static u32 mars_sata_scr_read (struct ata_port *ap, unsigned int sc_reg);
+
 static int mars_init_sata (struct device *dev);
 static int mars_remove(struct device *dev);
-static u32 mars_sata_scr_read (struct ata_port *ap, unsigned int sc_reg);
-static void mars_sata_scr_write (struct ata_port *ap, unsigned int sc_reg, u32 val);
-static void mdio_setting(u8, u16,u8);
+static int mars_sata_match(struct device *dev, struct device_driver *drv);
+static int sata_offline_resume(struct device *dev);
+static int mars_ATAPI_cmd(struct ata_port * ap,u8 atapi_op);
+
+static void __mars_sata_phy_reset(struct ata_port *ap);
 static void init_mdio (u8);
-void mars_ata_dma_reset(struct ata_port *ap);
-u8 mars_chk_online(struct ata_port *ap,u8 show);
-unsigned int mars_ata_busy_sleep (struct ata_port *ap,unsigned long tmout_pat,unsigned long tmout);
-void __mars_sata_phy_reset(struct ata_port *ap);
-static unsigned int PortStatus[SATA_PORT_COUNT] = {MARS_SATA_DEV_ONLINE, MARS_SATA_DEV_ONLINE};
-int sata_offline_resume(struct device *dev);
-static struct work_struct mars_sata_work;
+static void mars_sata_scr_write (struct ata_port *ap, unsigned int sc_reg, u32 val);
+static void mars_ata_dma_reset(struct ata_port *ap);
+static void mars_sata_phy_reset(struct ata_port *ap);
+static void mdio_setting(u8, u16,u8);
+
 static struct timer_list sata_timer ;
-static unsigned int mod_state=0;
+static struct work_struct mars_sata_work;
 
-#if 1 // 20091019 : Add status flag to detect SATA1
-static bool detect_sata1=false;
-#endif
-
-struct device *dev_addr=0;
+extern int ata_bus_probe(struct ata_port *ap);
+extern int ata_qc_issue(struct ata_queued_cmd *qc);
+extern unsigned int mars_ata_busy_sleep (struct ata_port *ap,unsigned long tmout_pat,unsigned long tmout);
+extern void ata_qc_free(struct ata_queued_cmd *qc);
+extern struct ata_queued_cmd *ata_qc_new_init(struct ata_port *ap,struct ata_device *dev);
 
 struct bus_type sata_bus_type = {
     .name       = "SATA_BUS",
@@ -103,6 +110,7 @@ static struct ata_port_operations mars_ops = {
     .dev_select     = ata_std_dev_select,
     .phy_reset      = mars_sata_phy_reset,
     .check_status   = mars_ata_check_status,
+    .check_err      = mars_ata_check_err,
     .bmdma_setup    = mars_ata_dma_setup,
     .bmdma_start    = mars_ata_dma_start,
     .bmdma_stop     = mars_ata_dma_stop,
@@ -119,6 +127,7 @@ static struct ata_port_operations mars_ops = {
     .host_stop      = ata_host_stop,
     .dma_reset      = mars_ata_dma_reset,
     .chk_online     = mars_chk_online,
+    .exec_ATAPI_cmd = mars_ATAPI_cmd,
 };
 
 static struct ata_port_info mars_port_info = {
@@ -156,16 +165,63 @@ void UR_CHAR(unsigned char s){
 }
 
 #define ur_char(s) writel('s', (void __iomem *) (0xb801b200));
+int mars_qc_complete_noop(struct ata_queued_cmd *qc, u8 drv_stat);
+static int mars_ATAPI_cmd(struct ata_port * ap,u8 atapi_op)
+{
+    struct ata_device *adev = &ap->device[0];
+    struct ata_queued_cmd *qc;
+    DECLARE_COMPLETION(wait);
+    unsigned long flags;
+    int rc;
+
+    printk("%s(%d)ap->active_tag:0x%x\n",__func__,__LINE__,ap->active_tag);
+    if(ata_qc_from_tag(ap, ap->active_tag)){
+        printk("%s(%d)ap active\n",__func__,__LINE__);
+        return -1;
+    }
+    else
+    {
+        qc = ata_qc_new_init(ap, adev);
+        if(qc == NULL){
+            printk("%s(%d) get new qc fail\n",__func__,__LINE__);
+            return -1;
+        }
+    }
+
+    qc->complete_fn = mars_qc_complete_noop;
+    qc->tf.command = ATA_CMD_PACKET;
+    qc->tf.feature = 0;
+    qc->tf.flags |= ATA_TFLAG_ISADDR | ATA_TFLAG_DEVICE;
+    qc->tf.protocol = ATA_PROT_ATAPI_NODATA;
+    qc->tf.nsect = 0;
+    qc->tf.device=(qc->tf.device&(~0x08))|(ap->port_no<<3);
+
+    qc->waiting = &wait;
+    qc->cdb[0]=atapi_op; //TEST_UNIT_READY
+
+    spin_lock_irqsave(&ap->host_set->lock, flags);
+    rc = ata_qc_issue(qc);
+    spin_unlock_irqrestore(&ap->host_set->lock, flags);
+
+    if (rc){
+        ata_qc_free(qc);
+        return -1;
+    }else{
+        wait_for_completion(&wait);
+    }
+    return 0;
+}
+
 
 #ifdef CONFIG_MARS_PM
-int mars_qc_complete_noop(struct ata_queued_cmd *qc, u8 drv_stat);
 int generic_sata_suspend(struct device *dev, u32 state)
 {
     struct ata_host_set *host_set = dev_get_drvdata(dev);
     struct ata_port *ap;
 
     //int err;
-    int i,j;
+    int i;
+    //int j;
 
     printk(KERN_INFO"generic_sata_suspend\n");
 
@@ -183,7 +239,7 @@ int generic_sata_suspend(struct device *dev, u32 state)
         ap = (struct ata_port *) host_set->ports[i];
         if (sata_dev_present(ap)){
             printk(KERN_WARNING"sata%u :device found on port%u; ATA status:0x%02x\n",
-                                ap->id,ap->port_no,reginfo);
+                                ap->id,ap->port_no,ata_chk_status(ap));
         }else{
             printk(KERN_WARNING"sata%u :no device found on port%u\n",
                                 ap->id,ap->port_no);
@@ -206,7 +262,7 @@ int generic_sata_suspend(struct device *dev, u32 state)
         }
         printk("%s(%d)\n",__func__,__LINE__);
         qc = ata_qc_new_init(ap, adev);
-
+        BUG_ON(qc == NULL);
         qc->tf.command = ATA_CMD_STANDBYNOW1;
 
         qc->tf.feature = 0;
@@ -313,8 +369,8 @@ int sata_offline_resume(struct device *dev)
     int i;
 
     printk(KERN_INFO"sata_offline_resume\n");
-
     for(i=0;i<host_set->n_ports;i++){
+        host_set->ahost_hp_event &= ~(1<<i);
         ap = host_set->ports[i];
         PortStatus[i]=0x00;
         writel(TIMEOUT_VOL, (void __iomem *) (SATA0_TIMEOUT  +(ap->port_no*MARS_BANK_GAP)));
@@ -359,12 +415,21 @@ static void mars_sata_scr_write (struct ata_port *ap, unsigned int sc_reg, u32 v
 
 static u8 mars_ata_check_status(struct ata_port *ap)
 {
+    u8 tf_status;
     marsinfo("mars_ata_check_status\n");
-    if(ap->aport_hp_event)
-        return 0x51;
-
     void __iomem *mmio = (void __iomem *) ap->ioaddr.status_addr;
-    marslolo("status:%x\n",(u8)readl(mmio)&0xff);
+    tf_status=(u8)readl(mmio)&0xff;
+    if(ap->aport_hp_event){
+        printk("%s(%d)dev disconnect, return tf_status:0x51\n",__func__,__LINE__);
+        printk("%s(%d)true tf_status:0x%x\n",__func__,__LINE__,tf_status);
+        return 0x51;
+    }
+    return tf_status;
+}
+
+static u8 mars_ata_check_err(struct ata_port *ap)
+{
+    void __iomem *mmio = (void __iomem *) ap->ioaddr.error_addr;
     return (u8)readl(mmio)&0xff;
 }
 
@@ -379,7 +444,7 @@ void mars_ata_dma_setup(struct ata_queued_cmd *qc)
 
 
 #ifdef SHOW_PRD
-    if(0){
+    if(1){
         u16 i;
         u32 addr;
         struct scatterlist *sg = qc->sg;
@@ -493,8 +558,10 @@ u8 mars_ata_dma_status(struct ata_port *ap)
 
 u8 mars_chk_online(struct ata_port *ap,u8 show)
 {
-//    if(ap->aport_hp_event)
-//        return 0;
+    struct ata_device *adev;
+    adev = &ap->device[0];
+    if(adev->flags & ATA_DFLAG_RESET_ALERT)
+        return 1;
 
     if(!sata_dev_present(ap)){
         udelay(100);
@@ -518,6 +585,7 @@ void mars_ata_dma_reset(struct ata_port *ap)
     marsinfo("mars_ata_dma_reset\n");
 
     /*Mask SB1 sata*/
+    asm ("sync");
     reginfo=readl((void __iomem *)SB1_MASK);
 
     polltime=0;
@@ -535,32 +603,54 @@ void mars_ata_dma_reset(struct ata_port *ap)
     marslolo("polltime-c: %u\n",polltime);
 
     /* reset phy*/
+    asm ("sync");
     reginfo=readl((void __iomem *)CRT_SOFT_RESET1);
     writel(reginfo&(~(SATA_RST_PHY0<<phy_bank)),(void __iomem *)CRT_SOFT_RESET1);
 
     /*reset SATA MAC clock*/
+    asm ("sync");
     reginfo=readl((void __iomem *)CRT_CLOCK_ENABLE1);
     writel(reginfo&(~(SATA_PORT0_CLK_EN<<phy_bank)),(void __iomem *)CRT_CLOCK_ENABLE1);
 
     /*reset SATA MAC */
+    asm ("sync");
     reginfo=readl((void __iomem *)CRT_SOFT_RESET1);
     writel(reginfo&(~(SATA_RST_MAC0<<phy_bank)),(void __iomem *)CRT_SOFT_RESET1);
 
+
+    udelay(100);
     /*release SB1 Mask*/
+    asm ("sync");
     reginfo=readl((void __iomem *)SB1_MASK);
     writel(reginfo&(~(SB1_MASK_SATA0<<phy_bank)),(void __iomem *)SB1_MASK);
 
     /*release SATA MAC*/
+    asm ("sync");
     reginfo=readl((void __iomem *)CRT_SOFT_RESET1);
-    writel(reginfo|((SATA_RST_MAC0|SATA_RST_PHY0)<<phy_bank),(void __iomem *)CRT_SOFT_RESET1);
+    writel(reginfo|(SATA_RST_MAC0<<phy_bank),(void __iomem *)CRT_SOFT_RESET1);
 
     /*release SATA MAC clock*/
+    asm ("sync");
     reginfo=readl((void __iomem *)CRT_CLOCK_ENABLE1);
     writel(reginfo|(SATA_PORT0_CLK_EN<<phy_bank),(void __iomem *)CRT_CLOCK_ENABLE1);
 
-    writel(SCR2_VOL|SCR2_ACT_COMMU, (void __iomem *) (SATA0_SCR2  +(ap->port_no*MARS_BANK_GAP)));
-    //udelay(100);
+    /*release SATA phy*/
+    asm ("sync");
+    reginfo=readl((void __iomem *)CRT_SOFT_RESET1);
+    writel(reginfo|(SATA_RST_PHY0<<phy_bank),(void __iomem *)CRT_SOFT_RESET1);
+
+
+    udelay(200);
+    //printk("%s(%d)\n",__func__,__LINE__);
+    asm ("sync");
+    //writel(SCR2_VOL|SCR2_ACT_COMMU, (void __iomem *) (SATA0_SCR2  +(ap->port_no*MARS_BANK_GAP)));
+
+    writel(SCR2_VOL,(void __iomem *) (SATA0_SCR2+phy_bank*MARS_BANK_GAP));
+    asm ("sync");
     init_mdio(phy_bank);
+    udelay(100);
+    //writel(SCR2_VOL,(void __iomem *) (SATA0_SCR2+phy_bank*MARS_BANK_GAP));
+    writel(SCR2_VOL|SCR2_ACT_COMMU, (void __iomem *) (SATA0_SCR2  +(ap->port_no*MARS_BANK_GAP)));
     udelay(100);
     writel(SCR2_VOL,(void __iomem *) (SATA0_SCR2+phy_bank*MARS_BANK_GAP));
 }
@@ -571,9 +661,18 @@ void mars_ata_dma_stop(struct ata_queued_cmd *qc)
     struct ata_port *ap = qc->ap;
     void __iomem *mmio;
     unsigned int polltime;
+    unsigned int reginfo;
+    u8 drv_stat;
 
     marsinfo("sata%u: mars_ata_dma_stop\n",ap->id);
 
+    drv_stat = ata_chk_status(ap);
+    if(drv_stat & 0x81){
+        printk(KERN_ERR "%s(%d) tf_stat:0x%x;tf_error:0x%x\n",__func__,__LINE__,drv_stat,ap->ops->check_err(ap));
+    }
+
+
+    writel((u32)0x00, (void __iomem *) (SATA0_DMACR+(ap->port_no * MARS_BANK_GAP )));   //alex add
     /*clear DMACTRL go bit */
     mmio = (void __iomem *)(SATA0_DMACTRL+(ap->port_no * MARS_BANK_GAP));
 
@@ -603,9 +702,20 @@ void mars_ata_dma_stop(struct ata_queued_cmd *qc)
         while((readl(mmio)&0x01)){
             mdelay(1);
             if(polltime>500){
-                qc->dev->flags |= ATA_DFLAG_DMA_RESET;
+
+                reginfo=readl((void __iomem *)(SATA0_INTPR+(ap->port_no * MARS_BANK_GAP)));
+                /*
+                printk(KERN_INFO "%s(%d) sata%u: INTPR:0x%08x\n",__func__,__LINE__,ap->id,reginfo);
+                printk(KERN_INFO "DMAT=%d; NEWFP=%d; PMABORT=%d; ERR=%d; NEWBIST=%d; IPF=%d\n"
+                                 ,(reginfo&0x01)
+                                 ,(reginfo&0x02)>>1
+                                 ,(reginfo&0x04)>>2
+                                 ,(reginfo&0x08)>>3
+                                 ,(reginfo&0x10)>>4
+                                 ,(reginfo&0x80000000)>>31);
+                */
                 writel(0x00, mmio);
-                printk(KERN_WARNING "sata%u: DMA read from HD error !\n",ap->id);
+                printk(KERN_WARNING "sata%u: DMA read from device error !\n",ap->id);
 
 #ifdef SHOW_IPF
         void __iomem *mmio3;
@@ -633,7 +743,7 @@ void mars_ata_dma_irq_clear(struct ata_port *ap)
     mmio = (void __iomem *)(SATA0_CDR7+(ap->port_no * MARS_BANK_GAP));
     readl(mmio);
     mmio = (void __iomem *)(SATA0_INTPR+(ap->port_no * MARS_BANK_GAP));
-    //readl(mmio);
+    readl(mmio);
     writel(readl(mmio), mmio);
 
 
@@ -687,7 +797,7 @@ static void init_mdio (u8 bank)
 
     mdio_setting(SATA_PHY_RCR2, 0xc2b8,bank);
 
-   	mdio_setting(SATA_PHY_TCR0, 0xa23c,bank);
+        mdio_setting(SATA_PHY_TCR0, 0xa23c,bank);
 
     mdio_setting(SATA_PHY_TCR1, 0x2800,bank);
 
@@ -752,13 +862,6 @@ hd_rty:
     writel(TIMEOUT_VOL, (void __iomem *) (SATA0_TIMEOUT  +(phy_bank*MARS_BANK_GAP)));
     writel(ENABLE_VOL, (void __iomem *) (SATA0_ENABLE+(phy_bank*MARS_BANK_GAP)));
 
-#if 0 // 20091019 : Add code to detect SATA1 for SATA2
-    if( ap->id == 2 && (detect_sata1 == false) ) // For Xtreamer_Pro
-		goto sata2_exit;
-#else
-    if( ap->id == 2 ) // For Xtreamer 
-		goto sata2_exit;
-#endif
 
     /* waiting phy become ready, if necessary */
     marslolo("wait phy ready\n");
@@ -779,18 +882,12 @@ hd_rty:
             printk(KERN_WARNING "sata%u: reset phy again!\n",ap->id);
             goto hd_rty;
         }
-#if 0 // 20091019 change counter value to decarese boot time
         if(ap->id==1 && (rtyconut&0xf)<5)
-#else
-        if(ap->id==1 && (rtyconut&0xf)<3) //only 1 time to detect extra dev 
-#endif
         {
             rtyconut++;
             printk(KERN_WARNING "sata%u: reset phy extra!\n",ap->id);
             goto hd_rty;
         }
-
-sata2_exit:
         printk(KERN_WARNING "sata%u: phy reset timeout!\n",ap->id);
         sstatus = scr_read(ap, SCR_STATUS);
         printk(KERN_WARNING "sata%u: no device found (phy stat %08x)\n",
@@ -798,22 +895,9 @@ sata2_exit:
 
         ap->ops->port_disable(ap);
         PortStatus[phy_bank] &= ~MARS_SATA_DEV_ONLINE;
-
-#if 1 // 20091019 : Add code to detect SATA1 for SATA2
-        if( ap->id == 1 )
-		{
-			detect_sata1=false;
-		}
-#endif
     }
     else
     {
-#if 1 // 20091019 : Add code to detect SATA1 for SATA2
-        if( ap->id == 1 )
-		{
-			detect_sata1=true;
-		}
-#endif
         marslolo("phy is ready\n");
         printk(KERN_WARNING "sata%u: occupy port%d, COMRESET ok, sstatus = %X, SCRstatus = %x\n",
                 ap->id,ap->port_no,sstatus, scr_read(ap, SCR_STATUS));
@@ -851,7 +935,7 @@ reset_taskfile:
             goto extra_try;
         }
         ap->ops->port_disable(ap);
-        //printk(KERN_WARNING "sata%u:detect fail!\n",
+        //printk(KERN_WARNING "sata%u:detect fail!\n",__func__,__LINE__);
         return;
     }
     ap->cbl = ATA_CBL_SATA;
@@ -970,7 +1054,11 @@ void mars_sata_work_fn(void* ptr)
 
             if (PortStatus[i] == MARS_SATA_DEV_ONLINE)
             {   /*plugin event ****/
-                adev->flags |= ATA_DFLAG_DEV_ONLINE;
+                if(adev->flags & ATA_DFLAG_DEV_ONLINE){
+                    printk("%s(%d)host is exist\n",__func__,__LINE__);
+                    goto finish_out;
+                }
+
                 adev->flags |= ATA_DFLAG_DEV_PLUGING;
                 ata_port_probe(ap);
                 ap->aport_hp_event=0;
@@ -988,21 +1076,21 @@ void mars_sata_work_fn(void* ptr)
                 */
 
                 if(ata_bus_probe(ap)){
-                    //adev->flags &= ~ATA_DFLAG_DEV_ONLINE;
                     goto finish_out;
                 }
 
                 scsi_scan_host(ap->host);
+                adev->flags |= ATA_DFLAG_DEV_ONLINE;
                 adev->adev_hp_state=ADEV_HP_END;
                 goto finish_out;
             }   /*plugin event &&&*/
             else
             {   /*plugout event ****/
 
-                adev->flags &= ~ATA_DFLAG_DEV_ONLINE;
                 adev->flags |= ATA_DFLAG_DEV_PLUGING;
                 printk(KERN_WARNING"device removed from sata port%u\n",ap->port_no);
                 if(qc){
+                    printk("%s(%d): cmd Q persisting!!\n",__func__,__LINE__);
                     spin_lock_irqsave(&ap->host_set->lock, flags);
                     qc = ata_qc_from_tag(ap, ap->active_tag);
                     if(!qc){
@@ -1014,11 +1102,11 @@ void mars_sata_work_fn(void* ptr)
                         printk("%s(%d) DMA cmd\n",__func__,__LINE__);
                         scmd=ap->qcmd->scsicmd;
                         if (scmd->eh_timeout.function){
-                            printk("%s(%d)\n",__func__,__LINE__);
+                            printk("%s(%d)eh_timeout.function exist\n",__func__,__LINE__);
                             mod_timer(&scmd->eh_timeout,jiffies);
+                        }else{
+                            printk("%s(%d)eh_timeout.function disapper!!\n",__func__,__LINE__);
                         }
-
-                        printk("%s(%d)\n",__func__,__LINE__);
                         ap->ops->dma_reset(ap);
                     }else if((qc->tf.protocol==ATA_PROT_PIO) ||(qc->tf.protocol==ATA_PROT_ATAPI)){
                         printk("%s(%d): PIO cmd \n",__func__,__LINE__);
@@ -1044,6 +1132,7 @@ non_qc_path:
                     spin_unlock_irqrestore(&ap->host_set->lock, flags);
                     adev->adev_hp_state=ADEV_HP_END;
                     scsi_forget_host(ap->host);
+                    adev->flags &= ~ATA_DFLAG_DEV_ONLINE;
                     //ap->ops->port_disable(ap);
                     goto finish_out;
                 }
@@ -1059,6 +1148,7 @@ non_qc_path:
                 break;
             }else{
                 scsi_forget_host(ap->host);
+                adev->flags &= ~ATA_DFLAG_DEV_ONLINE;
                 //ap->ops->port_disable(ap);
                 writel(0x00, (void __iomem *) (SATA0_ENABLE+(ap->port_no*MARS_BANK_GAP)));
                 printk("%s(%d) finish Q, \n",__func__,__LINE__);
@@ -1196,8 +1286,6 @@ static int mars_remove(struct device *dev)
     return 0;
 }
 
-
-
 static ssize_t
 show_offline_dev_field(struct bus_type *bus, char *buf)
 {
@@ -1210,9 +1298,9 @@ show_offline_dev_field(struct bus_type *bus, char *buf)
     flush_scheduled_work();
 
     printk(KERN_ERR "%s(%d)dev_addr=%p;\n",__func__,__LINE__,dev_addr);
-    host_set->ahost_hp_event=3;
 
     for(i=0; i<host_set->n_ports; i++){
+        host_set->ahost_hp_event|=(0x01<<i);
         ap = host_set->ports[i];
         adev=&ap->device[0];
         if (ata_dev_present(adev)){
@@ -1227,7 +1315,64 @@ show_offline_dev_field(struct bus_type *bus, char *buf)
     mars_sata_work_fn(dev_addr);
     return sprintf(buf, "sata device have removed.\n");
 }
-static BUS_ATTR(offline_dev, S_IRUGO | S_IWUSR, show_offline_dev_field, NULL);
+//static BUS_ATTR(offline_dev, S_IRUGO | S_IWUSR, show_offline_dev_field, NULL);
+
+
+static ssize_t
+store_offline_dev_field(struct bus_type *bus, const char *buf, size_t count)
+{
+    //unsigned int i;
+    struct ata_host_set *host_set = dev_get_drvdata(dev_addr);
+    struct ata_port *ap;
+    struct ata_device *adev;
+    unsigned int off_port_no;
+
+    sscanf (buf, "%d\n", &off_port_no);
+    if(off_port_no==1||off_port_no==2)
+        printk("port %d will be stop!\n",off_port_no);
+    else{
+        printk("port %d not exist!\n",off_port_no);
+        return count;
+    }
+
+    del_timer(&sata_timer);
+    flush_scheduled_work();
+
+    off_port_no--;
+    host_set->ahost_hp_event|=(0x01<<off_port_no);
+    ap = host_set->ports[off_port_no];
+    adev=&ap->device[0];
+
+    if(adev->flags &ATA_DFLAG_DEV_ONLINE){
+
+        if (ata_dev_present(adev)){
+            printk(KERN_WARNING"sata%u :device%u found\n",ap->id,ap->port_no);
+        }else{
+            printk(KERN_WARNING"sata%u :device%u not found\n",ap->id,ap->port_no);
+        }
+        PortStatus[off_port_no]=0;
+        adev=&ap->device[0];
+        adev->adev_hp_state=ADEV_HP_START;
+
+        mars_sata_work_fn(dev_addr);
+        PortStatus[off_port_no]=MARS_SATA_DEV_ONLINE;
+    }else{
+        printk("port %d is offline!\n",off_port_no+1);
+    }
+    mod_timer(&sata_timer,jiffies+HZ/2);
+
+    return count;
+}
+static BUS_ATTR(offline_dev, S_IRUGO | S_IWUSR, show_offline_dev_field, store_offline_dev_field);
+
+static ssize_t
+show_scan_dev_field(struct bus_type *bus, char *buf)
+{
+    printk(KERN_INFO"show_scan_dev_field\n");
+    sata_offline_resume(dev_addr);
+    return sprintf(buf, "sata device is scaning...\n");
+}
+static BUS_ATTR(scan_dev, S_IRUGO | S_IWUSR, show_scan_dev_field, NULL);
 
 static ssize_t
 show_wait_insmod_state_field(struct bus_type *bus, char *buf)
@@ -1244,7 +1389,6 @@ show_wait_insmod_state_field(struct bus_type *bus, char *buf)
     else
         printk("sata module insmod fail !!!\n");
 
-
     return sprintf(buf, "%x\n",mod_state);
 }
 static BUS_ATTR(wait_insmod_state, S_IRUGO | S_IWUSR, show_wait_insmod_state_field, NULL);
@@ -1253,11 +1397,12 @@ static int __init mars_init(void)
 {
     int error;
 
-    printk(KERN_INFO"sata driver initial...2009/06/25\n");
+    printk(KERN_INFO"sata driver initial...2009/11/09 10:30\n");
     error = bus_register(&sata_bus_type);
     if (error)
         goto err_bus_fail;
     else {
+        bus_create_file(&sata_bus_type, &bus_attr_scan_dev);
         bus_create_file(&sata_bus_type, &bus_attr_offline_dev);
         bus_create_file(&sata_bus_type, &bus_attr_wait_insmod_state);
         error = device_register(&sata_sb1);
@@ -1278,6 +1423,7 @@ err_driver_fail:
 err_device_fail:
     printk(KERN_INFO"sata device insert fail.\n");
     device_unregister(&sata_sb1);
+    bus_remove_file(&sata_bus_type, &bus_attr_scan_dev);
     bus_remove_file(&sata_bus_type, &bus_attr_offline_dev);
     bus_remove_file(&sata_bus_type, &bus_attr_wait_insmod_state);
 

@@ -26,14 +26,8 @@
 #define LOGO_INFO_ADDR1	0xbfc6ff00
 #define LOGO_INFO_ADDR2	0xbfc3ff00
 #define BOOT_PARAM_ADDR_NEPTUNE	0xbfc01010
-#define BOOT_PARAM_ADDR_MARS	0xbfcff800
+#define BOOT_PARAM_ADDR_MARS	0xa0002800
 #define LOGO_INFO_SIZE	128
-
-typedef struct {
-	int	mode;		// 0: NTSC, 1: PAL
-	int	size;
-	int	color[4];
-} logo_info_struct;
 
 typedef struct {
 	unsigned int flash_type;
@@ -56,7 +50,7 @@ typedef struct {
 	unsigned char *env_param_saddr;
 } boot_extern_param;
 
-static logo_info_struct logo_info;
+logo_info_struct logo_info;
 
 extern unsigned long dvr_task;	/* dvr application's PID */
 extern unsigned long (*rtc_get_time)(void);

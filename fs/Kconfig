@@ -1766,6 +1766,23 @@ config CIFS
 	  and Samba 3 servers, and smbfs for accessing old servers). If you need 
 	  to mount to Samba or Windows 2003 servers from this machine, say Y.
 
+config CIFS_USE_MD_COPY
+        bool "using md_copy to enhance cifs performance (EXPERIMENTAL)"
+        depends on CIFS && REALTEK_VENUS
+	    select REALTEK_MD
+	    default n
+        help
+          Enabling this option to allow the CIFS uses VENUS MD engine to perform
+          memory copy.
+
+config CIFS_READ_PIPELINEING
+        bool "using md_copy to perform the pipeline read performance (EXPERIMENTAL)"
+        depends on CIFS && REALTEK_VENUS && CIFS_USE_MD_COPY	
+	    default n
+        help
+          Enabling this option to allow the CIFS uses VENUS MD engine to perform 
+          pipeline read.
+
 config CIFS_STATS
         bool "CIFS statistics"
         depends on CIFS

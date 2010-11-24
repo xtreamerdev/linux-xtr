@@ -162,7 +162,7 @@ static int dio_refill_pages(struct dio *dio)
 
 	nr_pages = min(dio->total_pages - dio->curr_page, DIO_PAGES);
 #ifdef CONFIG_USB_FILE_STORAGE_DIRECT_IO_MODE
-	if(current->mm) { // user mode pages
+	if (!(dio->curr_user_address & CAC_BASE)) {
 #endif /* CONFIG_USB_FILE_STORAGE_DIRECT_IO_MODE */
 	down_read(&current->mm->mmap_sem);
 	ret = get_user_pages(

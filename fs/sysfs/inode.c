@@ -125,12 +125,26 @@ const unsigned char * sysfs_get_name(struct sysfs_dirent *sd)
  */
 void sysfs_drop_dentry(struct sysfs_dirent * sd, struct dentry * parent)
 {
-	struct dentry * dentry = sd->s_dentry;
+	struct dentry *dentry = NULL;
 
+	/* We're not holding a reference to ->s_dentry dentry but the
+	* field will stay valid as long as sysfs_lock is held.
+	*/
+	spin_lock(&sysfs_lock);
+	spin_lock(&dcache_lock);
+
+	/* dget dentry if it's still alive */
+	if (sd->s_dentry && sd->s_dentry->d_inode)
+		dentry = dget_locked(sd->s_dentry);
+
+	spin_unlock(&dcache_lock);
+	spin_unlock(&sysfs_lock);
+
+	/* drop dentry */
 	if (dentry) {
 		spin_lock(&dcache_lock);
 		spin_lock(&dentry->d_lock);
-		if (!(d_unhashed(dentry) && dentry->d_inode)) {
+		if (!d_unhashed(dentry) && dentry->d_inode) {
 			dget_locked(dentry);
 			__d_drop(dentry);
 			spin_unlock(&dentry->d_lock);
@@ -140,14 +154,30 @@ void sysfs_drop_dentry(struct sysfs_dirent * sd, struct dentry * parent)
 			spin_unlock(&dentry->d_lock);
 			spin_unlock(&dcache_lock);
 		}
+
+		dput(dentry);
 	}
 }
 
 void sysfs_hash_and_remove(struct dentry * dir, const char * name)
 {
 	struct sysfs_dirent * sd;
-	struct sysfs_dirent * parent_sd = dir->d_fsdata;
+	struct sysfs_dirent * parent_sd;
 
+	if (!dir)
+		return;
+ 
+	if ((unsigned int)dir < 0x80000000) {
+		printk("#######[cfyeh-debug] %s(%d) dentry 0x%.8x, fail !!!\n", __func__, __LINE__, dir);
+		dir = NULL;
+		return;
+	}
+
+	if (dir->d_inode == NULL)
+		/* no inode means this hasn't been made visible yet */
+		return;
+
+	parent_sd = dir->d_fsdata;
 	down(&dir->d_inode->i_sem);
 	list_for_each_entry(sd, &parent_sd->s_children, s_sibling) {
 		if (!sd->s_element)

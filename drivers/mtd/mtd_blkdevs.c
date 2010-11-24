@@ -23,13 +23,6 @@
 #include <asm/uaccess.h>
 #include <linux/devfs_fs_kernel.h>
 
-#define MARS_DEBUG 0
-#if MARS_DEBUG
-      #define debug_mars(fmt, arg...)  printk(fmt, ##arg);
-#else
-      #define debug_mars(fmt, arg...)
-#endif
-
 static LIST_HEAD(blktrans_majors);
 
 extern struct semaphore mtd_table_mutex;
@@ -51,7 +44,7 @@ static int do_blktrans_request(struct mtd_blktrans_ops *tr,
 	char *buf;
 
 	block = req->sector;
-	nsect = req->current_nr_sectors;	//nsec=8
+	nsect = req->current_nr_sectors;
 	buf = req->buffer;
 
 	if (!(req->flags & REQ_CMD))
@@ -60,14 +53,11 @@ static int do_blktrans_request(struct mtd_blktrans_ops *tr,
 	if (block + nsect > get_capacity(req->rq_disk))
 		return 0;
 
-	//Ken, 20080903
 	struct mtd_info *mtd = dev->mtd;
 	int page2sect_num;
-	//printk("[%s] mtd->name=%s, mtd->type=%d\n", 
-			//__FUNCTION__, mtd->name, mtd->type);
 	
 	if ( mtd->type == MTD_NANDFLASH || strstr(mtd->name, "nand") )
-		page2sect_num = (mtd->oobblock) >> 9;	//page = 2048, page2sect_num will be 4
+		page2sect_num = (mtd->oobblock) >> 9;
 
 	switch(rq_data_dir(req)) {
 	case READ:
@@ -95,7 +85,7 @@ static int do_blktrans_request(struct mtd_blktrans_ops *tr,
 						return 0;
 			}
 		}else{
-			for (; nsect > 0; nsect--, block++, buf += 512)	//Ken, org
+			for (; nsect > 0; nsect--, block++, buf += 512)
 				if (tr->writesect(dev, block, buf))
 					return 0;
 		}
@@ -170,7 +160,6 @@ static int mtd_blktrans_thread(void *arg)
 
 static void mtd_blktrans_request(struct request_queue *rq)
 {
-debug_mars("---------[%s]----------\n", __FUNCTION__);
 	struct mtd_blktrans_ops *tr = rq->queuedata;
 	wake_up(&tr->blkcore_priv->thread_wq);
 }
@@ -178,7 +167,6 @@ debug_mars("---------[%s]----------\n", __FUNCTION__);
 
 static int blktrans_open(struct inode *i, struct file *f)
 {
-debug_mars("---------[%s]----------\n", __FUNCTION__);
 	struct mtd_blktrans_dev *dev;
 	struct mtd_blktrans_ops *tr;
 	int ret = -ENODEV;
@@ -233,7 +221,6 @@ static int blktrans_release(struct inode *i, struct file *f)
 static int blktrans_ioctl(struct inode *inode, struct file *file, 
 			      unsigned int cmd, unsigned long arg)
 {
-debug_mars("---------[%s]----------\n", __FUNCTION__);
 	struct mtd_blktrans_dev *dev = inode->i_bdev->bd_disk->private_data;
 	struct mtd_blktrans_ops *tr = dev->tr;
 
@@ -273,14 +260,10 @@ struct block_device_operations mtd_blktrans_ops = {
 
 int add_mtd_blktrans_dev(struct mtd_blktrans_dev *new)
 {
-debug_mars("---------[%s]----------\n", __FUNCTION__);
 	struct mtd_blktrans_ops *tr = new->tr;
 	struct list_head *this;
 	int last_devnum = -1;
 	struct gendisk *gd;
-
-	//Ken, 20080903
-	struct mtd_info *mtd = new->mtd;
 
 	if (!down_trylock(&mtd_table_mutex)) {
 		up(&mtd_table_mutex);
@@ -344,8 +327,6 @@ debug_mars("---------[%s]----------\n", __FUNCTION__);
 	/* 2.5 has capacity in units of 512 bytes while still
 	   having BLOCK_SIZE_BITS set to 10. Just to keep us amused. */
 
-	//printk("[%s] mtd->type =%d, size=%ld\n", __FUNCTION__, mtd->type, new->size * new->blksize);
-
 	set_capacity(gd, (new->size * new->blksize) >> 9);
 
 	gd->private_data = new;
@@ -362,7 +343,6 @@ debug_mars("---------[%s]----------\n", __FUNCTION__);
 
 int del_mtd_blktrans_dev(struct mtd_blktrans_dev *old)
 {
-debug_mars("---------[%s]----------\n", __FUNCTION__);
 	if (!down_trylock(&mtd_table_mutex)) {
 		up(&mtd_table_mutex);
 		BUG();
@@ -378,7 +358,6 @@ debug_mars("---------[%s]----------\n", __FUNCTION__);
 
 static void blktrans_notify_remove(struct mtd_info *mtd)
 {
-debug_mars("---------[%s]----------\n", __FUNCTION__);
 	struct list_head *this, *this2, *next;
 
 	list_for_each(this, &blktrans_majors) {
@@ -395,7 +374,6 @@ debug_mars("---------[%s]----------\n", __FUNCTION__);
 
 static void blktrans_notify_add(struct mtd_info *mtd)
 {
-debug_mars("---------[%s]----------\n", __FUNCTION__);
 	struct list_head *this;
 
 	if (mtd->type == MTD_ABSENT)
@@ -416,7 +394,6 @@ static struct mtd_notifier blktrans_notifier = {
       
 int register_mtd_blktrans(struct mtd_blktrans_ops *tr)
 {
-debug_mars("---------[%s]----------\n", __FUNCTION__);
 	int ret, i;
 	/* Register the notifier if/when the first device type is 
 	   registered, to prevent the link/init ordering from fucking
@@ -480,7 +457,6 @@ debug_mars("---------[%s]----------\n", __FUNCTION__);
 
 int deregister_mtd_blktrans(struct mtd_blktrans_ops *tr)
 {
-debug_mars("---------[%s]----------\n", __FUNCTION__);
 	struct list_head *this, *next;
 
 	down(&mtd_table_mutex);
@@ -513,7 +489,6 @@ debug_mars("---------[%s]----------\n", __FUNCTION__);
 
 static void __exit mtd_blktrans_exit(void)
 {
-debug_mars("---------[%s]----------\n", __FUNCTION__);
 	/* No race here -- if someone's currently in register_mtd_blktrans
 	   we're screwed anyway. */
 	if (blktrans_notifier.list.next)

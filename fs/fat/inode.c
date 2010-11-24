@@ -318,12 +318,8 @@ static int fat_fill_inode(struct inode *inode, struct msdos_dir_entry *de)
 
 	if ((de->attr & ATTR_DIR) && !IS_FREE(de->name)) {
 		inode->i_generation &= ~1;
-		if (de->attr & ATTR_HIDDEN) 
-			inode->i_mode = MSDOS_MKMODE(de->attr,
-				S_IRWXUGO & ~sbi->options.fs_dmask) | S_IFHIDE;
-		else
-			inode->i_mode = MSDOS_MKMODE(de->attr,
-				S_IRWXUGO & ~sbi->options.fs_dmask) | S_IFDIR;
+		inode->i_mode = MSDOS_MKMODE(de->attr,
+			S_IRWXUGO & ~sbi->options.fs_dmask) | S_IFDIR;
 		inode->i_op = sbi->dir_ops;
 		inode->i_fop = &fat_dir_operations;
 

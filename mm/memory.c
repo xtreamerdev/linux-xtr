@@ -1090,7 +1090,7 @@ int get_kernel_pages(struct task_struct *tsk, struct mm_struct *mm,
 
 	do {
 		if (pages) {
-			if(start & UNCAC_BASE)
+			if ((start & UNCAC_BASE) == UNCAC_BASE)
 				pages[i] = virt_to_page(CAC_ADDR(start));
 			else
 				pages[i] = virt_to_page(start);

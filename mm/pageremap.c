@@ -247,7 +247,7 @@ radix_tree_replace_pages(struct page *page, struct page *newpage,
 		return -1;
 	}
 	/* Don't __put_page(page) here.  Truncate may be in progress. */
-	newpage->flags |= page->flags & ~(1 << PG_uptodate) &
+	newpage->flags |= page->flags & ~(1 << PG_uptodate) & ~(1 << PG_writeback) &
 	    ~(1 << PG_highmem) & ~(1 << PG_active) & ~(~0UL << NODEZONE_SHIFT);
 
 	/* list_del(&page->list); XXX */
@@ -369,14 +369,18 @@ wait_on_page_freeable(struct page *page, struct address_space *mapping,
 			msleep(1);
 			if ((nretry % HZ) == 0) {
 				printk("remap: still waiting on %p %d\n", page, nretry);
-				printk("page cout: %d, major: %d, minor: %d\n", page_count(page), 
-						MAJOR(mapping->host->i_sb->s_dev),
-						MINOR(mapping->host->i_sb->s_dev));
-				{
-					struct dentry *dentry;
-					dentry = list_entry(mapping->host->i_dentry.next, struct dentry, d_alias);
-					if (dentry)
-						printk("NAME: %s\n", dentry->d_iname);
+				if (mapping == &swapper_space) {
+					printk("NAME: swapper cache\n");
+				} else {
+					printk("page cout: %d, major: %d, minor: %d\n", page_count(page), 
+							MAJOR(mapping->host->i_sb->s_dev),
+							MINOR(mapping->host->i_sb->s_dev));
+					{
+						struct dentry *dentry;
+						dentry = list_entry(mapping->host->i_dentry.next, struct dentry, d_alias);
+						if (dentry)
+							printk("NAME: %s\n", dentry->d_iname);
+					}
 				}
 				break;
 			}
@@ -395,6 +399,38 @@ wait_on_page_freeable(struct page *page, struct address_space *mapping,
 //			ops->remap_release_buffers(page);
 			if (ops->remap_prepare)
 				ops->remap_prepare(page, 0);
+		} else if (PageNFSDirty(page)) {
+			int res;
+			struct writeback_control wbc = {
+				.sync_mode = WB_SYNC_NONE,
+				.nr_to_write = SWAP_CLUSTER_MAX,
+				.nonblocking = 1,
+				.for_reclaim = 1,
+			};
+
+			printk("nfs dirty page reappeared\n");
+
+			if (PageWriteback(page))
+				wait_on_page_writeback(page);
+
+			SetPageReclaim(page);
+			res = mapping->a_ops->writepage(page, &wbc);
+
+			if (res < 0)
+				/* not implemented. help */
+				BUG();
+			if (res == WRITEPAGE_ACTIVATE) {
+				ClearPageReclaim(page);
+				return -REMAPPREP_WB;
+			}
+			if (!PageWriteback(page)) {
+				/* synchronous write or broken a_ops? */
+				ClearPageReclaim(page);
+			}
+			lock_page(page);
+
+			while (PageNFSDirty(page))
+				msleep(1);
 		}
 		unmap_page(page, vlist);
 	}
@@ -723,7 +759,6 @@ got_page:
 	while (!list_empty(&failedp)) {
 		page = list_entry(failedp.prev, struct page, lru);
 		list_del(&page->lru);
-		map_fail++;	// ***
 		if (!TestSetPageLocked(page)) {
 			if (remap_preparepage(page, 10 /* XXX */)) {
 				unlock_page(page);
@@ -733,6 +768,7 @@ got_page:
 					continue;
 			}
 		}
+		map_fail++;	// ***
 		spin_lock_irq(&zone->lru_lock);
 		if (PageActive(page)) {
 			list_add(&page->lru, &zone->active_list);

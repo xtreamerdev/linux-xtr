@@ -248,6 +248,21 @@ extern int CIFSSMBRead(const int xid, struct cifsTconInfo *tcon,
                         const int netfid, unsigned int count,
                         const __u64 lseek, unsigned int *nbytes, char **buf,
 			int * return_buf_type);
+			
+
+#ifdef CONFIG_CIFS_READ_PIPELINEING
+
+int CIFSSMBAsynRead(const int xid, struct cifsTconInfo *tcon,
+            const int netfid, const unsigned int count,
+            const __u64 lseek, unsigned int *nbytes, char **buf,
+	        int * pbuf_type,
+	        unsigned long* mid);
+	        
+void CIFSSMBAsynReadSync(unsigned long mid);	        
+	        
+#endif 	        			
+
+
 extern int CIFSSMBWrite(const int xid, struct cifsTconInfo *tcon,
 			const int netfid, const unsigned int count,
 			const __u64 lseek, unsigned int *nbytes,

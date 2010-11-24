@@ -2333,6 +2333,14 @@ out:
 	return ret;
 }
 
+#define IOCTL_FOR_IN_OUT_SAMPLING_RATE
+#ifdef IOCTL_FOR_IN_OUT_SAMPLING_RATE 
+int usb_audio_in_sampling_rate_size = 0;
+int usb_audio_out_sampling_rate_size = 0;
+unsigned int usb_audio_in_sampling_rate_array[32];
+unsigned int usb_audio_out_sampling_rate_array[32];
+#endif /* IOCTL_FOR_IN_OUT_SAMPLING_RATE */
+
 static int usb_audio_ioctl(struct inode *inode, struct file *file, unsigned int cmd, unsigned long arg)
 {
 	struct usb_audiodev *as = (struct usb_audiodev *)file->private_data;
@@ -2343,6 +2351,9 @@ static int usb_audio_ioctl(struct inode *inode, struct file *file, unsigned int 
 	count_info cinfo;
 	int val = 0;
 	int val2, mapped, ret;
+#ifdef IOCTL_FOR_IN_OUT_SAMPLING_RATE 
+	valid_sample_info sinfo;
+#endif /* IOCTL_FOR_IN_OUT_SAMPLING_RATE */
 
 	if (!s->usbdev)
 		return -EIO;
@@ -2605,6 +2616,22 @@ static int usb_audio_ioctl(struct inode *inode, struct file *file, unsigned int 
 		val2 = (file->f_mode & FMODE_READ) ? as->usbin.dma.format : as->usbout.dma.format;
 		return put_user(AFMT_IS16BIT(val2) ? 16 : 8, user_arg);
 
+#ifdef IOCTL_FOR_IN_OUT_SAMPLING_RATE 
+	case SNDCTL_DSP_VALID_SAMPLE:
+		if (get_user(val, user_arg))
+			return -EFAULT;
+		if(val == VALID_SAMPLE_INPUT) {
+			sinfo.cmd = VALID_SAMPLE_INPUT;
+			sinfo.size = usb_audio_in_sampling_rate_size;
+			memcpy(sinfo.sample, usb_audio_in_sampling_rate_array, sizeof(sinfo.sample)); 
+		} else {
+			sinfo.cmd = VALID_SAMPLE_OUTPUT;
+			sinfo.size = usb_audio_out_sampling_rate_size;
+			memcpy(sinfo.sample, usb_audio_out_sampling_rate_array, sizeof(sinfo.sample)); 
+		}
+		return (copy_to_user(user_arg, &sinfo, sizeof(sinfo)));
+#endif /* IOCTL_FOR_IN_OUT_SAMPLING_RATE */
+
 	case SOUND_PCM_WRITE_FILTER:
 	case SNDCTL_DSP_SETSYNCRO:
 	case SOUND_PCM_READ_FILTER:
@@ -2841,6 +2868,10 @@ static void usb_audio_parsestreaming(struct usb_audio_state *s, unsigned char *b
 	if (asifin >= 0) {
 		as->usbin.flags = FLG_CONNECTED;
 		iface = usb_ifnum_to_if(dev, asifin);
+#ifdef IOCTL_FOR_IN_OUT_SAMPLING_RATE 
+		usb_audio_in_sampling_rate_size = 0;
+		memset(usb_audio_in_sampling_rate_array, 0, sizeof(usb_audio_in_sampling_rate_array));
+#endif /* IOCTL_FOR_IN_OUT_SAMPLING_RATE */
 		for (idx = 0; idx < iface->num_altsetting; idx++) {
 			alts = &iface->altsetting[idx];
 			i = alts->desc.bAlternateSetting;
@@ -2905,9 +2936,15 @@ static void usb_audio_parsestreaming(struct usb_audio_state *s, unsigned char *b
 			fp->format = format;
 			fp->altsetting = i;
 			fp->sratelo = fp->sratehi = fmt[8] | (fmt[9] << 8) | (fmt[10] << 16);
+#ifdef IOCTL_FOR_IN_OUT_SAMPLING_RATE 
+			usb_audio_in_sampling_rate_array[usb_audio_in_sampling_rate_size++] = (unsigned int)fp->sratelo;
+#endif /* IOCTL_FOR_IN_OUT_SAMPLING_RATE */
 			printk(KERN_INFO "usbaudio: valid input sample rate %u\n", fp->sratelo);
 			for (j = fmt[7] ? (fmt[7]-1) : 1; j > 0; j--) {
 				k = fmt[8+3*j] | (fmt[9+3*j] << 8) | (fmt[10+3*j] << 16);
+#ifdef IOCTL_FOR_IN_OUT_SAMPLING_RATE 
+				usb_audio_in_sampling_rate_array[usb_audio_in_sampling_rate_size++] = (unsigned int)k;
+#endif /* IOCTL_FOR_IN_OUT_SAMPLING_RATE */
 				printk(KERN_INFO "usbaudio: valid input sample rate %u\n", k);
 				if (k > fp->sratehi)
 					fp->sratehi = k;
@@ -2923,6 +2960,10 @@ static void usb_audio_parsestreaming(struct usb_audio_state *s, unsigned char *b
 	if (asifout >= 0) {
 		as->usbout.flags = FLG_CONNECTED;
 		iface = usb_ifnum_to_if(dev, asifout);
+#ifdef IOCTL_FOR_IN_OUT_SAMPLING_RATE 
+		usb_audio_out_sampling_rate_size = 0;
+		memset(usb_audio_out_sampling_rate_array, 0, sizeof(usb_audio_out_sampling_rate_array));
+#endif /* IOCTL_FOR_IN_OUT_SAMPLING_RATE */
 		for (idx = 0; idx < iface->num_altsetting; idx++) {
 			alts = &iface->altsetting[idx];
 			i = alts->desc.bAlternateSetting;
@@ -2992,9 +3033,15 @@ static void usb_audio_parsestreaming(struct usb_audio_state *s, unsigned char *b
 			fp->format = format;
 			fp->altsetting = i;
 			fp->sratelo = fp->sratehi = fmt[8] | (fmt[9] << 8) | (fmt[10] << 16);
+#ifdef IOCTL_FOR_IN_OUT_SAMPLING_RATE 
+			usb_audio_out_sampling_rate_array[usb_audio_out_sampling_rate_size++] = (unsigned int)fp->sratelo;
+#endif /* IOCTL_FOR_IN_OUT_SAMPLING_RATE */
 			printk(KERN_INFO "usbaudio: valid output sample rate %u\n", fp->sratelo);
 			for (j = fmt[7] ? (fmt[7]-1) : 1; j > 0; j--) {
 				k = fmt[8+3*j] | (fmt[9+3*j] << 8) | (fmt[10+3*j] << 16);
+#ifdef IOCTL_FOR_IN_OUT_SAMPLING_RATE 
+				usb_audio_out_sampling_rate_array[usb_audio_out_sampling_rate_size++] = (unsigned int)k;
+#endif /* IOCTL_FOR_IN_OUT_SAMPLING_RATE */
 				printk(KERN_INFO "usbaudio: valid output sample rate %u\n", k);
 				if (k > fp->sratehi)
 					fp->sratehi = k;

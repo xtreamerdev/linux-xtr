@@ -71,6 +71,10 @@ static int get_kobj_path_length(struct kobject *kobj)
 	 * Add 1 to strlen for leading '/' of each level.
 	 */
 	do {
+		if(kobject_name(parent) == NULL) {
+			printk("#######[cfyeh-debug] %s(%d) kobject_name(parent) is NULL!\n", __func__, __LINE__);
+			return 0;
+		}
 		length += strlen(kobject_name(parent)) + 1;
 		parent = parent->parent;
 	} while (parent);
@@ -106,6 +110,10 @@ char *kobject_get_path(struct kobject *kobj, int gfp_mask)
 	int len;
 
 	len = get_kobj_path_length(kobj);
+	if (!len) {
+		printk("#######[cfyeh-debug] %s(%d) len is NULL!\n", __func__, __LINE__);
+		return NULL;
+	}
 	path = kmalloc(len, gfp_mask);
 	if (!path)
 		return NULL;

@@ -45,6 +45,14 @@ config REALTEK_MD
 	help
 	  Moving Data Engine Driver
 	  
+config REALTEK_MD_DEVICE_FILE
+	bool "MD Device File Interface (EXPERIMENTAL)"
+	depends on REALTEK_MD
+	default n
+	help
+	  This feature allows user space ap to uses md via ioctl.
+	  	  
+	  
 config REALTEK_MCP
 	tristate "MCP Driver"
 	depends on REALTEK_VENUS

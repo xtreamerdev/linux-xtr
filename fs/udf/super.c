@@ -799,7 +799,8 @@ static int
 udf_vrs(struct super_block *sb, int silent)
 {
 	struct volStructDesc *vsd = NULL;
-	int sector = 32768;
+	//int sector = 32768;
+	unsigned long long sector = 32768;
 	int sectorsize;
 	struct buffer_head *bh = NULL;
 	int iso9660=0;
@@ -815,15 +816,16 @@ udf_vrs(struct super_block *sb, int silent)
 	else
 		sectorsize = sb->s_blocksize;
 
-	sector += (UDF_SB_SESSION(sb) << sb->s_blocksize_bits);
+	//sector += (UDF_SB_SESSION(sb) << sb->s_blocksize_bits);
+	sector += ((unsigned long long)(UDF_SB_SESSION(sb)) << sb->s_blocksize_bits);
 
-	udf_debug("Starting at sector %u (%ld byte sectors)\n",
+	udf_debug("Starting at sector %llu (%ld byte sectors)\n",
 		(sector >> sb->s_blocksize_bits), sb->s_blocksize);
 	/* Process the sequence (if applicable) */
 	for (;!nsr02 && !nsr03; sector += sectorsize)
 	{
 		/* Read a block */
-		bh = udf_tread(sb, sector >> sb->s_blocksize_bits);
+		bh = udf_tread(sb, (int)(sector >> sb->s_blocksize_bits));
 		if (!bh)
 			break;
 

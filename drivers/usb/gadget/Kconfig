@@ -371,6 +371,14 @@ config USB_FILE_STORAGE_DIRECT_IO_MODE
 
 	  Say "y" to support DIRECT IO mode.
 	   
+config USB_FILE_STORAGE_ASYNC_IO_MODE
+	bool "File-backed Storage Gadget ASYNC IO mode"
+	depends on USB_FILE_STORAGE
+	help
+	  Enable asynchronous IO for The File-backed Storage Gadget.
+
+	  Say "y" to support ASYNC IO mode.
+
 # cyhuang (2008/4/1) : Add for remote wakeup test.
 config USB_OTG_REALTEK_REMOTE_WAKEUP
 	boolean "Realtek USB OTG Remote Wakeup Function"	

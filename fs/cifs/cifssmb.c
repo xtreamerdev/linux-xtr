@@ -40,6 +40,10 @@
 #include "cifsacl.h"
 #include "js.h"
 
+#ifdef CONFIG_CIFS_USE_MD_COPY 
+#include <asm/mach-venus/md.h>
+#endif	
+
 #ifdef CONFIG_CIFS_POSIX
 static struct {
 	int index;
@@ -1161,6 +1165,7 @@ openRetry:
 	return rc;
 }
 
+
 int
 CIFSSMBRead(const int xid, struct cifsTconInfo *tcon,
             const int netfid, const unsigned int count,
@@ -1239,7 +1244,16 @@ CIFSSMBRead(const int xid, struct cifsTconInfo *tcon,
                                 rc = -EFAULT;
                         }*/ /* can not use copy_to_user when using page cache*/
 			if(*buf)
+            {
+#ifdef CONFIG_CIFS_USE_MD_COPY 
+                if (data_length >= 1024 && md_is_valid_address(*buf, data_length) && md_is_valid_address(pReadData, data_length))                                
+                    md_memcpy(*buf,pReadData,data_length, 1);                
+                else
+		            memcpy(*buf,pReadData,data_length);
+#else                      
 				memcpy(*buf,pReadData,data_length);
+#endif				
+            }				
 		}
 	}
 
@@ -1262,6 +1276,140 @@ CIFSSMBRead(const int xid, struct cifsTconInfo *tcon,
 		since file handle passed in no longer valid */
 	return rc;
 }
+
+
+
+#ifdef CONFIG_CIFS_READ_PIPELINEING
+
+int CIFSSMBAsynRead(
+    const int               xid, 
+    struct cifsTconInfo*    tcon,
+    const int               netfid, 
+    const unsigned int      count,
+    const __u64             lseek, 
+    unsigned int*           nbytes,
+    char**                  buf,
+    int*                    pbuf_type,
+    unsigned long*          mid
+    )
+{
+	int rc = -EACCES;
+	READ_REQ *pSMB = NULL;
+	READ_RSP *pSMBr = NULL;
+	char *pReadData = NULL;
+	int wct;
+	int resp_buf_type = 0;
+	struct kvec iov[1];		
+	MD_COPY_HANDLE mdh = 0;
+	
+	*mid = 0;
+		                               
+    //init_md_copy_request(&req, lpDst, lpSrc, len, forward);
+
+	cFYI(1,("Reading %d bytes on fid %d",count,netfid));
+	if(tcon->ses->capabilities & CAP_LARGE_FILES)
+		wct = 12;
+	else
+		wct = 10; /* old style read */
+
+	*nbytes = 0;
+	rc = small_smb_init(SMB_COM_READ_ANDX, wct, tcon, (void **) &pSMB);
+	if (rc)
+		return rc;
+
+	/* tcon and ses pointer are checked in smb_init */
+	if (tcon->ses->server == NULL)
+		return -ECONNABORTED;
+
+	pSMB->AndXCommand = 0xFF;       /* none */
+	pSMB->Fid = netfid;
+	pSMB->OffsetLow = cpu_to_le32(lseek & 0xFFFFFFFF);
+	if(wct == 12)
+		pSMB->OffsetHigh = cpu_to_le32(lseek >> 32);
+	else if((lseek >> 32) > 0) /* can not handle this big offset for old */
+		return -EIO;
+
+	pSMB->Remaining = 0;
+	pSMB->MaxCount = cpu_to_le16(count & 0xFFFF);
+	pSMB->MaxCountHigh = cpu_to_le32(count >> 16);
+	if(wct == 12)
+		pSMB->ByteCount = 0;  /* no need to do le conversion since 0 */
+	else {
+		/* old style read */
+		struct smb_com_readx_req * pSMBW =
+			(struct smb_com_readx_req *)pSMB;
+		pSMBW->ByteCount = 0;
+	}
+
+	iov[0].iov_base = (char *)pSMB;
+	iov[0].iov_len = pSMB->hdr.smb_buf_length + 4;
+	rc = SendReceive2(xid, tcon->ses, iov, 
+			  1 /* num iovecs */,
+			  &resp_buf_type, 0); 
+	cifs_stats_inc(&tcon->num_reads);
+	pSMBr = (READ_RSP *)iov[0].iov_base;
+	if (rc) {
+		cERROR(1, ("Send error in read = %d", rc));
+	} else {
+		int data_length = le16_to_cpu(pSMBr->DataLengthHigh);
+		data_length = data_length << 16;
+		data_length += le16_to_cpu(pSMBr->DataLength);
+		*nbytes = data_length;
+
+		/*check that DataLength would not go beyond end of SMB */
+		if ((data_length > CIFSMaxBufSize)
+				|| (data_length > count)) {
+			cFYI(1,("bad length %d for count %d",data_length,count));
+			rc = -EIO;
+			*nbytes = 0;
+		} else {
+			pReadData = (char *) (&pSMBr->hdr.Protocol) +
+			    le16_to_cpu(pSMBr->DataOffset);
+/*                      if(rc = copy_to_user(buf, pReadData, data_length)) {
+                                cERROR(1,("Faulting on read rc = %d",rc));
+                                rc = -EFAULT;
+                        }*/ /* can not use copy_to_user when using page cache*/
+			if(*buf)
+            {
+                if (data_length >= 512 && md_is_valid_address(*buf, data_length) && md_is_valid_address(pReadData, data_length))                
+                    mdh = md_copy_start(*buf,pReadData, data_length, 1);
+                
+                if (!mdh)                    
+                    memcpy(*buf,pReadData,data_length);				
+            }				
+		}
+	}		
+
+    *mid = mdh;
+
+    /*	cifs_small_buf_release(pSMB); */ /* Freed earlier now in SendReceive2 */
+	if(*buf) {
+		if(resp_buf_type == CIFS_SMALL_BUFFER)
+			cifs_small_buf_release(iov[0].iov_base);
+		else if(resp_buf_type == CIFS_LARGE_BUFFER)
+			cifs_buf_release(iov[0].iov_base);
+	} else if(resp_buf_type != CIFS_NO_BUFFER) {
+		/* return buffer to caller to free */ 
+		*buf = iov[0].iov_base;		
+		if(resp_buf_type == CIFS_SMALL_BUFFER)
+			*pbuf_type = CIFS_SMALL_BUFFER;
+		else if(resp_buf_type == CIFS_LARGE_BUFFER)
+			*pbuf_type = CIFS_LARGE_BUFFER;
+	} /* else no valid buffer on return - leave as null */
+
+	/* Note: On -EAGAIN error only caller can retry on handle based calls
+		since file handle passed in no longer valid */
+	return rc;
+}
+
+
+
+void CIFSSMBAsynReadSync(unsigned long mid)    
+{	    
+    md_copy_sync(mid);
+}
+
+#endif
 
 
 int

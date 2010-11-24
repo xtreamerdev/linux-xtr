@@ -888,6 +888,8 @@ static void release_everything(struct us_data *us)
 	scsi_host_put(us_to_host(us));
 }
 
+extern int usb_plug_status;
+
 /* Thread to carry out delayed SCSI-device scanning */
 static int usb_stor_scan_thread(void * __us)
 {
@@ -960,7 +962,11 @@ retry:
 			us->max_lun = usb_stor_Bulk_max_lun(us);
 			up(&us->dev_semaphore);
 		}
+		usb_plug_status++;
+		//printk("#######[cfyeh-debug] %s(%d) usb_plug_status %d\n", __func__, __LINE__, usb_plug_status);
 		scsi_scan_host(us_to_host(us));
+		usb_plug_status--;
+		//printk("#######[cfyeh-debug] %s(%d) usb_plug_status %d\n", __func__, __LINE__, usb_plug_status);
 
 #ifdef USB_STORAGE_POWER_CONDITION_MODE // test for power condition mode page
 		printk("#######[cfyeh-debug] %s(%d) vid 0x%.4x\n", __func__, __LINE__, us->pusb_dev->descriptor.idVendor);
@@ -1096,8 +1102,12 @@ static void storage_disconnect(struct usb_interface *intf)
 
 	US_DEBUGP("storage_disconnect() called\n");
 
+	usb_plug_status++;
+	//printk("#######[cfyeh-debug] %s(%d) usb_plug_status %d\n", __func__, __LINE__, usb_plug_status);
 	quiesce_and_remove_host(us);
 	release_everything(us);
+	usb_plug_status--;
+	//printk("#######[cfyeh-debug] %s(%d) usb_plug_status %d\n", __func__, __LINE__, usb_plug_status);
 }
 
 /***********************************************************************

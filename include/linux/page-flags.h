@@ -83,6 +83,7 @@
 #define PG_dvr			24	/* mark dvr page used in direct I/O */
 #define PG_again		25
 #define PG_flush		26
+#define PG_nfsdirty		27
 
 /*
  * Global page accounting.  One instance per CPU.  Only unsigned longs are
@@ -345,6 +346,10 @@ extern void __mod_page_state(unsigned offset, unsigned long delta);
 #define PageFlush(page)		test_bit(PG_flush, &(page)->flags)
 #define SetPageFlush(page)	set_bit(PG_flush, &(page)->flags)
 #define ClearPageFlush(page)	clear_bit(PG_flush, &(page)->flags)
+
+#define PageNFSDirty(page)	test_bit(PG_nfsdirty, &(page)->flags)
+#define SetPageNFSDirty(page)	set_bit(PG_nfsdirty, &(page)->flags)
+#define ClearPageNFSDirty(page)	clear_bit(PG_nfsdirty, &(page)->flags)
 
 struct page;	/* forward declaration */
 

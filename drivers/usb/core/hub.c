@@ -2789,6 +2789,9 @@ int usb_mars_otg_test_mode_jk = 0;
 extern void USBPHY_SetReg_Default_3A(void);
 #endif
 
+int usb_plug_status = 0;
+EXPORT_SYMBOL (usb_plug_status);
+
 static void hub_events(void)
 {
 	struct list_head *tmp;
@@ -2865,7 +2868,11 @@ static void hub_events(void)
 			dev_dbg (hub_dev, "resetting for error %d\n",
 				hub->error);
 
+			usb_plug_status++;
+			//printk("#######[cfyeh-debug] %s(%d) usb_plug_status %d\n", __func__, __LINE__, usb_plug_status);
 			ret = usb_reset_device(hdev);
+			usb_plug_status--;
+			//printk("#######[cfyeh-debug] %s(%d) usb_plug_status %d\n", __func__, __LINE__, usb_plug_status);
 			if (ret) {
 				dev_dbg (hub_dev,
 					"error resetting hub: %d\n", ret);
@@ -3036,8 +3043,14 @@ static void hub_events(void)
 			}
 
 			if (connect_change)
+			{
+				usb_plug_status++;
+				//printk("#######[cfyeh-debug] %s(%d) usb_plug_status %d\n", __func__, __LINE__, usb_plug_status);
 				hub_port_connect_change(hub, i,
 						portstatus, portchange);
+				usb_plug_status--;
+				//printk("#######[cfyeh-debug] %s(%d) usb_plug_status %d\n", __func__, __LINE__, usb_plug_status);
+			}
 
 			if (portstatus & USB_PORT_STAT_C_CONNECTION) {
 				if (prev_kobj_address == (unsigned int)&hub_dev->kobj &&

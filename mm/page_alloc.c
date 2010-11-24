@@ -349,6 +349,7 @@ static inline void free_pages_check(const char *function, struct page *page)
 				1 << PG_slab	|
 				1 << PG_swapcache |
 				1 << PG_again	|
+				1 << PG_nfsdirty  |
 				1 << PG_writeback )))
 			bad_page(function, page);
 	} else {
@@ -1042,9 +1043,12 @@ EXPORT_SYMBOL(free_pages);
 #ifdef CONFIG_REALTEK_RESERVE_DVR
 int DVR_zone_disable(void)
 {
-	unsigned long flags;
+	unsigned long flags, pages;
 	struct zone *zone = zone_table[ZONE_DVR];
 
+	pages = zone->present_pages;
+	if (zone->zone_start_pfn < 0x2000)
+		pages -= mdesc[3].size>>12;
 retry:
 	spin_lock_irqsave(&zone->lock, flags);
 	if ((zone) && (zone->free_pages == 0)) {
@@ -1052,7 +1056,7 @@ retry:
 		spin_unlock_irqrestore(&zone->lock, flags);
 		return 0;
 	}
-	if ((zone) && (zone->free_pages == zone->present_pages - (mdesc[3].size>>12))) {
+	if ((zone) && (zone->free_pages == pages)) {
 		zone->free_pages = 0;
 		spin_unlock_irqrestore(&zone->lock, flags);
 		return 1;

@@ -81,6 +81,7 @@ struct hd_struct {
 	unsigned reads, read_sectors, writes, write_sectors;
 	int policy, partno;
 	int part_serial; /*  2009/06/15 cfyeh : partiton serial */
+	int is_efi_system_partition;
 };
 
 #define GENHD_FL_REMOVABLE			1

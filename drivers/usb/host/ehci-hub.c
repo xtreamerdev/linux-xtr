@@ -502,6 +502,7 @@ static int ehci_hub_control (
 		}
 
 		// hack for memorette usb device, which port_status will be 0x1100 when plug in/out to fast
+		if(!(is_venus_cpu() || is_neptune_cpu()))
 		if ((temp & PORT_RESET) && !(temp & PORT_CONNECT)) {
 			printk("#######[cfyeh-debug] %s(%d) hack for memorette usb device port_status 0x%x\n", __func__, __LINE__, temp);
 			writel (temp & ~PORT_POWER,

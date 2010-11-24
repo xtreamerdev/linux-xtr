@@ -12,22 +12,15 @@
  */
 
 const char *yaffs_checkptrw_c_version =
-     "$Id: yaffs_checkptrw.c,v 1.17 2008-08-12 22:51:57 charles Exp $";
+     "$Id: yaffs_checkptrw.c,v 1.19 2009-06-19 01:35:46 charles Exp $";
 
 
 #include "yaffs_checkptrw.h"
 #include "yaffs_getblockinfo.h"
 
-#define RTK_DEBUG 0
-#if RTK_DEBUG
-      #define debug_nand(fmt, arg...)  printk(fmt, ##arg);
-#else
-      #define debug_nand(fmt, arg...)
-#endif
-
 static int yaffs_CheckpointSpaceOk(yaffs_Device *dev)
 {
-	debug_nand("---------[%s]----------\n", __FUNCTION__);
+	 
 	int blocksAvailable = dev->nErasedBlocks - dev->nReservedBlocks;
 
 	T(YAFFS_TRACE_CHECKPOINT,
@@ -41,7 +34,7 @@ static int yaffs_CheckpointSpaceOk(yaffs_Device *dev)
 
 static int yaffs_CheckpointErase(yaffs_Device *dev)
 {
-	debug_nand("---------[%s]----------\n", __FUNCTION__);
+	 
 	int i;
 	if(!dev->eraseBlockInNAND)
 		return 0;
@@ -71,7 +64,7 @@ static int yaffs_CheckpointErase(yaffs_Device *dev)
 
 static void yaffs_CheckpointFindNextErasedBlock(yaffs_Device *dev)
 {
-	debug_nand("---------[%s]----------\n", __FUNCTION__);
+	 
 	int  i;
 	int blocksAvailable = dev->nErasedBlocks - dev->nReservedBlocks;
 	T(YAFFS_TRACE_CHECKPOINT,
@@ -100,7 +93,7 @@ static void yaffs_CheckpointFindNextErasedBlock(yaffs_Device *dev)
 
 static void yaffs_CheckpointFindNextCheckpointBlock(yaffs_Device *dev)
 {
-	debug_nand("---------[%s]----------\n", __FUNCTION__);
+	 
 	int  i;
 	yaffs_ExtendedTags tags;
 
@@ -112,9 +105,10 @@ static void yaffs_CheckpointFindNextCheckpointBlock(yaffs_Device *dev)
 			int chunk = i * dev->nChunksPerBlock;
 			int realignedChunk = chunk - dev->chunkOffset;
 
-			dev->readChunkWithTagsFromNAND(dev,realignedChunk,NULL,&tags);
-			T(YAFFS_TRACE_CHECKPOINT,(TSTR("find next checkpt block: search: block %d oid %d seq %d eccr %d" TENDSTR),
-				i, tags.objectId,tags.sequenceNumber,tags.eccResult));
+			dev->readChunkWithTagsFromNAND(dev, realignedChunk,
+					NULL, &tags);
+			T(YAFFS_TRACE_CHECKPOINT, (TSTR("find next checkpt block: search: block %d oid %d seq %d eccr %d" TENDSTR),
+				i, tags.objectId, tags.sequenceNumber, tags.eccResult));
 
 			if(tags.sequenceNumber == YAFFS_SEQUENCE_CHECKPOINT_DATA){
 				/* Right kind of block */
@@ -136,7 +130,7 @@ static void yaffs_CheckpointFindNextCheckpointBlock(yaffs_Device *dev)
 
 int yaffs_CheckpointOpen(yaffs_Device *dev, int forWriting)
 {
-	debug_nand("---------[%s]----------\n", __FUNCTION__);
+	 
 	/* Got the functions we need? */
 	if (!dev->writeChunkWithTagsToNAND ||
 	    !dev->readChunkWithTagsFromNAND ||
@@ -178,7 +172,10 @@ int yaffs_CheckpointOpen(yaffs_Device *dev, int forWriting)
 		dev->blocksInCheckpoint = 0;
 		dev->checkpointMaxBlocks = (dev->internalEndBlock - dev->internalStartBlock)/16 + 2;
 		dev->checkpointBlockList = YMALLOC(sizeof(int) * dev->checkpointMaxBlocks);
-		for(i = 0; i < dev->checkpointMaxBlocks; i++)
+		if(!dev->checkpointBlockList)
+			return 0;
+
+		for (i = 0; i < dev->checkpointMaxBlocks; i++)
 			dev->checkpointBlockList[i] = -1;
 	}
 
@@ -187,7 +184,7 @@ int yaffs_CheckpointOpen(yaffs_Device *dev, int forWriting)
 
 int yaffs_GetCheckpointSum(yaffs_Device *dev, __u32 *sum)
 {
-	debug_nand("---------[%s]----------\n", __FUNCTION__);
+	 
 	__u32 compositeSum;
 	compositeSum =  (dev->checkpointSum << 8) | (dev->checkpointXor & 0xFF);
 	*sum = compositeSum;
@@ -196,7 +193,7 @@ int yaffs_GetCheckpointSum(yaffs_Device *dev, __u32 *sum)
 
 static int yaffs_CheckpointFlushBuffer(yaffs_Device *dev)
 {
-	debug_nand("---------[%s]----------\n", __FUNCTION__);
+	 
 	int chunk;
 	int realignedChunk;
 
@@ -231,7 +228,8 @@ static int yaffs_CheckpointFlushBuffer(yaffs_Device *dev)
 
 	realignedChunk = chunk - dev->chunkOffset;
 
-	dev->writeChunkWithTagsToNAND(dev,realignedChunk,dev->checkpointBuffer,&tags);
+	dev->writeChunkWithTagsToNAND(dev, realignedChunk,
+			dev->checkpointBuffer, &tags);
 	dev->checkpointByteOffset = 0;
 	dev->checkpointPageSequence++;
 	dev->checkpointCurrentChunk++;
@@ -247,7 +245,7 @@ static int yaffs_CheckpointFlushBuffer(yaffs_Device *dev)
 
 int yaffs_CheckpointWrite(yaffs_Device *dev,const void *data, int nBytes)
 {
-	debug_nand("---------[%s]----------\n", __FUNCTION__);
+	 
 	int i=0;
 	int ok = 1;
 
@@ -280,7 +278,7 @@ int yaffs_CheckpointWrite(yaffs_Device *dev,const void *data, int nBytes)
 
 int yaffs_CheckpointRead(yaffs_Device *dev, void *data, int nBytes)
 {
-	debug_nand("---------[%s]----------\n", __FUNCTION__);
+	 
 	int i=0;
 	int ok = 1;
 	yaffs_ExtendedTags tags;
@@ -309,26 +307,23 @@ int yaffs_CheckpointRead(yaffs_Device *dev, void *data, int nBytes)
 			if(dev->checkpointCurrentBlock < 0)
 				ok = 0;
 			else {
-
-				chunk = dev->checkpointCurrentBlock * dev->nChunksPerBlock +
-				          dev->checkpointCurrentChunk;
+				chunk = dev->checkpointCurrentBlock *
+					dev->nChunksPerBlock +
+					dev->checkpointCurrentChunk;
 
 				realignedChunk = chunk - dev->chunkOffset;
 
-	   			/* read in the next chunk */
-	   			/* printf("read checkpoint page %d\n",dev->checkpointPage); */
-				dev->readChunkWithTagsFromNAND(dev, realignedChunk,
-							       dev->checkpointBuffer,
-							      &tags);
-							      
-				debug_nand("[%s]tags.chunkId=%x, dev->checkpointPageSequence=%x, tags.sequenceNumber=%x, YAFFS_SEQUENCE_CHECKPOINT_DATA=%x\n", 
-						__FUNCTION__, tags.chunkId, dev->checkpointPageSequence, 
-						tags.sequenceNumber, YAFFS_SEQUENCE_CHECKPOINT_DATA);
-						
-				if(tags.chunkId != (dev->checkpointPageSequence + 1) ||
+				/* read in the next chunk */
+				/* printf("read checkpoint page %d\n",dev->checkpointPage); */
+				dev->readChunkWithTagsFromNAND(dev,
+						realignedChunk,
+						dev->checkpointBuffer,
+						&tags);
+
+				if (tags.chunkId != (dev->checkpointPageSequence + 1) ||
 					tags.eccResult > YAFFS_ECC_RESULT_FIXED ||
-				   tags.sequenceNumber != YAFFS_SEQUENCE_CHECKPOINT_DATA)
-				   ok = 0;
+					tags.sequenceNumber != YAFFS_SEQUENCE_CHECKPOINT_DATA)
+					ok = 0;
 
 				dev->checkpointByteOffset = 0;
 				dev->checkpointPageSequence++;
@@ -355,7 +350,7 @@ int yaffs_CheckpointRead(yaffs_Device *dev, void *data, int nBytes)
 
 int yaffs_CheckpointClose(yaffs_Device *dev)
 {
-	debug_nand("---------[%s]----------\n", __FUNCTION__);
+	 
 	if(dev->checkpointOpenForWrite){
 		if(dev->checkpointByteOffset != 0)
 			yaffs_CheckpointFlushBuffer(dev);
@@ -385,15 +380,14 @@ int yaffs_CheckpointClose(yaffs_Device *dev)
 		YFREE(dev->checkpointBuffer);
 		dev->checkpointBuffer = NULL;
 		return 1;
-	}
-	else
+	} else
 		return 0;
 
 }
 
 int yaffs_CheckpointInvalidateStream(yaffs_Device *dev)
 {
-	debug_nand("---------[%s]----------\n", __FUNCTION__);
+	 
 	/* Erase the first checksum block */
 
 	T(YAFFS_TRACE_CHECKPOINT,(TSTR("checkpoint invalidate"TENDSTR)));

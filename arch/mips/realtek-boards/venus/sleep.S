@@ -597,6 +597,14 @@ wake_up:
 	jal	long_sleep_delay
 	nop
 no_pm_sleep_reboot:
+#else
+/* For Venus and Neptune, resuming may fail. Therefore, use watchdog timeout
+ * to prevent from this. */
+	sw	zero, VENUS_MIS_TCWCR(s0)
+	jal	long_sleep_delay
+	nop
+	li	t1, 0x1
+	sw	t1, VENUS_MIS_TCWTR(s0)
 #endif
 
 	lui	s0, 0xb800
@@ -617,7 +625,7 @@ no_pm_sleep_reboot:
 	/* HW says that this is useless, but we still need it because IC bug on 27M OSC. */
 	li	t1, 0x0C485001
 	sw	t1, 0x8804(s0)
-	jal long_sleep_delay
+	jal	long_sleep_delay
 	nop
 
 	li	a0, '1'

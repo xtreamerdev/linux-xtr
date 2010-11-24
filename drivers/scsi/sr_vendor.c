@@ -310,8 +310,10 @@ int sr_cd_check(struct cdrom_device_info *cdi)
 	}
 	cd->ms_offset = sector;
 	cd->xa_flag = 0;
-	if (CDS_AUDIO != sr_disk_status(cdi) && 1 == sr_is_xa(cd))
-		cd->xa_flag = 1;
+	if(rc==0){
+	    if (CDS_AUDIO != sr_disk_status(cdi) && 1 == sr_is_xa(cd))
+		    cd->xa_flag = 1;
+	}
 
 	if (2048 != cd->device->sector_size) {
 		sr_set_blocklength(cd, 2048);

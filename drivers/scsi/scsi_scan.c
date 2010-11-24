@@ -1648,6 +1648,7 @@ int scsi_device_check_change_force(struct device *dev)
 	struct scsi_device *sdev = container_of(dev, struct scsi_device, sdev_gendev);
 	struct scsi_target *starget = sdev->sdev_target;
 	struct scsi_driver *drv;
+	struct Scsi_Host *shost = sdev->host;
 	unsigned int media_present_before = 0, media_present_after = 0;
 	unsigned char*result;
 	int bflags, res = SCSI_SCAN_NO_RESPONSE;
@@ -1672,6 +1673,7 @@ int scsi_device_check_change_force(struct device *dev)
 
 	if ((media_present_after != media_present_before) || (media_present_after==1))
 	{
+		down(&shost->scan_mutex);
 		get_device(&starget->dev);
 
 #if 1
@@ -1741,6 +1743,7 @@ out:
 		scsi_target_reap(starget);
 
 		put_device(&starget->dev);
+		up(&shost->scan_mutex);
 	}
 	return ret;
 }
@@ -1751,6 +1754,7 @@ int scsi_check_device_change(struct device *dev)
 	struct scsi_device *sdev = container_of(dev, struct scsi_device, sdev_gendev);
 	struct scsi_target *starget = sdev->sdev_target;
 	struct scsi_driver *drv;
+	struct Scsi_Host *shost = sdev->host;
 	unsigned int media_present_before = 0, media_present_after = 0;
 	unsigned char*result;
 	int bflags, res = SCSI_SCAN_NO_RESPONSE;
@@ -1775,6 +1779,7 @@ int scsi_check_device_change(struct device *dev)
 
 	if (media_present_after != media_present_before)
 	{
+		down(&shost->scan_mutex);
 		get_device(&starget->dev);
 
 #if 1
@@ -1844,6 +1849,7 @@ out:
 		scsi_target_reap(starget);
 
 		put_device(&starget->dev);
+		up(&shost->scan_mutex);
 	}
 	return ret;
 }

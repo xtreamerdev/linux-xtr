@@ -399,7 +399,11 @@ static struct {
 	.vendor			= DRIVER_VENDOR_ID,
 	.product		= DRIVER_PRODUCT_ID,
 	.release		= 0xffff,	// Use controller chip type
+#ifdef CONFIG_USB_FILE_STORAGE_ASYNC_IO_MODE
+	.buflen			= 65536,
+#else
 	.buflen			= 32768,
+#endif // CONFIG_USB_FILE_STORAGE_ASYNC_IO_MODE
 	.can_stall		= 1,
 	};
 
@@ -454,6 +458,13 @@ MODULE_PARM_DESC(stall, "false to prevent bulk stalls");
 
 #endif /* CONFIG_USB_FILE_STORAGE_TEST */
 
+
+#ifdef CONFIG_USB_FILE_STORAGE_ASYNC_IO_MODE
+unsigned long setup_kernel_aio();
+unsigned long submit_kernel_aio(unsigned long ctx_id, struct file *file, struct iocb *iocb);
+long suspend_kernel_aio(unsigned long ctx_id);
+long destroy_kernel_aio(unsigned long ctx_id);
+#endif // CONFIG_USB_FILE_STORAGE_ASYNC_IO_MODE
 
 /*-------------------------------------------------------------------------*/
 
@@ -565,6 +576,16 @@ struct interrupt_data {
 #define ASC(x)		((u8) ((x) >> 8))
 #define ASCQ(x)		((u8) (x))
 
+#ifdef CONFIG_USB_FILE_STORAGE_ASYNC_IO_MODE
+#define	RCACHE_READY			0x00
+#define	RCACHE_ISSUE			0x01
+#define	RCACHE_SYNC			0x02
+
+#define	WCACHE_READY			0x00
+#define	WCACHE_DELAY			0x01
+#define	WCACHE_WRITE_BACK		0x02
+#define	WCACHE_SYNC			0x04
+#endif // CONFIG_USB_FILE_STORAGE_ASYNC_IO_MODE
 
 /*-------------------------------------------------------------------------*/
 
@@ -716,6 +737,32 @@ struct fsg_dev {
 	struct fsg_buffhd	*next_buffhd_to_fill;
 	struct fsg_buffhd	*next_buffhd_to_drain;
 	struct fsg_buffhd	buffhds[NUM_BUFFERS];
+
+#ifdef CONFIG_USB_FILE_STORAGE_ASYNC_IO_MODE
+	struct fsg_buffhd	*next_rcachehd_to_fill;
+	struct fsg_buffhd	*next_rcachehd_to_drain;
+	struct fsg_buffhd	rcachehds[NUM_BUFFERS];
+
+	struct fsg_buffhd	*next_wcachehd_to_fill;
+	struct fsg_buffhd	*next_wcachehd_to_drain;
+	struct fsg_buffhd	wcachehds[NUM_BUFFERS];
+
+	struct iocb		*iocb_r;
+	unsigned long		ctx_id_r;
+	struct file		*file_r;
+	loff_t			offset_r;
+	unsigned long		amount_r;
+	unsigned long		submit_r;
+	unsigned long		hit;
+
+	struct iocb		*iocb_w;
+	unsigned long		ctx_id_w;
+	struct file		*file_w;
+	loff_t			offset_w;
+	unsigned long		amount_w;
+	unsigned long		submit_w;
+	struct timer_list	wb_timer;
+#endif // CONFIG_USB_FILE_STORAGE_ASYNC_IO_MODE
 
 	wait_queue_head_t	thread_wqh;
 	int			thread_wakeup_needed;
@@ -1627,6 +1674,41 @@ static int sleep_thread(struct fsg_dev *fsg)
 {
 	int	rc;
 
+#ifdef CONFIG_USB_FILE_STORAGE_ASYNC_IO_MODE
+	if (fsg->submit_r & RCACHE_ISSUE) {
+		fsg->submit_r &= ~RCACHE_ISSUE;
+
+		fsg->next_rcachehd_to_fill->state = BUF_STATE_EMPTY;
+		fsg->iocb_r->aio_data = 0;
+		fsg->iocb_r->aio_offset = fsg->offset_r;
+		fsg->iocb_r->aio_buf = (unsigned long)(fsg->next_rcachehd_to_fill->buf);
+		fsg->iocb_r->aio_nbytes = fsg->amount_r;
+		fsg->iocb_r->aio_lio_opcode = IOCB_CMD_PREAD;
+		submit_kernel_aio(fsg->ctx_id_r, fsg->file_r, fsg->iocb_r);
+		fsg->submit_r |= RCACHE_SYNC;
+	}
+	if (fsg->submit_w & WCACHE_SYNC) {
+		fsg->submit_w &= ~WCACHE_SYNC;
+		if (fsg->submit_w & WCACHE_WRITE_BACK) {
+			suspend_kernel_aio(fsg->ctx_id_w);
+			fsg->next_wcachehd_to_fill->state = BUF_STATE_EMPTY;
+		}
+
+		/* switch to write-delay buffer and check if it's full */
+		fsg->next_wcachehd_to_fill = fsg->next_wcachehd_to_fill->next;
+		if (fsg->next_wcachehd_to_fill->state != BUF_STATE_FULL)
+			BUG();
+
+		fsg->iocb_w->aio_data = 0;
+		fsg->iocb_w->aio_offset = fsg->offset_w;
+		fsg->iocb_w->aio_buf = (unsigned long)(fsg->next_wcachehd_to_fill->buf);
+		fsg->iocb_w->aio_nbytes = fsg->amount_w;
+		fsg->iocb_w->aio_lio_opcode = IOCB_CMD_PWRITE;
+		submit_kernel_aio(fsg->ctx_id_w, fsg->file_w, fsg->iocb_w);
+		fsg->submit_w |= WCACHE_WRITE_BACK;
+	}
+#endif // CONFIG_USB_FILE_STORAGE_ASYNC_IO_MODE
+
 	/* Wait until a signal arrives or we are woken up */
 	rc = wait_event_interruptible(fsg->thread_wqh,
 			fsg->thread_wakeup_needed);
@@ -1650,6 +1732,9 @@ static int do_read(struct fsg_dev *fsg)
 	unsigned int		amount;
 	unsigned int		partial_page;
 	ssize_t			nread;
+#ifdef CONFIG_USB_FILE_STORAGE_ASYNC_IO_MODE
+	unsigned int		hit = 0;
+#endif // CONFIG_USB_FILE_STORAGE_ASYNC_IO_MODE
 
 	/* Get the starting Logical Block Address and check that it's
 	 * not too big */
@@ -1676,6 +1761,52 @@ static int do_read(struct fsg_dev *fsg)
 	amount_left = fsg->data_size_from_cmnd;
 	if (unlikely(amount_left == 0))
 		return -EIO;		// No default reply
+
+#ifdef CONFIG_USB_FILE_STORAGE_ASYNC_IO_MODE
+	/* EJ: ensure do_write() is completed */
+	local_irq_disable();
+	if ((fsg->submit_w & WCACHE_DELAY) || (fsg->submit_w & WCACHE_SYNC)) {
+		fsg->submit_w &= ~WCACHE_DELAY;
+		fsg->submit_w &= ~WCACHE_SYNC;
+		local_irq_enable();
+		if (fsg->submit_w & WCACHE_WRITE_BACK) {
+			suspend_kernel_aio(fsg->ctx_id_w);
+			fsg->next_wcachehd_to_fill->state = BUF_STATE_EMPTY;
+		}
+
+		/* switch to write-delay buffer and check if it's full */
+		fsg->next_wcachehd_to_fill = fsg->next_wcachehd_to_fill->next;
+		if (fsg->next_wcachehd_to_fill->state != BUF_STATE_FULL)
+			BUG();
+
+		fsg->iocb_w->aio_data = 0;
+		fsg->iocb_w->aio_offset = fsg->offset_w;
+		fsg->iocb_w->aio_buf = (unsigned long)(fsg->next_wcachehd_to_fill->buf);
+		fsg->iocb_w->aio_nbytes = fsg->amount_w;
+		fsg->iocb_w->aio_lio_opcode = IOCB_CMD_PWRITE;
+		submit_kernel_aio(fsg->ctx_id_w, fsg->file_w, fsg->iocb_w);
+		fsg->submit_w |= WCACHE_WRITE_BACK;
+	} else {
+		local_irq_enable();
+	}
+	if (fsg->submit_w & WCACHE_WRITE_BACK) {
+		suspend_kernel_aio(fsg->ctx_id_w);
+		fsg->next_wcachehd_to_fill->state = BUF_STATE_EMPTY;
+	}
+	fsg->submit_w = WCACHE_READY;
+
+	if (fsg->submit_r & RCACHE_SYNC) {
+		int ret;
+
+		if ((ret = suspend_kernel_aio(fsg->ctx_id_r)) > 0) {
+			fsg->amount_r = ret;
+			fsg->next_rcachehd_to_fill->state = BUF_STATE_FULL;
+		} else {
+			fsg->amount_r = 0;
+		}
+		fsg->submit_r = RCACHE_READY;
+	}
+#endif // CONFIG_USB_FILE_STORAGE_ASYNC_IO_MODE
 
 	for (;;) {
 
@@ -1717,12 +1848,31 @@ static int do_read(struct fsg_dev *fsg)
 
 		/* Perform the read */
 		file_offset_tmp = file_offset;
+
+#ifdef CONFIG_USB_FILE_STORAGE_ASYNC_IO_MODE
+		/* check if the read-ahead hit */
+		if ((fsg->next_rcachehd_to_fill->state == BUF_STATE_FULL) && 
+			(curlun->filp == fsg->file_r) && (amount == fsg->amount_r) && (file_offset_tmp == fsg->offset_r)) {
+			fsg->hit = (unsigned long)fsg->next_rcachehd_to_fill;
+			hit = 1;
+		} else {
+			fsg->hit = 0;
+		}
+
+		if (fsg->hit) {
+			bh = fsg->next_rcachehd_to_fill; 
+			nread = amount;
+		} else {
+#endif // CONFIG_USB_FILE_STORAGE_ASYNC_IO_MODE
 		nread = vfs_read(curlun->filp,
 				(char __user *) bh->buf,
 				amount, &file_offset_tmp);
 		VLDBG(curlun, "file read %u @ %llu -> %d\n", amount,
 				(unsigned long long) file_offset,
 				(int) nread);
+#ifdef CONFIG_USB_FILE_STORAGE_ASYNC_IO_MODE
+		}
+#endif // CONFIG_USB_FILE_STORAGE_ASYNC_IO_MODE
 		if (signal_pending(current))
 			return -EINTR;
 
@@ -1755,8 +1905,31 @@ static int do_read(struct fsg_dev *fsg)
 		bh->inreq->zero = 0;
 		start_transfer(fsg, fsg->bulk_in, bh->inreq,
 				&bh->inreq_busy, &bh->state);
+#ifdef CONFIG_USB_FILE_STORAGE_ASYNC_IO_MODE
+		if (!fsg->hit)
+#endif // CONFIG_USB_FILE_STORAGE_ASYNC_IO_MODE
 		fsg->next_buffhd_to_fill = bh->next;
 	}
+
+#ifdef CONFIG_USB_FILE_STORAGE_ASYNC_IO_MODE
+	/* EJ: send this request to do the read-ahead */
+	if ((amount != 0) && (fsg->submit_r == RCACHE_READY)) {
+		if (hit) {
+			struct fsg_buffhd *cachebh;
+
+			fsg->next_rcachehd_to_fill = fsg->next_rcachehd_to_fill->next;
+			cachebh = fsg->next_rcachehd_to_fill;
+			while (cachebh->state != BUF_STATE_EMPTY) {
+				if ((rc = sleep_thread(fsg)) != 0)
+					return rc;
+			}
+		}
+		fsg->file_r = curlun->filp;
+		fsg->offset_r = file_offset;
+		fsg->amount_r = amount;
+		fsg->submit_r |= RCACHE_ISSUE;
+	}
+#endif // CONFIG_USB_FILE_STORAGE_ASYNC_IO_MODE
 
 	return -EIO;		// No default reply
 }
@@ -1811,6 +1984,84 @@ static int do_write(struct fsg_dev *fsg)
 	file_offset = usb_offset = ((loff_t) lba) << 9;
 	amount_left_to_req = amount_left_to_write = fsg->data_size_from_cmnd;
 
+#ifdef CONFIG_USB_FILE_STORAGE_ASYNC_IO_MODE
+	/* EJ: ensure do_read() will get the correct data */
+	fsg->file_r = 0;
+
+	if (fsg->submit_w & WCACHE_WRITE_BACK) {
+		suspend_kernel_aio(fsg->ctx_id_w);
+		fsg->next_wcachehd_to_fill->state = BUF_STATE_EMPTY;
+	}
+	fsg->submit_w = WCACHE_READY;
+
+	if (amount_left_to_req <= mod_data.buflen) {
+		/* EJ: use the write-delay mode */
+
+		/* EJ: read data from PC */
+		bh = fsg->next_wcachehd_to_fill;
+		if (bh->state != BUF_STATE_EMPTY)
+			BUG();
+
+		amount = min(amount_left_to_req, curlun->file_length - usb_offset);
+
+		if (amount == 0) {
+			curlun->sense_data =
+				SS_LOGICAL_BLOCK_ADDRESS_OUT_OF_RANGE;
+			curlun->sense_data_info = usb_offset >> 9;
+			goto out;
+		}
+		amount -= (amount & 511);
+		if (amount == 0) {
+			goto out;
+		}
+
+		/* Get the next buffer */
+		usb_offset += amount;
+		fsg->usb_amount_left -= amount;
+		amount_left_to_req -= amount;
+
+		/* amount is always divisible by 512, hence by
+		 * the bulk-out maxpacket size */
+		bh->outreq->length = bh->bulk_out_intended_length =
+				amount;
+		start_transfer(fsg, fsg->bulk_out, bh->outreq,
+				&bh->outreq_busy, &bh->state);
+		fsg->next_wcachehd_to_fill = bh->next;
+
+		/* EJ: issue the delay write */
+		bh = fsg->next_wcachehd_to_fill;
+		local_irq_disable();
+		if ((bh->state == BUF_STATE_FULL) && (fsg->submit_w == WCACHE_READY)) {
+			fsg->submit_w |= WCACHE_WRITE_BACK;
+			local_irq_enable();
+
+			fsg->iocb_w->aio_data = 0;
+			fsg->iocb_w->aio_offset = fsg->offset_w;
+			fsg->iocb_w->aio_buf = (unsigned long)(fsg->next_wcachehd_to_fill->buf);
+			fsg->iocb_w->aio_nbytes = fsg->amount_w;
+			fsg->iocb_w->aio_lio_opcode = IOCB_CMD_PWRITE;
+			submit_kernel_aio(fsg->ctx_id_w, fsg->file_w, fsg->iocb_w);
+		} else {
+			local_irq_enable();
+		}
+
+		mod_timer(&fsg->wb_timer, jiffies + 5);
+
+		/* record the info of this transactoin */
+		fsg->file_w = curlun->filp;
+		fsg->offset_w = file_offset;
+		fsg->amount_w = amount;
+		fsg->submit_w |= WCACHE_DELAY;
+
+		/* check if write is completely done */
+		if (amount_left_to_req != 0) {
+			curlun->sense_data =
+				SS_LOGICAL_BLOCK_ADDRESS_OUT_OF_RANGE;
+			curlun->sense_data_info = usb_offset >> 9;
+			goto out;
+		}
+	} else {
+#endif // CONFIG_USB_FILE_STORAGE_ASYNC_IO_MODE
 	while (amount_left_to_write > 0) {
 
 		/* Queue a request for more data from the host */
@@ -1938,6 +2189,10 @@ static int do_write(struct fsg_dev *fsg)
 		if ((rc = sleep_thread(fsg)) != 0)
 			return rc;
 	}
+#ifdef CONFIG_USB_FILE_STORAGE_ASYNC_IO_MODE
+	}
+out:
+#endif // CONFIG_USB_FILE_STORAGE_ASYNC_IO_MODE
 
 	return -EIO;		// No default reply
 }
@@ -2502,6 +2757,11 @@ static int finish_reply(struct fsg_dev *fsg)
 
 	/* All but the last buffer of data must have already been sent */
 	case DATA_DIR_TO_HOST:		
+#ifdef CONFIG_USB_FILE_STORAGE_ASYNC_IO_MODE
+		if (fsg->hit) {
+			bh = fsg->hit;
+		}
+#endif // CONFIG_USB_FILE_STORAGE_ASYNC_IO_MODE
 		if (fsg->data_size == 0)
 			;		// Nothing to send
 
@@ -2510,6 +2770,9 @@ static int finish_reply(struct fsg_dev *fsg)
 			bh->inreq->zero = 0;
 			start_transfer(fsg, fsg->bulk_in, bh->inreq,
 					&bh->inreq_busy, &bh->state);
+#ifdef CONFIG_USB_FILE_STORAGE_ASYNC_IO_MODE
+			if (!fsg->hit)
+#endif // CONFIG_USB_FILE_STORAGE_ASYNC_IO_MODE
 			fsg->next_buffhd_to_fill = bh->next;
 		}
 
@@ -2535,6 +2798,9 @@ static int finish_reply(struct fsg_dev *fsg)
 #endif				
 				start_transfer(fsg, fsg->bulk_in, bh->inreq,
 						&bh->inreq_busy, &bh->state);
+#ifdef CONFIG_USB_FILE_STORAGE_ASYNC_IO_MODE
+				if (!fsg->hit)
+#endif // CONFIG_USB_FILE_STORAGE_ASYNC_IO_MODE
 				fsg->next_buffhd_to_fill = bh->next;
 			}
 		}
@@ -2552,6 +2818,9 @@ static int finish_reply(struct fsg_dev *fsg)
 #endif				
 				start_transfer(fsg, fsg->bulk_in, bh->inreq,
 						&bh->inreq_busy, &bh->state);
+#ifdef CONFIG_USB_FILE_STORAGE_ASYNC_IO_MODE
+				if (!fsg->hit)
+#endif // CONFIG_USB_FILE_STORAGE_ASYNC_IO_MODE
 				fsg->next_buffhd_to_fill = bh->next;
 				
 				rc = halt_bulk_in_endpoint(fsg);
@@ -3284,6 +3553,34 @@ reset:
 			bh->outreq = NULL;
 		}
 	}
+#ifdef CONFIG_USB_FILE_STORAGE_ASYNC_IO_MODE
+	/* Deallocate the requests */
+	for (i = 0; i < NUM_BUFFERS; ++i) {
+		struct fsg_buffhd *bh = &fsg->rcachehds[i];
+
+		if (bh->inreq) {
+			usb_ep_free_request(fsg->bulk_in, bh->inreq);
+			bh->inreq = NULL;
+		}
+		if (bh->outreq) {
+			usb_ep_free_request(fsg->bulk_out, bh->outreq);
+			bh->outreq = NULL;
+		}
+	}
+	/* Deallocate the requests */
+	for (i = 0; i < NUM_BUFFERS; ++i) {
+		struct fsg_buffhd *bh = &fsg->wcachehds[i];
+
+		if (bh->inreq) {
+			usb_ep_free_request(fsg->bulk_in, bh->inreq);
+			bh->inreq = NULL;
+		}
+		if (bh->outreq) {
+			usb_ep_free_request(fsg->bulk_out, bh->outreq);
+			bh->outreq = NULL;
+		}
+	}
+#endif // CONFIG_USB_FILE_STORAGE_ASYNC_IO_MODE
 	if (fsg->intreq) {
 		usb_ep_free_request(fsg->intr_in, fsg->intreq);
 		fsg->intreq = NULL;
@@ -3342,6 +3639,37 @@ reset:
 		bh->inreq->complete = bulk_in_complete;
 		bh->outreq->complete = bulk_out_complete;
 	}
+#ifdef CONFIG_USB_FILE_STORAGE_ASYNC_IO_MODE
+	/* Allocate the read requests */
+	for (i = 0; i < NUM_BUFFERS; ++i) {
+		struct fsg_buffhd	*bh = &fsg->rcachehds[i];
+
+		if ((rc = alloc_request(fsg, fsg->bulk_in, &bh->inreq)) != 0)
+			goto reset;
+		if ((rc = alloc_request(fsg, fsg->bulk_out, &bh->outreq)) != 0)
+			goto reset;
+		bh->inreq->buf = bh->outreq->buf = bh->buf;
+		bh->inreq->dma = bh->outreq->dma = bh->dma;
+		bh->inreq->context = bh->outreq->context = bh;
+		bh->inreq->complete = bulk_in_complete;
+		bh->outreq->complete = bulk_out_complete;
+	}
+	/* Allocate the write requests */
+	for (i = 0; i < NUM_BUFFERS; ++i) {
+		struct fsg_buffhd	*bh = &fsg->wcachehds[i];
+
+		if ((rc = alloc_request(fsg, fsg->bulk_in, &bh->inreq)) != 0)
+			goto reset;
+		if ((rc = alloc_request(fsg, fsg->bulk_out, &bh->outreq)) != 0)
+			goto reset;
+		bh->inreq->buf = bh->outreq->buf = bh->buf;
+		bh->inreq->dma = bh->outreq->dma = bh->dma;
+		bh->inreq->context = bh->outreq->context = bh;
+		bh->inreq->complete = bulk_in_complete;
+		bh->outreq->complete = bulk_out_complete;
+	}
+#endif // CONFIG_USB_FILE_STORAGE_ASYNC_IO_MODE
+
 	if (transport_is_cbi()) {
 		if ((rc = alloc_request(fsg, fsg->intr_in, &fsg->intreq)) != 0)
 			goto reset;
@@ -3434,6 +3762,22 @@ static void handle_exception(struct fsg_dev *fsg)
 		if (bh->outreq_busy)
 			usb_ep_dequeue(fsg->bulk_out, bh->outreq);
 	}
+#ifdef CONFIG_USB_FILE_STORAGE_ASYNC_IO_MODE
+	for (i = 0; i < NUM_BUFFERS; ++i) {
+		bh = &fsg->rcachehds[i];
+		if (bh->inreq_busy)
+			usb_ep_dequeue(fsg->bulk_in, bh->inreq);
+		if (bh->outreq_busy)
+			usb_ep_dequeue(fsg->bulk_out, bh->outreq);
+	}
+	for (i = 0; i < NUM_BUFFERS; ++i) {
+		bh = &fsg->wcachehds[i];
+		if (bh->inreq_busy)
+			usb_ep_dequeue(fsg->bulk_in, bh->inreq);
+		if (bh->outreq_busy)
+			usb_ep_dequeue(fsg->bulk_out, bh->outreq);
+	}
+#endif // CONFIG_USB_FILE_STORAGE_ASYNC_IO_MODE
 
 	/* Wait until everything is idle */
 	for (;;) {
@@ -3442,6 +3786,16 @@ static void handle_exception(struct fsg_dev *fsg)
 			bh = &fsg->buffhds[i];
 			num_active += bh->inreq_busy + bh->outreq_busy;
 		}
+#ifdef CONFIG_USB_FILE_STORAGE_ASYNC_IO_MODE
+		for (i = 0; i < NUM_BUFFERS; ++i) {
+			bh = &fsg->rcachehds[i];
+			num_active += bh->inreq_busy + bh->outreq_busy;
+		}
+		for (i = 0; i < NUM_BUFFERS; ++i) {
+			bh = &fsg->wcachehds[i];
+			num_active += bh->inreq_busy + bh->outreq_busy;
+		}
+#endif // CONFIG_USB_FILE_STORAGE_ASYNC_IO_MODE
 		if (num_active == 0)
 			break;
 		if (sleep_thread(fsg))
@@ -3466,6 +3820,20 @@ static void handle_exception(struct fsg_dev *fsg)
 	}
 	fsg->next_buffhd_to_fill = fsg->next_buffhd_to_drain =
 			&fsg->buffhds[0];
+#ifdef CONFIG_USB_FILE_STORAGE_ASYNC_IO_MODE
+	for (i = 0; i < NUM_BUFFERS; ++i) {
+		bh = &fsg->rcachehds[i];
+		bh->state = BUF_STATE_EMPTY;
+	}
+	fsg->next_rcachehd_to_fill = fsg->next_rcachehd_to_drain =
+			&fsg->rcachehds[0];
+	for (i = 0; i < NUM_BUFFERS; ++i) {
+		bh = &fsg->wcachehds[i];
+		bh->state = BUF_STATE_EMPTY;
+	}
+	fsg->next_wcachehd_to_fill = fsg->next_wcachehd_to_drain =
+			&fsg->wcachehds[0];
+#endif // CONFIG_USB_FILE_STORAGE_ASYNC_IO_MODE
 
 	exception_req_tag = fsg->exception_req_tag;
 	new_config = fsg->new_config;
@@ -3569,7 +3937,9 @@ static int fsg_main_thread(void *fsg_)
 	fsg->thread_task = current;
 
 	/* Release all our userspace resources */
+#ifndef CONFIG_USB_FILE_STORAGE_ASYNC_IO_MODE
 	daemonize("file-storage-gadget");
+#endif // CONFIG_USB_FILE_STORAGE_ASYNC_IO_MODE
 
 	/* Allow the thread to be killed by a signal, but set the signal mask
 	 * to block everything but INT, TERM, KILL, and USR1. */
@@ -3607,6 +3977,9 @@ static int fsg_main_thread(void *fsg_)
 			fsg->state = FSG_STATE_DATA_PHASE;
 		spin_unlock_irq(&fsg->lock);
 
+#ifdef CONFIG_USB_FILE_STORAGE_ASYNC_IO_MODE
+		fsg->hit = 0;
+#endif // CONFIG_USB_FILE_STORAGE_ASYNC_IO_MODE
 		if (do_scsi_command(fsg) || finish_reply(fsg))
 			continue;
 
@@ -3622,7 +3995,7 @@ static int fsg_main_thread(void *fsg_)
 		if (!exception_in_progress(fsg))
 			fsg->state = FSG_STATE_IDLE;
 		spin_unlock_irq(&fsg->lock);
-		}
+	}
 
 	fsg->thread_task = NULL;
 	flush_signals(current);
@@ -3894,6 +4267,28 @@ static void fsg_unbind(struct usb_gadget *gadget)
 			usb_ep_free_buffer(fsg->bulk_in, bh->buf, bh->dma,
 					mod_data.buflen);
 	}
+#ifdef CONFIG_USB_FILE_STORAGE_ASYNC_IO_MODE
+	/* Free the read cache buffers */
+	for (i = 0; i < NUM_BUFFERS; ++i) {
+		struct fsg_buffhd	*bh = &fsg->rcachehds[i];
+
+		if (bh->buf)
+			usb_ep_free_buffer(fsg->bulk_in, bh->buf, bh->dma,
+					mod_data.buflen);
+	}
+	/* Free the write cache buffers */
+	for (i = 0; i < NUM_BUFFERS; ++i) {
+		struct fsg_buffhd	*bh = &fsg->wcachehds[i];
+
+		if (bh->buf)
+			usb_ep_free_buffer(fsg->bulk_in, bh->buf, bh->dma,
+					mod_data.buflen);
+	}
+
+	if (!fsg->iocb_r)
+		kfree(fsg->iocb_r);
+	destroy_kernel_aio(fsg->ctx_id_r);
+#endif // CONFIG_USB_FILE_STORAGE_ASYNC_IO_MODE
 
 	/* Free the request and buffer for endpoint 0 */
 	if (req) {
@@ -4014,6 +4409,18 @@ static int __init check_parameters(struct fsg_dev *fsg)
 	return 0;
 }
 
+#ifdef CONFIG_USB_FILE_STORAGE_ASYNC_IO_MODE
+static void wb_func(unsigned long data)
+{
+	struct fsg_dev *fsg = (struct fsg_dev *)data;
+
+	if (fsg->submit_w & WCACHE_DELAY) {
+		fsg->submit_w &= ~WCACHE_DELAY;
+		fsg->submit_w |= WCACHE_SYNC;
+		wakeup_thread(fsg);
+	}
+}
+#endif // CONFIG_USB_FILE_STORAGE_ASYNC_IO_MODE
 
 static int __init fsg_bind(struct usb_gadget *gadget)
 {
@@ -4178,6 +4585,54 @@ static int __init fsg_bind(struct usb_gadget *gadget)
 		bh->next = bh + 1;
 	}
 	fsg->buffhds[NUM_BUFFERS - 1].next = &fsg->buffhds[0];
+#ifdef CONFIG_USB_FILE_STORAGE_ASYNC_IO_MODE
+	/* Allocate the read cache buffers */
+	for (i = 0; i < NUM_BUFFERS; ++i) {
+		struct fsg_buffhd	*bh = &fsg->rcachehds[i];
+
+		bh->buf = usb_ep_alloc_buffer(fsg->bulk_in, mod_data.buflen,
+				&bh->dma, GFP_KERNEL);
+		if (!bh->buf)
+			goto out;
+		bh->next = bh + 1;
+	}
+	fsg->rcachehds[NUM_BUFFERS - 1].next = &fsg->rcachehds[0];
+	/* Allocate the write cache buffers */
+	for (i = 0; i < NUM_BUFFERS; ++i) {
+		struct fsg_buffhd	*bh = &fsg->wcachehds[i];
+
+		bh->buf = usb_ep_alloc_buffer(fsg->bulk_in, mod_data.buflen,
+				&bh->dma, GFP_KERNEL);
+		if (!bh->buf)
+			goto out;
+		bh->next = bh + 1;
+	}
+	fsg->wcachehds[NUM_BUFFERS - 1].next = &fsg->wcachehds[0];
+
+	/* initialize read-ahead */
+	fsg->iocb_r = kmalloc(sizeof(struct iocb), GFP_KERNEL);
+	if (!fsg->iocb_r)
+		goto out;
+	fsg->ctx_id_r = setup_kernel_aio();
+	fsg->file_r = 0;
+	fsg->offset_r = 0;
+	fsg->amount_r = 0;
+	fsg->submit_r = 0;
+	fsg->hit = 0;
+
+	/* initialize write-delay */
+	fsg->iocb_w = kmalloc(sizeof(struct iocb), GFP_KERNEL);
+	if (!fsg->iocb_w)
+		goto out;
+	fsg->ctx_id_w = setup_kernel_aio();
+	fsg->file_w = 0;
+	fsg->offset_w = 0;
+	fsg->amount_w = 0;
+	fsg->submit_w = 0;
+	init_timer(&fsg->wb_timer);
+	fsg->wb_timer.data = (unsigned long)fsg;
+	fsg->wb_timer.function = wb_func;
+#endif // CONFIG_USB_FILE_STORAGE_ASYNC_IO_MODE
 
 	/* This should reflect the actual gadget power source */
 	usb_gadget_set_selfpowered(gadget);

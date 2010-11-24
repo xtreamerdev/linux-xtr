@@ -29,6 +29,10 @@
 #include <net/checksum.h>
 #include <net/sock.h>
 
+#ifdef CONFIG_SKB_USE_MD_COPY 
+#include <asm/mach-venus/md.h>
+#endif	
+
 /*
  *	Verify iovec. The caller must ensure that the iovec is big enough
  *	to hold the message iovec.
@@ -85,8 +89,18 @@ int memcpy_toiovec(struct iovec *iov, unsigned char *kdata, int len)
 	while (len > 0) {
 		if (iov->iov_len) {
 			int copy = min_t(unsigned int, iov->iov_len, len);
+			
+#ifdef CONFIG_SKB_USE_MD_COPY 
+
+            if (copy >= 512 && md_is_valid_address((void*)iov->iov_base, copy) && md_is_valid_address((void*) kdata, copy))                 
+                md_memcpy(iov->iov_base, kdata, copy, 1);                               
+            else            
+                if (copy_to_user(iov->iov_base, kdata, copy))
+				    return -EFAULT;                                   
+#else			
 			if (copy_to_user(iov->iov_base, kdata, copy))
 				return -EFAULT;
+#endif				
 			kdata += copy;
 			len -= copy;
 			iov->iov_len -= copy;

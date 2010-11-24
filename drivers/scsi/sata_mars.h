@@ -228,8 +228,6 @@ u8 mars_ata_dma_status(struct ata_port *ap);
 void mars_ata_dma_stop(struct ata_queued_cmd *qc);
 void mars_ata_dma_irq_clear(struct ata_port *ap);
 
-void mars_sata_phy_reset(struct ata_port *ap);
-
 #ifdef CONFIG_MARS_PM
 int generic_sata_suspend(struct device *dev, u32 state);
 int generic_sata_resume(struct device *dev);

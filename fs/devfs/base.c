@@ -1690,7 +1690,7 @@ void devfs_remove(const char *fmt, ...)
 		if (!de) {
 			printk(KERN_ERR "%s: %s not found, cannot remove\n",
 			       __FUNCTION__, buf);
-			dump_stack();
+			//dump_stack();
 			return;
 		}
 

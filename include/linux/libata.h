@@ -101,6 +101,7 @@ enum {
     ATA_DFLAG_DEV_ONLINE    = (1 << 3), /* alex */
     ATA_DFLAG_DEV_PLUGING   = (1 << 4), /* alex */
     ATA_DFLAG_DMA_RESET     = (1 << 5), /* alex */
+    ATA_DFLAG_RESET_ALERT   = (1 << 6), /* alex */
 
     ATA_DEV_UNKNOWN         = 0,        /* unknown device */
     ATA_DEV_ATA             = 1,        /* ATA device */
@@ -141,7 +142,7 @@ enum {
     ATA_TMOUT_BOOT_QUICK    = 7 * HZ,   /* hueristic */
     ATA_TMOUT_CDB           = 20*HZ,    //alex for Rootapp 30 * HZ,
     ATA_TMOUT_CDB_QUICK     = 5 * HZ,
-    ATA_TMOUT_NODATA        = 5*HZ, //alex
+    ATA_TMOUT_NODATA        = 20*HZ, //alex
     ATA_TMOUT_20			= 20*HZ, //alex
     ATA_TMOUT_15			= 15*HZ, //alex
     ATA_TMOUT_13			= 13*HZ, //alex
@@ -430,6 +431,8 @@ struct ata_port_operations {
     u8   (*bmdma_status) (struct ata_port *ap);
     void (*dma_reset)(struct ata_port *ap);
     u8   (*chk_online)(struct ata_port *ap,u8 show);
+    int (*exec_ATAPI_cmd)(struct ata_port * ap,u8 atapi_op);
+
 };
 
 struct ata_port_info {

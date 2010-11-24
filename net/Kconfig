@@ -27,6 +27,15 @@ config NET_DEBUG
 
 menu "Networking options"
 	depends on NET
+	
+config SKB_USE_MD_COPY
+        bool "using md_copy to enhance skb_copy performance (EXPERIMENTAL)"
+        depends on NET && REALTEK_VENUS
+	    select REALTEK_MD
+	    default n
+        help
+          Enabling this option to allow the NET to use VENUS MD engine to perform
+          memory copy.		
 
 config PACKET
 	tristate "Packet socket"
@@ -49,6 +58,7 @@ config PACKET_MMAP
 	  mechanism that results in faster communication.
 
 	  If unsure, say N.
+	    
 
 config UNIX
 	tristate "Unix domain sockets"

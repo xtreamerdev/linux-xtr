@@ -80,6 +80,8 @@ static int sg_set_timeout(request_queue_t *q, int __user *p)
 
 static int sg_get_reserved_size(request_queue_t *q, int __user *p)
 {
+	if(q->sg_reserved_size == 0)
+		q->sg_reserved_size = q->max_sectors << 9;
 	return put_user(q->sg_reserved_size, p);
 }
 

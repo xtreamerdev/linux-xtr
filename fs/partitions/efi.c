@@ -637,6 +637,11 @@ efi_partition(struct parsed_partitions *state, struct block_device *bdev)
 		if (!efi_guidcmp(ptes[i].partition_type_guid,
 				 PARTITION_LINUX_RAID_GUID))
 			state->parts[i+1].flags = 1;
+
+		/* If this is a EFI System partition, tell hotplug */
+		if (!efi_guidcmp(ptes[i].partition_type_guid,
+				 PARTITION_SYSTEM_GUID))
+			state->parts[i+1].is_efi_system_partition = 1;
 	}
 	kfree(ptes);
 	kfree(gpt);

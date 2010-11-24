@@ -123,7 +123,7 @@ int sr_do_ioctl(Scsi_CD *cd, struct packet_command *cgc)
 			SDev->changed = 1;
 			if (!cgc->quiet)
 				printk(KERN_INFO "%s: disc change detected.\n", cd->cdi.name);
-			if (retries++ < 10)
+			if (retries++ < 5)
 				goto retry;
 			err = -ENOMEDIUM;
 			break;
@@ -133,7 +133,7 @@ int sr_do_ioctl(Scsi_CD *cd, struct packet_command *cgc)
 				/* sense: Logical unit is in process of becoming ready */
 				if (!cgc->quiet)
 					printk(KERN_INFO "%s: CDROM not ready yet.\n", cd->cdi.name);
-				if (retries++ < 10) {
+				if (retries++ < 5) {
 					/* sleep 2 sec and try again */
 					ssleep(2);
 					goto retry;

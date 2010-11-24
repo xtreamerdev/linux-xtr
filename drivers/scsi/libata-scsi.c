@@ -38,6 +38,7 @@
 #include <linux/spinlock.h>
 #include <scsi/scsi.h>
 #include "scsi.h"
+#include "scsi_priv.h"
 #include <scsi/scsi_host.h>
 #include <linux/libata.h>
 #include <asm/uaccess.h>
@@ -801,6 +802,7 @@ static void ata_scsi_translate(struct ata_port *ap, struct ata_device *dev,
     qc = ata_scsi_qc_new(ap, dev, cmd, done);
     if (!qc)
     {
+        printk("%s(%d)ini qc fail\n",__func__,__LINE__);
         return;
     }
 
@@ -831,6 +833,12 @@ static void ata_scsi_translate(struct ata_port *ap, struct ata_device *dev,
         goto err_out;
     }
     /* select device, send command to hardware */
+    if(1){
+        u8 tf_stat;
+        tf_stat = ata_chk_status(ap);
+        if(tf_stat & 0x80)
+            printk("%s(%d)tf_stat:0x%02x\n",__func__,__LINE__,tf_stat);
+    }
     if (ata_qc_issue(qc))
     {
         goto err_out;
@@ -1408,12 +1416,18 @@ static int atapi_qc_complete(struct ata_queued_cmd *qc, u8 drv_stat)
 
     if (unlikely(drv_stat & (ATA_ERR | ATA_BUSY | ATA_DRQ))) {
         DPRINTK("request check condition\n");
-
+        //printk("%s(%d)request check condition\n",__func__,__LINE__);
         cmd->result = SAM_STAT_CHECK_CONDITION;
 
         qc->scsidone(cmd);
 
-        return 1;
+        if (cmd->eh_eflags & SCSI_EH_CANCEL_CMD) {
+            printk("%s(%d)return 0\n",__func__,__LINE__);
+            return 0;
+        }else{
+            //printk("%s(%d)return 1\n",__func__,__LINE__);
+            return 1;
+        }
     } else {
         u8 *scsicmd = cmd->cmnd;
 
@@ -1667,6 +1681,15 @@ int ata_scsi_queuecmd(struct scsi_cmnd *cmd, void (*done)(struct scsi_cmnd *))
         goto out_unlock;
     }
 
+    if(dev->flags & ATA_DFLAG_RESET_ALERT){
+        u8 *scsicmd = cmd->cmnd;
+        if(*(scsicmd+0)==0x1b)
+            printk("%s(%d)cmd:0x%02x skip!\n",__func__,__LINE__,*(scsicmd+0));
+        cmd->result = (DID_BUS_BUSY << 16);//DID_BUS_BUSY;DID_RESET
+        done(cmd);
+        goto out_unlock;
+    }
+
     if (dev->class == ATA_DEV_ATA) {
         ata_xlat_func_t xlat_func = ata_get_xlat_func(dev,
                                   cmd->cmnd[0]);
@@ -1675,6 +1698,7 @@ int ata_scsi_queuecmd(struct scsi_cmnd *cmd, void (*done)(struct scsi_cmnd *))
         else
             ata_scsi_simulate(dev->id, cmd, done);
     } else{
+        u8 *scsicmd = cmd->cmnd;
         ata_scsi_translate(ap, dev, cmd, done, atapi_xlat);
     }
 

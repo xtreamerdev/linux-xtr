@@ -15,7 +15,7 @@
 /* mtd interface for YAFFS2 */
 
 const char *yaffs_mtdif2_c_version =
-    "$Id: yaffs_mtdif2.c 160401 2009-01-16 06:47:10Z ken.yu $";
+    "$Id: yaffs_mtdif2.c 268261 2009-09-17 07:01:22Z ken.yu $";
 
 #include "yportenv.h"
 
@@ -28,13 +28,6 @@ const char *yaffs_mtdif2_c_version =
 
 #include "yaffs_packedtags2.h"
 
-#define RTK_DEBUG 0
-#if RTK_DEBUG
-      #define debug_nand(fmt, arg...)  printk(fmt, ##arg);
-#else
-      #define debug_nand(fmt, arg...)
-#endif
-
 #define NAND_DRIVER_BBM	1
 
 /* NB For use with inband tags....
@@ -45,7 +38,6 @@ int nandmtd2_WriteChunkWithTagsToNAND(yaffs_Device * dev, int chunkInNAND,
 				      const __u8 * data,
 				      const yaffs_ExtendedTags * tags)
 {
-debug_nand("---------[%s]----------\n", __FUNCTION__);
 	struct mtd_info *mtd = (struct mtd_info *)(dev->genericDevice);
 #if (MTD_VERSION_CODE > MTD_VERSION(2,6,17))
 	struct mtd_oob_ops ops;
@@ -78,10 +70,6 @@ debug_nand("---------[%s]----------\n", __FUNCTION__);
 	}else
 		yaffs_PackTags2(&pt, tags);
 
-/*mars: LINUX_VERSION_CODE=0x2060c, KERNEL_VERSION(2,6,17)=0x20611
-printk("LINUX_VERSION_CODE=0x%x, KERNEL_VERSION(2,6,17)=0x%x\n", 
-		  LINUX_VERSION_CODE, KERNEL_VERSION(2,6,17));
-*/	
 #if (LINUX_VERSION_CODE > KERNEL_VERSION(2,6,17))
 	ops.mode = MTD_OOB_AUTO;
 	ops.ooblen = (dev->inbandTags) ? 0 : sizeof(pt);
@@ -92,7 +80,6 @@ printk("LINUX_VERSION_CODE=0x%x, KERNEL_VERSION(2,6,17)=0x%x\n",
 	retval = mtd->write_oob(mtd, addr, &ops);
 #else
 	if (!dev->inbandTags) {
-//printk("dev->inbandTags=%d, pt=%p, CALL mtd->write_ecc\n", 	dev->inbandTags, &pt);
 		retval = mtd->write_ecc(mtd, addr, dev->nDataBytesPerChunk,
 				     &dummy, data, (__u8 *) &pt, NULL);
 	} else {
@@ -110,16 +97,15 @@ printk("LINUX_VERSION_CODE=0x%x, KERNEL_VERSION(2,6,17)=0x%x\n",
 int nandmtd2_ReadChunkWithTagsFromNAND(yaffs_Device * dev, int chunkInNAND,
 				       __u8 * data, yaffs_ExtendedTags * tags)
 {
-debug_nand("---------[%s]----------\n", __FUNCTION__);
 	struct mtd_info *mtd = (struct mtd_info *)(dev->genericDevice);
 #if (MTD_VERSION_CODE > MTD_VERSION(2,6,17))
 	struct mtd_oob_ops ops;
 #endif
 	size_t dummy;
 	int retval = 0;
-	//int localData = 0;
+	int localData = 0;
 
-	loff_t addr = ((loff_t) chunkInNAND) * dev->nDataBytesPerChunk;
+	loff_t addr = ((loff_t) chunkInNAND) * dev->totalBytesPerChunk;
 
 	yaffs_PackedTags2 pt;
 	
@@ -128,16 +114,12 @@ debug_nand("---------[%s]----------\n", __FUNCTION__);
 	   ("nandmtd2_ReadChunkWithTagsFromNAND chunk %d data %p tags %p"
 	    TENDSTR), chunkInNAND, data, tags));
 
-	//printk("[%s] chunk %d data %p tags %p\n", __FUNCTION__, chunkInNAND, data, tags);
-    
-    /* mark by Ken
 	if(dev->inbandTags){
 		if(!data) {
 			localData = 1;
 			data = yaffs_GetTempBuffer(dev,__LINE__);
 		}
 	}
-	*/
 
 #if (LINUX_VERSION_CODE > KERNEL_VERSION(2,6,17))
 	if (dev->inbandTags || (data && !tags))
@@ -173,55 +155,14 @@ debug_nand("---------[%s]----------\n", __FUNCTION__);
 		}
 	}else{
 		if (tags){
-			//memcpy(&pt, dev->spareBuffer, sizeof(pt));	//Ken, org
-
-			//Ken: modify here if we use mars HW ECC
-#if 1		//save momory version	
-			pt.t.sequenceNumber = dev->spareBuffer[1] | (dev->spareBuffer[2] << 8) |
-												(dev->spareBuffer[3] << 16)| (dev->spareBuffer[4] << 24);
-			pt.t.objectId = dev->spareBuffer[16] | (dev->spareBuffer[17] << 8) |
-								(dev->spareBuffer[18] << 16)| (dev->spareBuffer[19] << 24);
-			pt.t.chunkId = dev->spareBuffer[32] | (dev->spareBuffer[33] << 8) |
-								(dev->spareBuffer[34] << 16)| (dev->spareBuffer[35] << 24);
-			pt.t.byteCount = dev->spareBuffer[48] | (dev->spareBuffer[49] << 8) |
-									(dev->spareBuffer[50] << 16)| (dev->spareBuffer[51] << 24);
-#else		//allocation memory version
-			__u8 *temp_buf = kmalloc( sizeof(yaffs_PackedTags2TagsPart), GFP_KERNEL );
-			//printk("sizeof(yaffs_PackedTags2TagsPart)=%d\n", sizeof(yaffs_PackedTags2TagsPart));
-			//printk("sizeof(pt.t)=%d\n", sizeof(pt.t));
-			memcpy(temp_buf, dev->spareBuffer+1, 4);
-			//memcpy(temp_buf+3, dev->spareBuffer+4, 1);
-			memcpy(temp_buf+4, dev->spareBuffer+16, 4);
-			memcpy(temp_buf+8, dev->spareBuffer+32, 4);
-			memcpy(temp_buf+12, dev->spareBuffer+48, 4);
-			memcpy(&pt, temp_buf, sizeof(yaffs_PackedTags2TagsPart));
-			//printk("sequenceNumber=0x%x, objectId=0x%x, chunkId=0x%x, byteCount=0x%x\n", 
-					//pt.t.sequenceNumber, pt.t.objectId, pt.t.chunkId, pt.t.byteCount );
-			kfree(temp_buf);
-#endif			
-
-			
-#if 0
-		int j;
-		printk("@@@@@@@@@@@print yaffs_PackedTags2@@@@@@@@@@@\n");	
-		for ( j=0; j < 64; j++){
-			if ( !(j % 8) )
-				printk("[%p]:", &dev->spareBuffer[j]);
-			printk("[0x%x]",  dev->spareBuffer[j]);
-			if ( (j % 8) == 7  )
-				printk("\n");
-		}
-		printk("\n");
-#endif			
+			memcpy(&pt, dev->spareBuffer+1, sizeof(pt));
 			yaffs_UnpackTags2(tags, &pt);
 		}
 	}	
 
-	//mark by Ken
-	//if(localData)
-		//yaffs_ReleaseTempBuffer(dev,data,__LINE__);
+	if(localData)
+		yaffs_ReleaseTempBuffer(dev,data,__LINE__);
 
-//printk("tags=%p, retval=%d, tags->eccResult=%d\n", tags, retval, tags->eccResult);
 	if(tags && retval == -EBADMSG && tags->eccResult == YAFFS_ECC_RESULT_NO_ERROR)
 		tags->eccResult = YAFFS_ECC_RESULT_UNFIXED;		
 	if (retval == 0)
@@ -232,7 +173,6 @@ debug_nand("---------[%s]----------\n", __FUNCTION__);
 
 int nandmtd2_MarkNANDBlockBad(struct yaffs_DeviceStruct *dev, int blockNo)
 {
-debug_nand("---------[%s]----------\n", __FUNCTION__);
 	struct mtd_info *mtd = (struct mtd_info *)(dev->genericDevice);
 	int retval;
 	T(YAFFS_TRACE_MTD,
@@ -241,7 +181,7 @@ debug_nand("---------[%s]----------\n", __FUNCTION__);
 	retval =
 	    mtd->block_markbad(mtd,
 			       blockNo * dev->nChunksPerBlock *
-			       dev->nDataBytesPerChunk);
+			       dev->totalBytesPerChunk);
 
 	if (retval == 0)
 		return YAFFS_OK;
@@ -253,7 +193,6 @@ debug_nand("---------[%s]----------\n", __FUNCTION__);
 int nandmtd2_QueryNANDBlock(struct yaffs_DeviceStruct *dev, int blockNo,
 			    yaffs_BlockState * state, __u32 *sequenceNumber)
 {
-debug_nand("---------[%s]----------\n", __FUNCTION__);
 #if NAND_DRIVER_BBM
 
 #else
@@ -264,12 +203,6 @@ debug_nand("---------[%s]----------\n", __FUNCTION__);
 	T(YAFFS_TRACE_MTD,
 	  (TSTR("nandmtd2_QueryNANDBlock %d" TENDSTR), blockNo));
 	
-	/* Ken: 20090912
-		NOTE: because nand driver has handled BB with remap way.
-		So I do not use Yaffs BBM, fool the yaffs to treat the whole nand as
-		no BB.
-	*/
-
 #if NAND_DRIVER_BBM
 	retval = 0;
 #else

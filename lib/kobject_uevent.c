@@ -59,6 +59,8 @@ static char *action_to_string(enum kobject_action action)
 		return "linkup";
         case KOBJ_LINKDOWN:
                 return "linkdown";
+        case KOBJ_NET_PBC:
+                return "NET_PBC";
 			
 	default:
 		return NULL;
@@ -280,6 +282,11 @@ void kobject_hotplug(struct kobject *kobj, enum kobject_action action)
 
 	envp [i++] = scratch;
 	scratch += sprintf(scratch, "ACTION=%s", action_string) + 1;
+
+	if (!kobj) {
+		printk("#######[cfyeh-debug] %s(%d) kobj is NULL!\n", __func__, __LINE__);
+		goto exit;
+	}
 
 	kobj_path = kobject_get_path(kobj, GFP_KERNEL);
 	if (!kobj_path)

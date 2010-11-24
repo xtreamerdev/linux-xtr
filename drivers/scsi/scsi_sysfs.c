@@ -21,6 +21,8 @@
 #include "scsi_priv.h"
 #include "scsi_logging.h"
 
+#include <linux/devfs_fs_kernel.h> // for devfs_remove
+
 static struct {
 	enum scsi_device_state	value;
 	char			*name;
@@ -409,9 +411,35 @@ store_rescan_field (struct device *dev, struct device_attribute *attr, const cha
 }
 static DEVICE_ATTR(rescan, S_IWUSR, NULL, store_rescan_field);
 
+static ssize_t
+show_hardsect_size_field(struct device *dev, struct device_attribute *attr, char *buf)
+{
+	ssize_t ret = 0;
+	struct scsi_device *sdev = container_of(dev, struct scsi_device, sdev_gendev);
+
+	if (sdev->sdev_state != SDEV_RUNNING)
+	{
+		ret = snprintf(buf, 20, "%d\n", 0);
+		return ret;
+	}
+
+	if (!dev->driver)
+	{
+		ret = snprintf(buf, 20, "%d\n", 0);
+		return ret;
+	}
+
+	ret = snprintf(buf, 20, "%d\n", sdev->sector_size);
+
+	return ret;
+}
+
+static DEVICE_ATTR(hardsect_size, S_IRUGO, show_hardsect_size_field , NULL);
+
 // add by cfyeh : 2007/2/16
 // for scsi check_change
 static DECLARE_MUTEX(scsi_detect_port_mutex);
+extern int usb_plug_status;
 
 static ssize_t
 store_check_change_force_field (struct device *dev, struct device_attribute *attr, const char *buf, size_t count) 
@@ -420,6 +448,11 @@ store_check_change_force_field (struct device *dev, struct device_attribute *att
 
 	if (sdev->sdev_state != SDEV_RUNNING)
 		return count;
+
+	if(usb_plug_status) {
+		printk("#######[cfyeh-debug] %s(%d) usb_plug_status %d\n", __func__, __LINE__, usb_plug_status);
+		return count;
+	}
 
 	down(&scsi_detect_port_mutex);
 	scsi_device_check_change_force(dev);
@@ -466,6 +499,11 @@ store_check_change_field (struct device *dev, struct device_attribute *attr, con
 
 	if (sdev->sdev_state != SDEV_RUNNING)
 		return count;
+
+	if(usb_plug_status) {
+		printk("#######[cfyeh-debug] %s(%d) usb_plug_status %d\n", __func__, __LINE__, usb_plug_status);
+		return count;
+	}
 
 	//do_gettimeofday(&time1);
 
@@ -645,6 +683,7 @@ static struct device_attribute *scsi_sysfs_sdev_attrs[] = {
 	&dev_attr_model,
 	&dev_attr_rev,
 	&dev_attr_rescan,
+	&dev_attr_hardsect_size,
 	&dev_attr_check_change_force,
 	&dev_attr_check_change,
 	&dev_attr_delete,
@@ -836,6 +875,7 @@ int scsi_sysfs_add_sdev(struct scsi_device *sdev)
 void __scsi_remove_device(struct scsi_device *sdev)
 {
 	struct device *dev = &sdev->sdev_gendev;
+	char devfs_name[64];
 
 	if (scsi_device_set_state(sdev, SDEV_CANCEL) != 0)
 		return;
@@ -850,6 +890,9 @@ void __scsi_remove_device(struct scsi_device *sdev)
 		sdev->host->hostt->slave_destroy(sdev);
 	transport_destroy_device(dev);
 	put_device(dev);
+
+	sprintf(devfs_name, "/dev/scsi/host%d", sdev->host->host_no);
+	devfs_remove(devfs_name);
 }
 
 /**

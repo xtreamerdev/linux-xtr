@@ -11,14 +11,26 @@
 #include "sysfs.h"
 
 DECLARE_RWSEM(sysfs_rename_sem);
+spinlock_t sysfs_lock = SPIN_LOCK_UNLOCKED;
 
 static void sysfs_d_iput(struct dentry * dentry, struct inode * inode)
 {
 	struct sysfs_dirent * sd = dentry->d_fsdata;
 
 	if (sd) {
-		BUG_ON(sd->s_dentry != dentry);
+		/* sd->s_dentry is protected with sysfs_lock.  This
+		* allows sysfs_drop_dentry() to dereference it.
+		*/
+		spin_lock(&sysfs_lock);
+
+		/* The dentry might have been deleted or another
+		* lookup could have happened updating sd->s_dentry to
+		* point the new dentry.  Ignore if it isn't pointing
+		* to this dentry.
+		*/
+		if (sd->s_dentry == dentry)
 		sd->s_dentry = NULL;
+		spin_unlock(&sysfs_lock);
 		sysfs_put(sd);
 	}
 	iput(inode);
@@ -181,7 +193,10 @@ static int sysfs_attach_attr(struct sysfs_dirent * sd, struct dentry * dentry)
 	}
 	dentry->d_op = &sysfs_dentry_ops;
 	dentry->d_fsdata = sysfs_get(sd);
+	/* protect sd->s_dentry against sysfs_d_iput */
+	spin_lock(&sysfs_lock);
 	sd->s_dentry = dentry;
+	spin_unlock(&sysfs_lock);
 	d_rehash(dentry);
 
 	return 0;
@@ -195,7 +210,10 @@ static int sysfs_attach_link(struct sysfs_dirent * sd, struct dentry * dentry)
 	if (!err) {
 		dentry->d_op = &sysfs_dentry_ops;
 		dentry->d_fsdata = sysfs_get(sd);
+		/* protect sd->s_dentry against sysfs_d_iput */
+		spin_lock(&sysfs_lock);
 		sd->s_dentry = dentry;
+		spin_unlock(&sysfs_lock);
 		d_rehash(dentry);
 	}
 	return err;
@@ -232,8 +250,19 @@ struct inode_operations sysfs_dir_inode_operations = {
 
 static void remove_dir(struct dentry * d)
 {
-	struct dentry * parent = dget(d->d_parent);
+	struct dentry * parent;
 	struct sysfs_dirent * sd;
+
+	if (!d) {
+		printk("#######[cfyeh-debug] %s(%d) dentry is NULL!\n", __func__, __LINE__);
+		return;
+	}
+
+	parent = dget(d->d_parent);
+	if (!parent) {
+		printk("#######[cfyeh-debug] %s(%d) dentry is NULL!\n", __func__, __LINE__);
+		return;
+	}
 
 	down(&parent->d_inode->i_sem);
 	d_delete(d);
@@ -267,13 +296,20 @@ void sysfs_remove_subdir(struct dentry * d)
 
 void sysfs_remove_dir(struct kobject * kobj)
 {
-	struct dentry * dentry = dget(kobj->dentry);
+	struct dentry * dentry;
 	struct sysfs_dirent * parent_sd;
 	struct sysfs_dirent * sd, * tmp;
 
-	if (!dentry)
+	if (!kobj || !kobj->dentry)
 		return;
 
+	if ((unsigned int)kobj->dentry < 0x80000000) {
+		printk("#######[cfyeh-debug] %s(%d) dentry 0x%.8x, fail !!!\n", __func__, __LINE__, kobj->dentry);
+		kobj->dentry = NULL;
+		return;
+	}
+
+	dentry = dget(kobj->dentry);
 	pr_debug("sysfs %s: removing dir\n",dentry->d_name.name);
 	down(&dentry->d_inode->i_sem);
 	parent_sd = dentry->d_fsdata;
@@ -291,6 +327,7 @@ void sysfs_remove_dir(struct kobject * kobj)
 	 * Drop reference from dget() on entrance.
 	 */
 	dput(dentry);
+	kobj->dentry = NULL;
 }
 
 int sysfs_rename_dir(struct kobject * kobj, const char *new_name)

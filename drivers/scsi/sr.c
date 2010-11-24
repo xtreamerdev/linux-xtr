@@ -62,7 +62,7 @@
 
 #define SR_DISKS	256
 
-#define MAX_RETRIES	3
+#define MAX_RETRIES	0
 #define SR_TIMEOUT	(30 * HZ)
 #define SR_CAPABILITIES \
 	(CDC_CLOSE_TRAY|CDC_OPEN_TRAY|CDC_LOCK|CDC_SELECT_SPEED| \
@@ -202,10 +202,15 @@ int sr_media_change(struct cdrom_device_info *cdi, int slot)
 	 * so we force a re-read of this information */
 	if (retval) {
 		/* check multisession offset etc */
-		sr_cd_check(cdi);
+		if(sr_cd_check(cdi)==0)
+		    get_sectorsize(cd);
+	}
 
+	if(cd->capacity == 0x1fffff) {
+		printk("#######[cfyeh-debug] %s(%d) if cd->capacity = 0x1fffff, call get_sectorsize(cd) again !\n", __func__, __LINE__);
 		get_sectorsize(cd);
 	}
+
 	return retval;
 }
 
@@ -342,8 +347,12 @@ static int sr_init_command(struct scsi_cmnd * SCpnt)
 			SCpnt->sc_data_direction = DMA_FROM_DEVICE;
 
 		this_count = rq->data_len;
-		if (rq->timeout)
+		if (rq->timeout){
+			if(rq->timeout>2000)
+				timeout=2000;
+			else
 			timeout = rq->timeout;
+		}
 
 		SCpnt->transfersize = rq->data_len;
 		goto queue;
@@ -629,6 +638,9 @@ static int sr_probe(struct device *dev)
 	disk->queue = sdev->request_queue;
 	cd->cdi.disk = disk;
 
+	strcpy(disk->port_structure, sdev->host->port_structure); /*  2009/03/03 cfyeh : port structure */
+	strcpy(disk->bus_type, sdev->host->bus_type); /*  2009/03/04 cfyeh : bus type */
+
 	if (register_cdrom(&cd->cdi))
 		goto fail_put;
 
@@ -686,8 +698,51 @@ static void get_sectorsize(struct scsi_cd *cd)
 		the_result = SRpnt->sr_result;
 		retries--;
 
+		if(!the_result) {
+			cd->capacity = 1 + ((buffer[0] << 24) |
+						    (buffer[1] << 16) |
+						    (buffer[2] << 8) |
+						    buffer[3]);
+
+			sector_size = (buffer[4] << 24) |
+			    (buffer[5] << 16) | (buffer[6] << 8) | buffer[7];
+		}
+
 	} while (the_result && retries);
 
+	// if buffer[*] == 0, try READ FORMAT CAPACITIES command
+	if(the_result || (cd->capacity == 1)) {
+	retries = 3;
+	printk("#######[cfyeh-debug] %s(%d) try READ FORMAT CAPACITIES command\n", __func__, __LINE__);
+	#define READ_FORMAT_CAPACITIES_BUF_SIZE	12
+	do {
+		cmd[0] = 0x23; // READ FORMAT CAPACITIES command
+		memset((void *) &cmd[1], 0, 9);
+		cmd[8] = READ_FORMAT_CAPACITIES_BUF_SIZE;
+		/* Mark as really busy */
+		SRpnt->sr_request->rq_status = RQ_SCSI_BUSY;
+		SRpnt->sr_cmd_len = 0;
+
+		memset(buffer, 0, READ_FORMAT_CAPACITIES_BUF_SIZE);
+
+		/* Do the command and wait.. */
+		SRpnt->sr_data_direction = DMA_FROM_DEVICE;
+		scsi_wait_req(SRpnt, (void *) cmd, (void *) buffer,
+			      READ_FORMAT_CAPACITIES_BUF_SIZE, SR_TIMEOUT, MAX_RETRIES);
+
+		the_result = SRpnt->sr_result;
+		retries--;
+
+		// if ((buffer[8] & 0x3) == 0x2), it is a formatted media
+		if(!the_result && ((buffer[8] & 0x3) == 0x2)) {
+			cd->capacity = 1 + ((buffer[4] << 24) |
+						    (buffer[5] << 16) |
+						    (buffer[6] << 8) |
+						    buffer[7]);
+		}
+	} while (the_result && retries);
+	#undef READ_FORMAT_CAPACITIES_BUF_SIZE
+	}
 
 	scsi_release_request(SRpnt);
 	SRpnt = NULL;
@@ -700,12 +755,6 @@ static void get_sectorsize(struct scsi_cd *cd)
 		if (cdrom_get_last_written(&cd->cdi,
 					   &cd->capacity))
 #endif
-			cd->capacity = 1 + ((buffer[0] << 24) |
-						    (buffer[1] << 16) |
-						    (buffer[2] << 8) |
-						    buffer[3]);
-		sector_size = (buffer[4] << 24) |
-		    (buffer[5] << 16) | (buffer[6] << 8) | buffer[7];
 		switch (sector_size) {
 			/*
 			 * HP 4020i CD-Recorder reports 2340 byte sectors

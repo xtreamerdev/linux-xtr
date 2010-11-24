@@ -15,6 +15,9 @@
 #include <linux/errno.h>
 #include <linux/init.h>
 #include <linux/pm.h>
+#include <venus.h>
+#include <platform.h>
+#include <asm/io.h>
 
 #include "power.h"
 
@@ -122,6 +125,13 @@ static void suspend_finish(suspend_state_t state)
 	device_resume();
 	if (pm_ops && pm_ops->finish)
 		pm_ops->finish(state);
+/* For Venus and Neptune, resuming may fail. Therefore, use watchdog timeout
+ * to prevent from this. */
+	if(is_venus_cpu()||is_neptune_cpu()) {
+		outl(0x1, VENUS_MIS_TCWTR);
+		udelay(10);
+		outl(0x1E0000A5, VENUS_MIS_TCWCR);
+	}
 	thaw_processes();
 	pm_restore_console();
 #ifdef CONFIG_REALTEK_SUPPORT_BOOT_AV

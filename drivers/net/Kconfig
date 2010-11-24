@@ -178,6 +178,16 @@ config 8139CP_VENUS
 	default y
 	help
 	  If you want to enable ethernet on Venus board, say Y.
+
+config 8139CP_VENUS_RX_MIT
+	bool "Use Rx Interrupt Mitigation"
+	depends on 8139CP_VENUS
+	default y
+	help
+	  If you want to use Rx interrupt mitigation feature, say Y.
+          Enable this feature will not only lower the interrupt count but also 
+          the throughput.
+	  
 #config 8139CP_MARS
 #	tristate "RealTek RTL-8139 C+ Ethernet Adapter support for Mars board"
 #	depends on NET_ETHERNET && REALTEK_VENUS

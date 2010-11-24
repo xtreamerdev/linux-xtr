@@ -21,41 +21,12 @@
 #include "yaffs_guts.h"
 #include "yaffs_ecc.h"
 
-//#ifdef CONFIG_YAFFS_DOES_ECC	//"Lets Yaffs do its own ECC
-#if 1
 typedef struct {
 	unsigned sequenceNumber;
 	unsigned objectId;
 	unsigned chunkId;
 	unsigned byteCount;
 } yaffs_PackedTags2TagsPart;
-#else
-typedef struct __attribute__ ((__packed__)){
- 	__u16 objectId;
- 	__u8 objectId_mid;
- 	__u16 sequenceNumber;
- 	__u32 chunkId: 24;  //2G=2^20*2K, 4 bits for check flags
- 	__u32 objectId_high:8;
- 	//__u32 sequenceNumber_mid:2;
- 	__u16 byteCount:12;  //4096=2^12
- 	__u16 sequenceNumber_high:4;
-} yaffs_PackedTags2TagsPart;
-#endif
-/*
-typedef struct __attribute__ ((__packed__)){
-	__u16 sequenceNumber;
-	__u16 objectId;
-	__u32 chunkId;
-	__u16 byteCount;	
-}yaffs_PackedTags2TagsPart;
-
-typedef struct __attribute__ ((__packed__)){
-	__u32 sequenceNumber;
-	__u8 objectId;
-	__u32 chunkId;
-	__u16 byteCount;	
-}yaffs_PackedTags2TagsPart;
-*/
 
 typedef struct{
 	yaffs_PackedTags2TagsPart t;

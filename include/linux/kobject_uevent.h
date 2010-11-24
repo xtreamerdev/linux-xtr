@@ -34,6 +34,7 @@ enum kobject_action {
 	KOBJ_UNKNOWN	= (__force kobject_action_t) 0x0a,	/* usb unknown device */
 	KOBJ_LINKUP	= (__force kobject_action_t) 0x0b,      /* MII link up event */
         KOBJ_LINKDOWN	= (__force kobject_action_t) 0x0c,      /* MII link down event */	
+        KOBJ_NET_PBC	= (__force kobject_action_t) 0x0d,      /* MII PBC pressed */	
 };
 
 

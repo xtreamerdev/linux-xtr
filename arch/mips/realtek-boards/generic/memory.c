@@ -116,6 +116,11 @@ struct prom_pmemblock * __init prom_getmdesc(void)
 
 	memset(mdesc, 0, sizeof(mdesc));
 
+#ifdef CONFIG_REALTEK_MARS_RESERVE_LAST_48MB
+	if (memsize == 0x10000000)
+		memsize -= 0x03000000;
+#endif
+
 	// The last page is used to store the DRAM calibration parameter; 
 	// Jacky says that this page can be included in his RTOS memory region.
 //	mdesc[4].type = yamon_dontuse;

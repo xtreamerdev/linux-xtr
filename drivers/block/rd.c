@@ -383,7 +383,7 @@ static int rd_open(struct inode *inode, struct file *filp)
 		 * driver happy.
 		 */
 		gfp_mask = mapping_gfp_mask(mapping);
-		gfp_mask &= ~(__GFP_FS|__GFP_IO);
+		gfp_mask &= ~(__GFP_FS|__GFP_IO|GFP_ZONEMASK);
 		gfp_mask |= __GFP_HIGH;
 		mapping_set_gfp_mask(mapping, gfp_mask);
 	}

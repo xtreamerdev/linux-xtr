@@ -52,8 +52,8 @@
 #if CONFIG_REALTEK_TEXT_DEBUG || CONFIG_REALTEK_MEMORY_DEBUG_MODE || CONFIG_REALTEK_USER_DEBUG
 #include <linux/interrupt.h>
 
-#include <platform.h>
 #include <venus.h>
+
 #if CONFIG_REALTEK_TEXT_DEBUG || CONFIG_REALTEK_MEMORY_DEBUG_MODE
 #define PREFETCH_BUFFER	0x400
 
@@ -70,6 +70,8 @@ atomic_t text_count;
 #include <asm/io.h>
 #include <asm/bugs.h>
 #include <asm/setup.h>
+
+#include <platform.h>
 
 /*
  * This is one of the first .c files built. Error out early
@@ -438,6 +440,7 @@ static int __init partition_hash(char *hash_str)
 			return 0;
 	}
 	partition_hash_value[0]='1';
+	platform_info.secure_boot=1;
 	return 1;
 }
 
@@ -922,6 +925,10 @@ static int init(void * unused)
 				sys_close(fd);
 				machine_restart("Secure boot error!");
 			}
+			/* For secure boot, only squashfs-root is supported, and it is scrambled before doing hash. */
+			/* Unscramble */
+			MCP_AES_ECB_Decryption(NULL, hash_buffer, hash_buffer, singlecount);
+			/* Calculate hash value */
 			MCP_AES_H_DataHash(hash_buffer, singlecount, hash_array, 512*1024, firstblock);
 			firstblock=0;
 			hashcount+=singlecount;

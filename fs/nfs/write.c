@@ -449,6 +449,7 @@ nfs_mark_request_dirty(struct nfs_page *req)
 	nfs_list_add_request(req, &nfsi->dirty);
 	nfsi->ndirty++;
 	spin_unlock(&nfsi->req_lock);
+	SetPageNFSDirty(req->wb_page);
 	inc_page_state(nr_dirty);
 	mark_inode_dirty(inode);
 }
@@ -1110,6 +1111,7 @@ static void nfs_writeback_done_full(struct nfs_write_data *data, int status)
 
 #if defined(CONFIG_NFS_V3) || defined(CONFIG_NFS_V4)
 		if (data->args.stable != NFS_UNSTABLE || data->verf.committed == NFS_FILE_SYNC) {
+			ClearPageNFSDirty(req->wb_page);
 			nfs_inode_remove_request(req);
 			dprintk(" OK\n");
 			goto next;
@@ -1316,6 +1318,7 @@ nfs_commit_done(struct rpc_task *task)
 		 * returned by the server against all stored verfs. */
 		if (!memcmp(req->wb_verf.verifier, data->verf.verifier, sizeof(data->verf.verifier))) {
 			/* We have a match */
+			ClearPageNFSDirty(req->wb_page);
 			nfs_inode_remove_request(req);
 			dprintk(" OK\n");
 			goto next;

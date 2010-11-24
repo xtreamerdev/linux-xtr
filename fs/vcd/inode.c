@@ -158,7 +158,7 @@ static int find_cd_info_in_toc( struct super_block *sb )
 		strcpy(proc_data_content.cd_type, "DATA");
 		CD_TYPE=DATA_DISC;
 	}
-	strcat(proc_data_content.cd_type, " DATE 0706\n");
+	strcat(proc_data_content.cd_type, " DATE 1106\n");
 	sprintf(buffer,"%2d %2d %2d %2d",video_track,audio_track,TRACK_NO,SESSION_NO);
 	strcat(proc_data_content.cd_type, buffer);
 	strcat(proc_data_content.cd_type, "\n");
@@ -913,9 +913,11 @@ static int fill_tracks_in_super(struct super_block *sb,int mounting_acd)
 						//printk("CHECKING VIDEOCD!!\n");
 						VIDEOCD_NO++;
 						this_cd->track[i].xa_data_size=2352;
+						/*
 						ret=cdfs_get_XA_info(sb, i);
 
 						if(!ret) goto invalid; //disc not recognized => mount fails
+						*/
 						
 						this_cd->track[i].time       = 0;
 						this_cd->track[i].iso_size   = 0;
@@ -1456,7 +1458,7 @@ root_found:
 	//4PRINT("david: Make /proc _ST for VCD\n");
 	find_cd_info_in_toc(s);
 	//5PRINT("david: Make /proc _SP\n");
-	printk("<vcd module> mount disc with vcd module SP OK for VCD/SVCD/Data........0706\n");
+	printk("<vcd module> mount disc with vcd module SP OK for VCD/SVCD/Data........1106\n");
 	switch (CD_TYPE)
 	{
 		case 1: printk("<vcd module> Disc type : VCD\n"); break;
@@ -1549,7 +1551,7 @@ out_audio_cd:
 	find_cd_info_in_toc(s);
 	PRINT("david: Make /proc _SP\n");
 	
-	printk("<vcd module> mount disc with vcd module SP OK for Audio CD........0706\n");
+	printk("<vcd module> mount disc with vcd module SP OK for Audio CD........1106\n");
 	#ifdef CONFIG_USE_CDDA_SUBCHANNEL
 	printk("<vcd module> Disc type : ACD2368\n");
 	#else

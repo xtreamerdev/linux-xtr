@@ -338,7 +338,11 @@ enum CP_ISR_REGS{
 
 enum CP_IOCMD_REG
 {
+#ifdef CONFIG_8139CP_VENUS_RX_MIT
 	RX_MIT 		= 4, /*change by thomas*/ 
+#else
+    RX_MIT 		= 1, /*change by kevin wang*/     
+#endif	
 	RX_TIMER 	= 1,
 	RX_FIFO 	= 2,
 	TX_FIFO		= 1,

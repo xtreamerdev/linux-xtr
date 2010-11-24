@@ -1096,6 +1096,11 @@ out:
 
 struct dentry * lookup_hash(struct qstr *name, struct dentry * base)
 {
+	if(!base) {
+		printk("#######[cfyeh-debug] %s(%d) dentry is NULL!\n", __func__, __LINE__);
+		return NULL;
+	}
+
 	return __lookup_hash(name, base, NULL);
 }
 

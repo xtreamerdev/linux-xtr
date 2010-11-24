@@ -12,7 +12,7 @@
  */
 
 const char *yaffs_mtdif_c_version =
-    "$Id: yaffs_mtdif.c,v 1.21 2007-12-13 15:35:18 wookey Exp $";
+    "$Id: yaffs_mtdif.c,v 1.22 2009-03-06 17:20:51 wookey Exp $";
 
 #include "yportenv.h"
 

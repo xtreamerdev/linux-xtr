@@ -523,6 +523,11 @@ static int block_hotplug(struct kset *kset, struct kobject *kobj, char **envp,
 		add_hotplug_env_var(envp, num_envp, &i, buffer, buffer_size, &length,
 				    "PART_SERIAL=%d", part->part_serial);
 		// cfyeh --- : for part_serial
+
+		if(part->is_efi_system_partition) {
+			add_hotplug_env_var(envp, num_envp, &i, buffer, buffer_size, &length,
+				"EFI_SYSTEM=%d", part->is_efi_system_partition);
+		}
 	} else
 		return 0;
 

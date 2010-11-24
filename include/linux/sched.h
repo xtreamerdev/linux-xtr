@@ -793,6 +793,7 @@ do { if (atomic_dec_and_test(&(tsk)->usage)) __put_task_struct(tsk); } while(0)
 #define PF_BORROWED_MM	0x00400000	/* I am a kthread doing use_mm */
 #define PF_RANDOMIZE	0x00800000	/* randomize virtual address space */
 #define PF_HELPER	0x01000000	/* I am created by khelper */
+#define PF_ASYNC_IO	0x02000000	/* I am using async i/o */
 
 /*
  * Only the _current_ task can read/write to tsk->flags, but other

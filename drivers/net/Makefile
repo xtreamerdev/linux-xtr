@@ -65,6 +65,7 @@ obj-$(CONFIG_ADAPTEC_STARFIRE) += starfire.o
 
 obj-$(CONFIG_MII) += mii.o
 obj-$(CONFIG_8139CP_VENUS) += 8139cplus.o
+#obj-$(CONFIG_8139CP_MARS)  += 8139cplus.o
 
 obj-$(CONFIG_SUNDANCE) += sundance.o
 obj-$(CONFIG_HAMACHI) += hamachi.o

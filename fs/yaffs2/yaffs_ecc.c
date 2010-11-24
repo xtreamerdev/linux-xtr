@@ -29,7 +29,7 @@
  */
 
 const char *yaffs_ecc_c_version =
-    "$Id: yaffs_ecc.c,v 1.10 2007-12-13 15:35:17 wookey Exp $";
+    "$Id: yaffs_ecc.c,v 1.11 2009-03-06 17:20:50 wookey Exp $";
 
 #include "yportenv.h"
 
@@ -109,12 +109,10 @@ void yaffs_ECCCalculate(const unsigned char *data, unsigned char *ecc)
 		b = column_parity_table[*data++];
 		col_parity ^= b;
 
-		if (b & 0x01)	// odd number of bits in the byte
-		{
+		if (b & 0x01) {		/* odd number of bits in the byte */
 			line_parity ^= i;
 			line_parity_prime ^= ~i;
 		}
-
 	}
 
 	ecc[2] = (~col_parity) | 0x03;
@@ -158,7 +156,7 @@ void yaffs_ECCCalculate(const unsigned char *data, unsigned char *ecc)
 	ecc[0] = ~t;
 
 #ifdef CONFIG_YAFFS_ECC_WRONG_ORDER
-	// Swap the bytes into the wrong order
+	/* Swap the bytes into the wrong order */
 	t = ecc[0];
 	ecc[0] = ecc[1];
 	ecc[1] = t;
@@ -189,7 +187,7 @@ int yaffs_ECCCorrect(unsigned char *data, unsigned char *read_ecc,
 		unsigned bit;
 
 #ifdef CONFIG_YAFFS_ECC_WRONG_ORDER
-		// swap the bytes to correct for the wrong order
+		/* swap the bytes to correct for the wrong order */
 		unsigned char t;
 
 		t = d0;
@@ -294,8 +292,7 @@ int yaffs_ECCCorrectOther(unsigned char *data, unsigned nBytes,
 		return 0; /* no error */
 
 	if (lDelta == ~lDeltaPrime &&
-	    (((cDelta ^ (cDelta >> 1)) & 0x15) == 0x15))
-	{
+	    (((cDelta ^ (cDelta >> 1)) & 0x15) == 0x15))	{
 		/* Single bit (recoverable) error in data */
 
 		bit = 0;
