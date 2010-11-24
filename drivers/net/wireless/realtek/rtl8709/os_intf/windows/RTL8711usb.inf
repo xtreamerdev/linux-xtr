@@ -1,0 +1,343 @@
+;; Windows .INF file for NDIS driver
+;;
+;; Realtek RTL8711 USB Wireless Adapter
+;;
+;; Copyright (C) 2006 Realtek Semiconductor Corp.
+;;
+;; this release is primarily for WHQL test.
+
+[Version]
+Signature	= "$Windows NT$"
+Class		= Net
+ClassGUID	= {4d36e972-e325-11ce-bfc1-08002be10318}
+Provider	= %REALTEK%
+CatalogFile.NT	= RTL8711u.cat		;; for WHQL certified
+DriverVer	= 01/17/2006,5.100.06.0117
+
+[Manufacturer]
+%REALTEK%    = REALTEK
+
+[ControlFlags]
+ExcludeFromSelect = USB\VID_0BDA&PID_8711
+[REALTEK]
+%RTL8711.DeviceDesc% = RTL8711.ndi,USB\VID_0BDA&PID_8711
+
+;;****************************************************************************
+;; Windows XP
+;;****************************************************************************
+[RTL8711.ndi.NT]
+AddReg		= RTL8711.NT.Reg, RTL8711.common.reg
+Characteristics = 0x84
+BusType         = 15 
+CopyFiles       = RTL8711.CopyFiles
+
+
+[RTL8711.ndi.NT.Services]
+AddService = RTLCEUSB, 2, rtsnt.Service, RTL8711.EventLog
+
+;*******************************************************************************
+; RTL8711 common paramters
+;*******************************************************************************
+[RTL8711.common.reg]
+HKR,Ndi\params\Chip_Version, ParamDesc, 0, "Chip Version"
+HKR,Ndi\params\Chip_Version, Type, 0,"enum"
+HKR,Ndi\params\Chip_Version, Default, 0,"1"
+HKR,Ndi\Params\Chip_Version\enum, "0", 0, "RTL8711_FPGA"
+HKR,Ndi\Params\Chip_Version\enum, "1", 0, "RTL8711_ASIC"
+
+;************************
+;	SWSI,
+;	HWSI,
+;	HWPI,
+;************************
+HKR,Ndi\params\Rf_Intf_Sel, ParamDesc, 0, "RF Interface Select"
+HKR,Ndi\params\Rf_Intf_Sel, Type, 0,"enum"
+HKR,Ndi\params\Rf_Intf_Sel, Default, 0,"2"
+HKR,Ndi\Params\Rf_Intf_Sel\enum, "0", 0, "SWSI"
+HKR,Ndi\Params\Rf_Intf_Sel\enum, "1", 0, "HWSI"
+HKR,Ndi\Params\Rf_Intf_Sel\enum, "2", 0, "HWPI"
+
+;************************
+;	RTL8711_AIR_TRX,
+;	RTL8711_MAC_LBK,
+;	RTL8711_BB_LBK,
+;	RTL8711_MAC_FW_LBK,
+;	RTL8711_BB_FW_LBK,
+;************************
+HKR,Ndi\params\Loop_Back_Mode, ParamDesc, 0, "Loop Back Mode"
+HKR,Ndi\params\Loop_Back_Mode, Type, 0,"enum"
+HKR,Ndi\params\Loop_Back_Mode, Default, 0,"0"
+HKR,Ndi\Params\Loop_Back_Mode\enum, "0", 0, "RTL8711_AIR_TRX"
+HKR,Ndi\Params\Loop_Back_Mode\enum, "1", 0, "RTL8711_MAC_LBK"
+HKR,Ndi\Params\Loop_Back_Mode\enum, "2", 0, "RTL8711_BB_LBK"
+HKR,Ndi\Params\Loop_Back_Mode\enum, "3", 0, "RTL8711_MAC_FW_LBK"
+HKR,Ndi\Params\Loop_Back_Mode\enum, "4", 0, "RTL8711_BB_FW_LBK"
+
+
+;************************
+;	RTL8711_SDIO,
+;	RTL8711_CFIO,
+;	RTL8711_USB,
+;************************
+HKR,Ndi\params\HCI_Type, ParamDesc, 0, "HCI Type"
+HKR,Ndi\params\HCI_Type, Type, 0,"enum"
+HKR,Ndi\params\HCI_Type, Default, 0,"2"
+HKR,Ndi\Params\HCI_Type\enum, "0", 0, "RTL8711_SDIO"
+HKR,Ndi\Params\HCI_Type\enum, "1", 0, "RTL8711_CFIO"
+HKR,Ndi\Params\HCI_Type\enum, "2", 0, "RTL8711_USB"
+
+
+
+
+HKR,Ndi\params\Channel, ParamDesc, 0, "Channel"
+HKR,Ndi\params\Channel, Type, 0,"int"
+HKR,Ndi\params\Channel, Default, 0,"1"
+HKR,Ndi\params\Channel, Min, 0,"1"
+HKR,Ndi\params\Channel, Max, 0,"161"
+HKR,Ndi\params\Channel, Step, 0,"1"
+
+HKR,Ndi\Params\WirelessMode, ParamDesc, 0, "Wireless Mode"
+HKR,Ndi\Params\WirelessMode, Type, 0, "enum"
+HKR,Ndi\Params\WirelessMode, Default, 0, "3"
+HKR,Ndi\Params\WirelessMode\enum, "0", 0, "Unknown"
+HKR,Ndi\Params\WirelessMode\enum, "1", 0, "B Mode"
+HKR,Ndi\Params\WirelessMode\enum, "2", 0, "G Mode"
+HKR,Ndi\Params\WirelessMode\enum, "3", 0, "BG Mode"
+HKR,Ndi\Params\WirelessMode\enum, "4", 0, "A Mode"
+
+HKR,Ndi\Params\VrtlCarrier, ParamDesc, 0, "Virtual Carrier Sense"
+HKR,Ndi\Params\VrtlCarrier, Type, 0, "enum"
+HKR,Ndi\Params\VrtlCarrier, Default, 0, "2"
+HKR,Ndi\Params\VrtlCarrier\enum, "0", 0, "Never"
+HKR,Ndi\Params\VrtlCarrier\enum, "1", 0, "Always"
+HKR,Ndi\Params\VrtlCarrier\enum, "2", 0, "Auto-VCS"
+
+HKR,Ndi\Params\VCSType, ParamDesc, 0, "VCS type"
+HKR,Ndi\Params\VCSType, Type, 0, "enum"
+HKR,Ndi\Params\VCSType, Default, 0, "2"
+HKR,Ndi\Params\VCSType\enum, "1", 0, "RTS/CTS"
+HKR,Ndi\Params\VCSType\enum, "2", 0, "CTS2Self"
+
+HKR,Ndi\params\RTSThresh, ParamDesc, 0, "RTS Threshold"
+HKR,Ndi\params\RTSThresh, Type, 0,"int"
+HKR,Ndi\params\RTSThresh, Default, 0,"2347"
+HKR,Ndi\params\RTSThresh, Min, 0,"0"
+HKR,Ndi\params\RTSThresh, Max, 0,"2347"
+HKR,Ndi\params\RTSThresh, Step, 0,"1"
+
+HKR,Ndi\params\FragThresh, ParamDesc, 0, "Fragmentation Threshold"
+HKR,Ndi\params\FragThresh, Type, 0,"int"
+HKR,Ndi\params\FragThresh, Default, 0,"2346"
+HKR,Ndi\params\FragThresh, Min, 0,"256"
+HKR,Ndi\params\FragThresh, Max, 0,"2346"
+HKR,Ndi\params\FragThresh, Step, 0,"1"
+
+HKR,Ndi\Params\Preamble, ParamDesc, 0, "Preamble"
+HKR,Ndi\Params\Preamble, Type, 0, "enum"
+HKR,Ndi\Params\Preamble, Default, 0, "1"
+HKR,Ndi\Params\Preamble\enum, "1", 0, "Long"
+HKR,Ndi\Params\Preamble\enum, "2", 0, "Auto"
+HKR,Ndi\Params\Preamble\enum, "3", 0, "Short"
+
+HKR,Ndi\Params\ScanMode, ParamDesc, 0, "Scanning Mode"
+HKR,Ndi\Params\ScanMode, Type, 0, "enum"
+HKR,Ndi\Params\ScanMode, Default, 0, "0"
+HKR,Ndi\Params\ScanMode\enum, "0", 0, "Passive"
+HKR,Ndi\Params\ScanMode\enum, "1", 0, "Active"
+
+HKR,Ndi\Params\AdhocTxPwr, ParamDesc, 0, "Ad Hoc TX Power"
+HKR,Ndi\Params\AdhocTxPwr, Type, 0, "enum"
+HKR,Ndi\Params\AdhocTxPwr, Default, 0, "2"
+HKR,Ndi\Params\AdhocTxPwr\enum, "0", 0, "Level 0"
+HKR,Ndi\Params\AdhocTxPwr\enum, "1", 0, "Level 1"
+HKR,Ndi\Params\AdhocTxPwr\enum, "2", 0, "Level 2"
+HKR,Ndi\Params\AdhocTxPwr\enum, "3", 0, "Level 3"
+
+HKR,Ndi\Params\SoftAP, ParamDesc, 0, "Soft AP"
+HKR,Ndi\Params\SoftAP, Type, 0, "enum"
+HKR,Ndi\Params\SoftAP, Default, 0, "0"
+HKR,Ndi\Params\SoftAP\enum, "0", 0, "Disable"
+HKR,Ndi\Params\SoftAP\enum, "1", 0, "Enable"
+
+HKR,Ndi\Params\SmartPS, ParamDesc, 0, "Smart PS"
+HKR,Ndi\Params\SmartPS, Type, 0, "enum"
+HKR,Ndi\Params\SmartPS, Default, 0, "0"
+HKR,Ndi\Params\SmartPS\enum, "0", 0, "Disable"
+HKR,Ndi\Params\SmartPS\enum, "1", 0, "Enable"
+
+HKR,Ndi\Params\PowerMgnt, ParamDesc, 0, "Power Management"
+HKR,Ndi\Params\PowerMgnt, Type, 0, "enum"
+HKR,Ndi\Params\PowerMgnt, Default, 0, "0"
+HKR,Ndi\Params\PowerMgnt\enum, "0", 0, "Power CAM"
+HKR,Ndi\Params\PowerMgnt\enum, "1", 0, "Minimum Power Save Mode"
+HKR,Ndi\Params\PowerMgnt\enum, "2", 0, "Maximum Power Save Mode"
+HKR,Ndi\Params\PowerMgnt\enum, "3", 0, "U-APSD"
+HKR,Ndi\Params\PowerMgnt\enum, "4", 0, "VOIP"
+
+HKR,Ndi\Params\RadioEnable, ParamDesc, 0, "Radio Control"
+HKR,Ndi\Params\RadioEnable, Type, 0, "enum"
+HKR,Ndi\Params\RadioEnable, Default, 0, "1"
+HKR,Ndi\Params\RadioEnable\enum, "0", 0, "Disable"
+HKR,Ndi\Params\RadioEnable\enum, "1", 0, "Enable"
+
+HKR,Ndi\params\LongRetryLimit, ParamDesc, 0, "Long Retry Limit"
+HKR,Ndi\params\LongRetryLimit, Type, 0, "int"
+HKR,Ndi\params\LongRetryLimit, Default, 0, "7"
+HKR,Ndi\params\LongRetryLimit, Min, 0, "0"
+HKR,Ndi\params\LongRetryLimit, Max, 0, "255"
+HKR,Ndi\params\LongRetryLimit, Step, 0, "1"
+
+HKR,Ndi\params\ShortRetryLimit, ParamDesc, 0, "Short Retry Limit"
+HKR,Ndi\params\ShortRetryLimit, Type, 0, "int"
+HKR,Ndi\params\ShortRetryLimit, Default, 0, "7"
+HKR,Ndi\params\ShortRetryLimit, Min, 0, "0"
+HKR,Ndi\params\ShortRetryLimit, Max, 0, "255"
+HKR,Ndi\params\ShortRetryLimit, Step, 0, "1"
+
+HKR,Ndi\params\BusyThresh, ParamDesc, 0, "Busy Threshold"
+HKR,Ndi\params\BusyThresh, Type, 0,"int"
+HKR,Ndi\params\BusyThresh, Default, 0,"40"
+HKR,Ndi\params\BusyThresh, Min, 0,"1"
+HKR,Ndi\params\BusyThresh, Max, 0,"500"
+HKR,Ndi\params\BusyThresh, Step, 0,"1"
+
+HKR,Ndi\Params\AckPolicy, ParamDesc, 0, "Ack Policy"
+HKR,Ndi\Params\AckPolicy, Type, 0, "enum"
+HKR,Ndi\Params\AckPolicy, Default, 0, "0"
+HKR,Ndi\Params\AckPolicy\enum, "0", 0, "Normal Ack"
+HKR,Ndi\Params\AckPolicy\enum, "1", 0, "No Ack"
+HKR,Ndi\Params\AckPolicy\enum, "2", 0, "Non Explicit Ack"
+HKR,Ndi\Params\AckPolicy\enum, "3", 0, "Block Ack"
+
+HKR,Ndi\Params\MPMode, ParamDesc, 0, "MP Mode"
+HKR,Ndi\Params\MPMode, Type, 0, "enum"
+HKR,Ndi\Params\MPMode, Default, 0, "0"
+HKR,Ndi\Params\MPMode\enum, "0", 0, "Normal"
+HKR,Ndi\Params\MPMode\enum, "1", 0, "MP"
+
+HKR,Ndi\Params\SoftwareEncrypt, ParamDesc, 0, "Software Encrypt"
+HKR,Ndi\Params\SoftwareEncrypt, Type, 0, "enum"
+HKR,Ndi\Params\SoftwareEncrypt, Default, 0, "0"
+HKR,Ndi\Params\SoftwareEncrypt\enum, "0", 0, "Disable"
+HKR,Ndi\Params\SoftwareEncrypt\enum, "1", 0, "Enable"
+
+HKR,Ndi\Params\SoftwareDecrypt, ParamDesc, 0, "Software Decrypt"
+HKR,Ndi\Params\SoftwareDecrypt, Type, 0, "enum"
+HKR,Ndi\Params\SoftwareDecrypt, Default, 0, "0"
+HKR,Ndi\Params\SoftwareDecrypt\enum, "0", 0, "Disable"
+HKR,Ndi\Params\SoftwareDecrypt\enum, "1", 0, "Enable"
+
+;Starting for U-APSD
+
+HKR,Ndi\Params\WMMEnable, ParamDesc, 0, "Enable WMM"
+HKR,Ndi\Params\WMMEnable, Type, 0, "enum"
+HKR,Ndi\Params\WMMEnable, Default, 0, "0"
+HKR,Ndi\Params\WMMEnable\enum, "0", 0, "Disable"
+HKR,Ndi\Params\WMMEnable\enum, "1", 0, "Enable"
+
+HKR,Ndi\Params\UAPSDEnable, ParamDesc, 0, "Enable U-APSD"
+HKR,Ndi\Params\UAPSDEnable, Type, 0, "enum"
+HKR,Ndi\Params\UAPSDEnable, Default, 0, "0"
+HKR,Ndi\Params\UAPSDEnable\enum, "0", 0, "Disable"
+HKR,Ndi\Params\UAPSDEnable\enum, "1", 0, "Enable"
+
+HKR,Ndi\Params\UAPSDMaxSP, ParamDesc, 0, "U-APSD:Max MSDU/MMPDU per SP"
+HKR,Ndi\Params\UAPSDMaxSP, Type, 0, "enum"
+HKR,Ndi\Params\UAPSDMaxSP, Default, 0, "0"
+HKR,Ndi\Params\UAPSDMaxSP\enum, "0", 0, "No Limit"
+HKR,Ndi\Params\UAPSDMaxSP\enum, "1", 0, "2 MSDU"
+HKR,Ndi\Params\UAPSDMaxSP\enum, "2", 0, "4 MSDU"
+HKR,Ndi\Params\UAPSDMaxSP\enum, "3", 0, "6 MSDU"
+
+HKR,Ndi\Params\UAPSDACBKEnable, ParamDesc, 0, "U-APSD:AC_BK support"
+HKR,Ndi\Params\UAPSDACBKEnable, Type, 0, "enum"
+HKR,Ndi\Params\UAPSDACBKEnable, Default, 0, "0"
+HKR,Ndi\Params\UAPSDACBKEnable\enum, "0", 0, "Disable"
+HKR,Ndi\Params\UAPSDACBKEnable\enum, "1", 0, "Enable"
+
+HKR,Ndi\Params\UAPSDACBEEnable, ParamDesc, 0, "U-APSD:AC_BE support"
+HKR,Ndi\Params\UAPSDACBEEnable, Type, 0, "enum"
+HKR,Ndi\Params\UAPSDACBEEnable, Default, 0, "0"
+HKR,Ndi\Params\UAPSDACBEEnable\enum, "0", 0, "Disable"
+HKR,Ndi\Params\UAPSDACBEEnable\enum, "1", 0, "Enable"
+
+HKR,Ndi\Params\UAPSDACVIEnable, ParamDesc, 0, "U-APSD:AC_VI support"
+HKR,Ndi\Params\UAPSDACVIEnable, Type, 0, "enum"
+HKR,Ndi\Params\UAPSDACVIEnable, Default, 0, "0"
+HKR,Ndi\Params\UAPSDACVIEnable\enum, "0", 0, "Disable"
+HKR,Ndi\Params\UAPSDACVIEnable\enum, "1", 0, "Enable"
+
+HKR,Ndi\Params\UAPSDACVOEnable, ParamDesc, 0, "U-APSD:AC_VO support"
+HKR,Ndi\Params\UAPSDACVOEnable, Type, 0, "enum"
+HKR,Ndi\Params\UAPSDACVOEnable, Default, 0, "0"
+HKR,Ndi\Params\UAPSDACVOEnable\enum, "0", 0, "Disable"
+HKR,Ndi\Params\UAPSDACVOEnable\enum, "1", 0, "Enable"
+
+;Ending for U-APSD
+
+HKR,Ndi\Params\NetworkMode, ParamDesc, 0, "Network Mode"
+HKR,Ndi\Params\NetworkMode, Type, 0, "enum"
+HKR,Ndi\Params\NetworkMode, Default, 0, "1"
+HKR,Ndi\Params\NetworkMode\enum, "0", 0, "Ad Hoc"
+HKR,Ndi\Params\NetworkMode\enum, "1", 0, "Infrastucture"
+HKR,Ndi\Params\NetworkMode\enum, "2", 0, "Auto"
+
+HKR,Ndi\params\SSID, ParamDesc, 0, "SSID"
+HKR,Ndi\params\SSID, Type, 0, "edit"
+HKR,Ndi\params\SSID, Default, 0,"ANY"
+HKR,Ndi\params\SSID, LimitText,	0, "32"
+;HKR,Ndi\params\SSID, Optional, 0, "1"
+
+;*******************************************************************************
+; Windows XP
+;*******************************************************************************
+[RTL8711.NT.Reg]
+HKR, Ndi\Interfaces,	UpperRange, 0, "ndis5"
+HKR, Ndi\Interfaces,    LowerRange, 0, "ethernet"
+HKR, Ndi,            	Service,    0, "RTLCEUSB"
+
+[rtsnt.Service]
+DisplayName    = %RTL8711.DeviceDesc.DispName%
+ServiceType    = 1		; %SERVICE_KERNEL_DRIVER%
+StartType      = 3		; %SERRVICE_DEMAND_START%
+ErrorControl   = 1		; %SERRVICE_ERROR_NORMAL%
+ServiceBinary  = %12%\RTL8711u.sys
+LoadOrderGroup = NDIS
+
+[RTL8711.EventLog]
+AddReg = RTL8711.AddEventLog.reg
+
+[RTL8711.AddEventLog.reg]
+HKR, , EventMessageFile, 0x00020000, "%%SystemRoot%%\System32\netevent.dll"
+HKR, , TypesSupported  , 0x00010001, 7
+
+[RTL8711.CopyFiles]
+RTL8711u.sys,,,2
+rtl8711fw.bin,,,2
+;*******************************************************************************
+; Destination Directory
+;*******************************************************************************
+[DestinationDirs]
+RTL8711.CopyFiles	= 12
+
+[SourceDisksNames]
+1=%DISKNAME%,,,
+
+[SourceDisksFiles]
+RTL8711u.sys = 1
+
+;*******************************************************************************
+; Strings
+;*******************************************************************************
+[Strings]
+REALTEK				= "Realtek Semiconductor Corp."
+SSID_STR			= "SSID"
+CHANNEL_STR			= "Channel"
+NETWORK_TYPE_STR		= "Network Type"
+;POWER_SAVE_STR			= "Power Save Mode"
+
+;; Source disk name
+DISKNAME			= "Realtek RTL8711 USB Wireless Adapter Driver Disk"
+RTL8711.DeviceDesc 		= "Realtek RTL8711 USB Wireless Adapter "
+RTL8711.DeviceDesc.DispName  	= "Realtek RTL8711 USB Wireless Adapter NT Driver"
+;

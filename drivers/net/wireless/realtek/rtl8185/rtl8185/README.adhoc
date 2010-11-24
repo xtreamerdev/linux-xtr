@@ -1,0 +1,28 @@
+Since V 0.16 and initial support for ad-hoc mode is included.
+This is still under development, and I'm aware that it might fail.
+
+You can put the nic in ad-hoc mode running
+
+iwconfig <ifname> mode ad-hoc
+
+Then, once the nic bringed up it will sets up an ad-hoc network called
+'Rtl8180'. You can change the essid in the same mode as for managed mode.
+You may also want to change channel just like for monitor mode.
+When the nic is set to a new essid, it scans the channel to see if another
+cell with the same essid exists, if it exist then the nic sets to this
+channel and connect itself to such cell.
+If it doesnt exist the nic creates a new one. In this case the channel 
+should be set manually.
+
+In this initial release you have to be very gentle with ad-hoc.
+
+Every time you set a new essid you might want to wait the card to complete
+scan and create the IBSS before issue other commands, in particular before
+changing channel.
+
+If the nic finds the IBSS but set the channel wrongly you might correct it
+manually.
+
+Furthermore i'm not sure (altought I think yes) if promisc mode still works when the nic operates in ad-hoc mode.. if you try it, *PLEASE* report..
+
+

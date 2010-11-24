@@ -1,0 +1,21 @@
+TARGETNAME=rtl871x_eeprom
+TARGETPATH=.
+TARGETTYPE=LIBRARY
+
+INCLUDES=	\
+		..\include;				\
+		$(DDK_INC_PATH);            \
+		$(DDK_INC_PATH)\..\wdm\wxp;
+
+
+C_DEFINES=$(C_DEFINES) -DNDIS_MINIPORT_DRIVER=1 -DNDIS51_MINIPORT=1 \
+ 			-DBINARY_COMPATIBLE=1 -DNDIS_WDM=1 -DUSE_KLOCKS=1 
+
+TARGETLIBS= $(DDK_LIB_PATH)\ndis.lib \
+           $(DDK_LIB_PATH)\ntoskrnl.lib
+           
+SOURCES = \
+	rtl871x_eeprom.c
+
+
+                

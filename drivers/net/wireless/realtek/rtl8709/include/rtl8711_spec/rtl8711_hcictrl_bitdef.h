@@ -1,0 +1,29 @@
+#ifndef __RTL8711_HCICTRL_BITDEF_H__
+#define __RTL8711_HCICTRL_BITDEF_H__
+
+//HFFR
+#define _HWFF0_CLR			BIT(1)
+#define _HRFF0_READY		BIT(2)
+#define _PKT_COUNT_MSK		0xF000
+#define _PKT_COUNT_SHT		12
+
+#ifdef CONFIG_SDIO_HCI
+#define _RFF_READY			BIT(8)
+#endif
+
+//RSTMSKOFF
+#define _RSTMASKOFF		BIT(0)
+
+//SLEEPMSKOFF
+#define _SLEEPMSKOFF		BIT(0)
+
+//LDOOFF
+#define _LDOOFF				BIT(0)
+
+//HSYSCLK
+#define _HHSSEL				BIT(1)
+#define _HLXBUS1S			BIT(2)
+#define _HVCODISABLE		BIT(4)
+
+
+#endif	//__RTL8711_HCICTRL_BITDEF_H__

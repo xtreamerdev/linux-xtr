@@ -1,0 +1,62 @@
+#!/bin/bash
+
+# Select NIC type
+card=RTL8192u
+
+SYSTEM=`uname -r|cut -d. -f1,2`
+
+if [ $SYSTEM = 2.4 ]
+then
+cd ieee80211
+insmod ieee80211_crypt-rsl.o
+insmod crypto-rsl.o
+insmod michael_mic-rsl.o
+insmod aes-rsl.o
+insmod ieee80211_crypt_wep-rsl.o
+insmod ieee80211_crypt_tkip-rsl.o
+insmod ieee80211_crypt_ccmp-rsl.o
+insmod ieee80211-rsl.o
+
+#insmod 
+case "$card" in
+        "RTL8192u")
+        cd ../HAL/rtl8192u;
+	insmod r8192_usb.o;;
+        "RTL8190p")
+        cd ../HAL/rtl8192;
+        insmod r8190_pci.o;;
+        "RTL8192e")
+        cd ../HAL/rtl8192;
+        insmod r8192_pci.o;;
+        *)
+        echo "Unknown NIC type"
+	;;
+esac
+
+else
+cd ieee80211/
+insmod ieee80211_crypt-rsl.ko
+insmod ieee80211_crypt_wep-rsl.ko
+insmod ieee80211_crypt_tkip-rsl.ko
+insmod ieee80211_crypt_ccmp-rsl.ko
+insmod ieee80211-rsl.ko
+
+#insmod
+case "$card" in
+        "RTL8192u")
+        cd ../HAL/rtl8192u;
+	insmod r8192_usb.ko;;
+        "RTL8190p")
+        cd ../HAL/rtl8192;
+        insmod r8190_pci.ko;;
+        "RTL8192e")
+        cd ../HAL/rtl8192;
+        insmod r8192_pci.ko;;
+        *)
+        echo "Unknown NIC type"
+	;;
+esac
+fi
+
+cd ../..
+ifconfig wlan0 up

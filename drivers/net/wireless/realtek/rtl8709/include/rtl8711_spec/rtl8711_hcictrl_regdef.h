@@ -1,0 +1,35 @@
+#ifndef __RTL8711_HCICTRL_REGDEF_H__
+#define __RTL8711_HCICTRL_REGDEF_H__
+
+#ifdef CONFIG_SDIO_HCI
+
+#define HWFF0ADDR			(RTL8711_HCICTRL_ + 0x10)
+#define HFFR				(RTL8711_HCICTRL_ + 0x1A)
+#define PKTSZ				(RTL8711_HCICTRL_ + 0x1C)
+#define RSTMSKOFF			(RTL8711_HCICTRL_ + 0x20)
+#define SLEEPMSKOFF			(RTL8711_HCICTRL_ + 0x21)
+#define LDOOFF				(RTL8711_HCICTRL_ + 0x22)
+#define HCPWM				(RTL8711_HCICTRL_ + 0x23)
+#define HRPWM				(RTL8711_HCICTRL_ + 0x24)
+#define HSYSCLK				(RTL8711_HCICTRL_ + 0x25)
+
+#endif //CONFIG_SDIO_HCI
+
+//-----------------------------------------------
+
+#ifndef CONFIG_SDIO_HCI //for (CONFIG_CFIO_HCI || CONFIG_LM_HCI)
+
+#define HWFF0ADDR			(RTL8711_HCICTRL_ + 0x0C)
+#define HFFR				(RTL8711_HCICTRL_ + 0x18)
+#define PKTSZ				(RTL8711_HCICTRL_ + 0x1A)
+#define LMCFG				(RTL8711_HCICTRL_ + 0x1C)
+#define RSTMSKOFF			(RTL8711_HCICTRL_ + 0x20)
+#define SLEEPMSKOFF			(RTL8711_HCICTRL_ + 0x21)
+#define LDOOFF				(RTL8711_HCICTRL_ + 0x22)
+#define HCPWM				(RTL8711_HCICTRL_ + 0x23)
+#define HRPWM				(RTL8711_HCICTRL_ + 0x24)
+#define HSYSCLK				(RTL8711_HCICTRL_ + 0x25)
+
+#endif	//for (CONFIG_CFIO_HCI || CONFIG_LM_HCI)
+
+#endif	//__RTL8711_HCICTRL_REGDEF_H__

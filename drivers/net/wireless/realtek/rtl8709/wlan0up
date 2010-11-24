@@ -1,0 +1,5 @@
+#!/bin/bash
+
+insmod r8192u.ko
+ifconfig wlan1 up
+

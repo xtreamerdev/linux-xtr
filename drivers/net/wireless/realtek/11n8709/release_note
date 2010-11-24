@@ -1,0 +1,89 @@
+---------------------------------------------------
+Release for rtl8192u linux driver
+
+---------------------------------------------------------------------------------------------
+Release date = 2008-06-17
+Operating system release = ubuntu 7.10 
+Kernel version = 2.6.22
+Release driver version = 0001.0617.2008
+Change history =
+        1. Finish merging 92u Initialization from windows driver to Linux one.
+        2. Firmware download sucess, the used bug was caused by that the Tx physical address was cleaned by system rest.
+        3. The Tx/Rx function has been ported to Linux driver.
+        4. Tx/Rx is OK under loopback mode. 
+        5. Rx is OK under normal mode. 
+        6. bg mode, infrastructure and ad-hoc mode is ok.
+        7. HT and BA is enabled, and tests OK.
+	 
+---------------------------------------------------------------------------------------------
+Release date = 2008-07-03
+Release driver version = 0002.0703.2008
+
+Operating system release = Fedora 6
+Kernel version = 2.6.18
+Change history =
+        1. AMSDU Rx process has been ported to code base. 
+        2. Merge the code with the name/file changed file, mainly from xxU to xxpci.
+        3. The driver now could support tx wait queue mechanism.
+        4. DM is merged, and before merge throughput only ups to (30U, 60D).
+        5. The driver now could be configured to download firmware from img file to avoid patent issue.
+
+Operating system release = ubuntu 7.10 
+Kernel version = 2.6.22
+Change history =
+        1. The driver now supports HW Security, both IPW and WEXT. But only CCMP is OK.
+        2. Dynamic mechenism is updated from windows code.
+        3. Fix bug that in 40M bandwidth, site survey will stop pinging. 
+        4. Fix bug that in wep security, it can't ping to AP using 2th,3th,4th key, and in shared key mode, PC will hang.
+        5. Support HW sec for TKIP and WEP four keys in b,g mode
+
+---------------------------------------------------------------------------------------------
+Release date = 2008-07-25
+Operating system release = Ubuntu 8.04 
+Kernel version = 2.6.24
+Release driver version = 0003.0725.2008
+Change history =
+        1. Tx/Rx driver aggreagtion feature support and verified ok.
+
+---------------------------------------------------------------------------------------------
+Release date = 2008-08-01
+Operating system release = Fedora 6
+Kernel version = 2.6.18
+Release driver version = 0003.0801.2008
+Change history =
+        1. Add the rx driver aggregation dynamic mechanism.
+
+Release date = 2008-09-26
+Operating system release = Fedora 6
+Kernel version = 2.6.18
+Release driver version = 0004.1008.2008
+Change history =
+	1. Append the Makefile to make the end user to install/uninstall.
+	2. Add 11D feature following default ChannelPlan.
+	3. Fix bug that available firmwire page becomes less and less and then cause chariot or ping to halt.
+	4. Add some iwconfig command support and fix bug showing some error message.  
+	5. Fix wep open and shared key bug.
+
+Release date = 2008-10-23
+Operating system release = Fedora 6
+Kernel version = 2.6.18
+Release driver version = 0005.1023.2008
+Change history =
+	1.Add hidden AP support
+	2.Fix ad-hoc throughput too low.
+	3.Fix the bug that tkip heavy traffic will cause MIC calculation
+	  error which will finally disconnect from AP.
+	4.Fix the bug that leap security can't connect.
+	5.Fix the bug that read wrong channel plan from EEPROM
+	6.Add support for iwconfig power.
+
+Release date = 2008-10-31
+Operating system release = Fedora 6
+Kernel version = 2.6.18
+Release driver version = 0006.1031.2008
+Change history =
+	1. Add support to iwconfig wlan0 power multicast
+	2. Fix the bug that sometime iwconfig will show illegal frequency.
+	2. Fix the bug ad-hoc mode can set to illegal channel.
+
+    

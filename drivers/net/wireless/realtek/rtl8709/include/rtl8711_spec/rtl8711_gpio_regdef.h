@@ -1,0 +1,15 @@
+#ifndef __RTL8711_GPIO_REGDEF_H__
+#define __RTL8711_GPIO_REGDEF_H__
+
+#define PADIR				(RTL8711_GPIO_ + 0x0000)
+#define PADAT				(RTL8711_GPIO_ + 0x0004)
+#define PAISR				(RTL8711_GPIO_ + 0x0008)
+#define PAIMR				(RTL8711_GPIO_ + 0x000C)
+#define PBDIR				(RTL8711_GPIO_ + 0x0010)
+#define PBDAT				(RTL8711_GPIO_ + 0x0014)
+#define PBISR				(RTL8711_GPIO_ + 0x0018)
+#define PBIMR				(RTL8711_GPIO_ + 0x001C)
+
+#endif //__RTL8711_SYSCFG_REGDEF_H__
+
+

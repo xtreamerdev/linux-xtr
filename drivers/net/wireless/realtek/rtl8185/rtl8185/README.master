@@ -1,0 +1,31 @@
+rtl8180-sa2400 as an AP (master mode)
+----------------------------------------
+
+The driver now supports a *basic* AP mode. Basic means that the 802.11 protocol is not fully implemented. 
+Each client may associate with open authentication method, anyway the AP doens't care about this, it simply accepts packet from the nics sending them to its BSS.
+
+To put the driver in AP mode you should run 
+
+iwconfig <ifacename> mode master
+
+Then you can assign a BSS name 
+
+iwconfig <ifacename> essid xxxxxxxxxx
+
+and a channel
+
+iwconfig <ifacename> channel xx
+
+if you wish you can specify also a key fo WEP encryption.
+
+iwconfig <ifacename> key xxxxxxxxxxxxxxxxxxxxxxxx
+
+When you bring up the interface the nic should create the BSS. You may assign an IP address to the interface if you want to simulate
+the connection of the AP to a wired network (your host).
+
+This means the hosts on the wlan might talk between themselves and with your host (trought the NIC ip).
+If you want to bridge this virtual AP to a real wired network you might use the kernel ethernet bridging.
+
+Please consider this feature is still rough and experimental, it may contain some bugs, so don't trust it too much.
+
+Please report me success/insuccess feedback 

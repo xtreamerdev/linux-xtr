@@ -1,0 +1,155 @@
+rtl8180-sa2400 Linux kernel driver
+Released under the terms of GNU General Public Licence (GPL)
+Copyright(c) Andrea Merello - 2004,2005
+
+Portions of this driver are based on Intel Pro Wireless 2100 driver. 
+Thanks to the original author !! Most notabily the ieee802.11 stack 
+is imported from this project, altought I've modified it
+
+------------------------------------------------------------------------------
+
+This is an attempt to write somethig that can make my rtl8180-based wlan card 
+work under Linux (using only opensource stuff). It's in early development 
+stage so don't expect too much from it (also use it at your own risk!)
+This should be considered just a fragment of code.. using it on your(any) 
+system is at your own risk! Please note that I never supported the idea to 
+use it in any way, so i cannot be considered responsible in any way for 
+anything deriving by it usage.
+
+Anyway for now we have monitor mode and managed mode
+basically working! This isn't necessary stable, but seems to work.. 
+Also since v 0.16 we have an initial and incomplete support for ad-hoc
+mode. *Please* see README.adhoc for further details 
+
+An official driver from Realtek exist for this NIC but
+- It's mainly closed source stuff
+- It doesn't work on 2.6 kernels (and on some 2.4)
+- It hasn't any support for monitor mode
+
+I have it working with ndiswrapper, but since I don't like to use windows' 
+closed source drv I decided to try to write this driver.
+
+*!!Please note that only cards with a PHILIPS sa2400 or MAXIM or GCT RF chip are supported.!!*
+
+Support for such a radio chip is also still experimental. 
+There are some variant of the card with rtl8180 and philips sa2400 RF: 
+antenna diversity, firdac etc.. 
+Altought all configurations should be supported, some are not tested and might
+fail. If you decide to test this drv on a digital-phy card, please let me know 
+the results.
+
+This driver is still under development and very far from perfect. It should work on x86,
+and someone reported success on PPC, while on amd64 I have some success and some failure
+report. Other archs are untested.. I think there is still work to do about this.
+
+If you decide to try it anyway (at your own risk!) and you want report me success/insuccess 
+I will apreciate it very much.
+
+To compile the driver simply run make.
+
+Note that the Makefile should work on kenrel 2.6 and 2.4. 
+Anyway the old Makefile for 2.6 kernel is still included as Makefile26.
+
+FOUR modules will be compiled: the ieee802.11 stack (3 modules) and the driver 
+itself. You need to insmod ALL of them!
+
+Some versions might work also on recent 2.4 kernel.
+
+After insmod'ing ieee80211-r8180_crypt-r8180 ieee80211_crypt_wep-r8180 ieee80211-r8180.ko and r8180
+the nic is sleeping.
+
+To wake up the nic run:
+
+   ifconfig <ifacename> up 
+
+(where <ifacename> is your network device for wlan card).
+
+Please note that the default interface name is wlanX.
+
+If you would like to set the interface name to something else you may use the 
+'devname=' module parameter. For example:
+
+   insmod r8180.ko ifname=eth%d 
+
+will set the interface name of this device to something like eth0.
+
+Once the nic is up it can be put in a monitor mode by running:
+
+   iwconfig <ifacename> mode monitor
+
+and channel number may be changed by running:
+
+   iwconfig <ifacename> channel XX
+
+Monitor mode is also accessible via iwpriv, so Kismet works (altought channel
+change routines are still a bit slow so channel hopping may not work perfectly).
+
+In monitor mode a choice may be made via iwpriv if the nic should pass packets 
+with bad crc or drop them.
+
+To put the nic in managed mode run:
+
+   iwconfig <ifacename> mode managed
+
+In managed mode there is support for
+
+   iwlist scan
+
+that should report the currently available networks.
+Please note that in managed mode channels cannot be changed manually.
+
+To associate with a network
+   
+   iwconfig <ifacename> essid XXXXX
+
+where XXXXX is the network essid (name) reported by 'iwlist scan'. Please
+note that essid is case sensitive.
+
+If your network is not broadcasting the ESSID, then you need to specify *also*
+the AP MAC address 
+
+   iwconfig <ifacename> ap XX:XX:XX:XX:XX:XX
+
+The driver accepts another boolean parameter: hwseqnum
+If set to 1 it lets the card HW take care of the sequence number of the TXed 
+frames. Altought in managed mode I can't see an important reason to use HW to 
+do that, when we'll start to TX beacons in master (AP) and ad-hoc modes most 
+probably it will be extremely useful (since most probably we will use two HW 
+queues).
+
+I'm unsure if it will work correctly on all NICs.. reports are *VERY, VERY* apreciated.. 
+
+ 
+ WEP
+ ===
+ 
+Since v 0.8 WEP encryption should be supported (tested with 104 bit keys).
+Wep encryption is done by host, not by the nic. Key can be set with:
+Key can be set with
+   
+   iwconfig <ifacename> key 12345...
+
+WEP is supported via software thanks to the ipw stack.
+
+I've found some register for nic HW wep encryption, but some nic in truth seems to don't 
+support it at all.
+
+Anyway some code to use HW wep is present and available by a module param, but most probably 
+it is buggy even in cards that have HW wep.
+
+ IWPRIV
+ ======
+
+This driver supports some private handlers
+The monitor private handler is quite redundant (it is possible to do the same with iwconfig)
+but it is keept to make sure kismet work (setting 'Orinoco' as source type)
+then are present the following option
+-badcrc: let you choose to kill or to pass to the upper layer frames with bad crc in monitor mode
+-forceassoc: if 1 the driver will not perform normal authentication+association procedure, but just belive to be successfully associated in monitor mode.. just for your fun
+-beaconint: set the beacon interval for ad-hoc/master mode. It is quite untested for now...
+-prismhdr: if 1 in monitor mode the driver will prefix a prism header to the ieee802.11 packet
+-activescan: if 0 the driver will avoid to send probe requests, sanning will be only on beacon basis
+
+
+If you have some question/comments please feel free to write me.
+

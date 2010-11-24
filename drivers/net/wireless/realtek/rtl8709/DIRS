@@ -1,0 +1,17 @@
+DIRS=\
+	debug	\
+	sta_mgt	\
+	rf	\
+	hal	\	
+	mlme	\
+	cmd	\
+	os_dep	\
+	eeprom	\
+	crypto	\
+	pwrctrl	\
+	io	\
+	xmit	\
+	mp	\
+	recv	\
+	ioctl	\
+	os_intf

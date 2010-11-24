@@ -1,0 +1,3 @@
+
+obj-$(CONFIG_REALTEK_PCI_RTL8190)       += ieee80211/ HAL/rtl8192/
+

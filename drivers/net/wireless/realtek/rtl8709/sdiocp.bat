@@ -1,0 +1,1 @@
+copy os_intf\windows\objchk_wxp_x86\i386\RTL8711Sd.sys C:\WINDOWS\system32\drivers\RTL8711Sd.sys

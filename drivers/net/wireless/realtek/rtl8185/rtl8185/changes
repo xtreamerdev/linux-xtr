@@ -1,0 +1,359 @@
+V 0.22
+Some more accurate check in the RX isr to avoid buggy or mad HW to crash the kernel
+Initial support for RTL8185 MAC+BB chip (Thanks to Realtek)
+Initial support for RTL8225 b/g radio chip (Thanks to Realtek)
+close properly GCT radio
+fixed bug in lock not released in set_retry wx
+addedd wx for set/get sensivity
+addedd support for setting sensivity on sa2400 RF
+One fix for 64bits arch - one success on amd64 (Thanks to stoodi for testing and reporting logs)
+Fix in lock not released in rx beacon process (bug probably introduced in 0.21)
+Fix entry not really deleted in becaon expire calcs (bug probably introduced in 0.21)
+Compile fix for sw susp 2 patch (Thanks to 'danbrown' and Svetoslav Slavtchev)
+Fix a typo in the interrupt handler, this should fix the TX watchdog timeout problem (Thanks to Onno Kortmann)
+Running (syncro) scan when associated can be preformed at least by superuser 
+Fixed a memory overflow that might cause oopses
+Fixed gcc 4.0 compile problem (Thanks to Kenneth Langdalen and Svetoslav Slavtchev)
+Fixed a bug in rx ring memory release
+Cleanup to Makefile26 (Thanks to Konstantin Antselovich)
+Unify the module_load/unload scripts for 2.6 and 2.4 kernels (Thanks to Konstantin Antselovich)
+The WEP module now checks if the ARC4 is compiled as a module before complain (Thanks to Svetoslav Slavtchev)
+
+V 0.21
+Make sure the ssid beacon field is long enought(Thanks to 'Deuce' and Markus Waldeck)
+Fixed auto load of WEP modules (Thanks to Lamarque Eric)
+2.4 compatibility fixes (Thanks to Lamarque Eric)
+BASIC support for AP mode
+use the AP wx to make possible change the IBSS cell mac(use ifconfig hw ether for master mode)
+Fixed oops when remmod and workqueue was running
+Fuxed oops on old kernels when loading with no devices present (Thansk to Lamarque Eric)
+Avoid to respond to probe request until the nic is correctly settled in ad-hoc or master mode (fix some HW error when creating IBSS and possibly BSS)
+New created IBSS cell have randomized MAC address (hope this is ok..)
+Tx fragmentation fix for HW seq number
+Static allocation for SSID (Thanks to 'Deuce')
+Statistics in proc fs reworked
+Support for optional prism-header in monitor mode (Thanks to Christian)
+Addedd module-author and module-description tags (Thanks to Lamarque Eric)
+Some code clean-ups
+Added WX for setting retry limit
+Fixed wrong declarations for some inline functions (Thanks to Benjamin Collins)
+Fixed iw_handler_def for compatiblity with newer WX (Thanks to Phil Jones)
+Setting essid - only in managed mode you can set null essid
+Ensure locking in WX
+Fixed a typo: reiceve -> receive (Thanks to 'Deuce')
+Support for active scan (Thanks to 'Deuce')
+Make the WEP module complains if ARC4 not loaded (Thanks to 'Thenihilist')
+increased PHY settle time, hopefully helps who seen errors on PHY write
+Fixed swapped arguments in TX buffer allocation (Thanks to Aryix who pointed out the original patch for the ieee 802.11 stack in -mm kernel patch)
+Improved association logic behaviour with varius user-set-essid, user-set-ap-bssid, network is broadcasting essid etc..
+
+V 0.20.2
+Did make clean
+
+V 0.20.1
+Deleted (again) an outdated README.gct
+
+V 0.20
+Experimental support for GCT radio
+RSSI fixes. Tested on Maxim - Philips still broken - (Thanks to Deuce)
+Some code for master (AP) mode included. Not finished yet
+Reassociation improvement (Thanks to Peter Fales for some reports)
+Support for AP that send deauth frame instead of disassoc frame (Thanks to 'ad209' for reporting the problem and to Andrea Fava who lend me his AP)
+When association procedure fails then the nic restart to scan and eventually retryes.. This is also a workaround for some case in witch the reassociation fail (don't ask me why..)
+Fixed problem with DHCP: bringing down the iface now keep the essid (Thanks do Deuce to have pointed it out and to have worked on it)
+Fixed memory leak in scan routines
+Support for the wx for setting ap. Should work for hidden essid network. 
+Association code reworked
+Fixed bug in probe response capability-WEP
+Make use of IOMMAP instead of PIO by default - performance improved.
+Fixed a bug in encoding the RX-ed rate for passing to the stack - Thanks to 'Christian' for pointing this out
+Changed the number of RX and TX descriptors to an half to reduce DMAable consistent memory requirement
+Fixed mgmt frames have reasonable sequence number even if we are using SW seq number handling
+Fixed module_unload24 script (Thanks to Ivano Primi)
+
+V 0.19
+Killed some nonsense warning for maxim radio
+Fixed maxim radio doesn't work with debug disabled (Thanks to Deuce)
+Added initial hook for wireless statistics (Thanks to Csredeagle )
+Fixed basic rate at 1Mbps (was unitialized in some circumnstances)
+
+V 0.18
+Fix: MAXIM radio fixes
+Fix: Module probe doesn't fail with MAXIM radio (Thanks to Deuce) 
+Fix: MAXIM / PHILIPS write_phy_antenna passed wrong argument
+Fix: Wep module autoload (Thanks to Deuce)
+Fix: MAXIM radio now should work (Thanks to Deuce)
+Fix: Changed some locking mechanism
+Added module load/unload scripts for 2.4 kernel
+
+V 0.17
+Fix: Makefile for 2.4 kernel
+Fix: Makefile26
+Fix: Ad-hoc mode channel logic improvement
+Fix: Driver should tolerate hw hotplug without complain too much
+Implemented memory free routines for buffers/descriptors
+SA2400 cleanups
+SA2400 digital PHY experimental fix (PLEASE REPORT!!!!!!!!!)
+Should recognize OK all PHY type (included MAXIM and GCT (previously recognized as RFMD?))
+Old EEPROM default values fix
+UNTESTED initial support for MAXIM radio
+Fixed another bastard bug in TX descriptor handling
+
+V 0.16
+Merged in a lot of cleanups (Thanks to Mariusz Matuszek)
+Added module parameter for channel scan bitmap (thanks to Mariusz Matuszek)
+Code for start/stop scan reworked
+Fix in sa2400 code (firdac- experimental, if you have firdac card please report)
+Fixes in the probe fail resource release
+Beacon TX support via HW beacon queue
+Initial ad-hoc support - Should basically work, if you treat it with care -
+Addedd a dummy WX for a not supported wx.
+Changed ieee stack name, so on the same PC I can have an rtl8180 and an ipw2100 running at the same time ;-P
+initial attempt to have duration field correct in TXed frame (code not active yet)
+Rx ISR is invoked with RX nic int masked.
+Added kernel tx_timeout handler and we update last_trans in dev struct
+Fix in beacon parsing
+Addedd lot of stats
+Addedd register image in proc fs
+Fix: insmodding with hwseqnum=1 should work now
+Reworked TX queue control flow
+Reworked TX descriptor handling
+Fix: compatibility with >2.6.9 kernel, we use pci_dma_sync_single_for_cpu/ _for_device. (Thanks to 'dignome')
+Fix: RX max DMA burst was wrong in register definition
+Fix: TX config take care of some more params
+Fix: makefile for 2.4 kernel (Thanks to Kamil Zidek)
+
+V 0.15
+We collects a lot of statistics
+Basic rtx stats returned by ifconfig should be ok.
+We don't want CTRL frames if we are not in monitor mode
+Fixed memory leak in TX
+Addedd /proc/net/rtl8180/<ifacename> proc enrty with stats
+Set the NIC to perform early rx as little as possible (This causes less RX pointer lost and missing last descriptor)
+
+V 0.14
+Some cleanups and PM skeleton (Thanks to Mariusz Matuszek)
+RX workaround to avoid RX lockup 
+
+V 0.13
+Addedd full register definition with Realtek's name (Thanks to Mariusz Matuszek)
+fixed 5.5Mbps (Thanks to Mihnea Stoenescu)
+fixed memory leak in RX isr in some case when packet reception isn't fully completed
+fixed memory leak in RX 802.11 stack when handling management frames
+Added support for changing mac address
+fixed sleeping in irq while resetting the card due to an int error (experimental:don't reset at all)
+Added workaround for RX fifo reset (from Mihnea's rtl8180-emb driver)
+We call the rx process with enabled interrupt (experimental) 
+
+V 0.12
+Improvement for monitor mode
+Explicit support for promiscuos mode in managed mode (implemented by workaround, might fail)
+Fixed mad numbers in iwconfig
+Support for changing rate via iwconfig (5.5Mbps is broken!)
+Compile fixes,cleanups and cosmetics (Thanks to Trisk)
+Lot of code cleanup and Updated README (Mariusz Matuszek)
+Better NIC restart/commit logics
+Empty the TX descriptors when reset/commit (instead of when init)
+
+V 0.11
+Now we reset/reconfigure card when some config param changed
+Fixed switching from monitor to managed
+Fixed crc-error-accept monitor ipwriv
+Fix (I hope) for who had association error code 0xa (Thanks to Harry Glinos for reporting this)
+
+V 0.10
+Addedd PCI id for Belkin F5D6020 (Thanks to Rick Bronson)
+Some experimental improvement in sa2400 programming
+Some major bugfix in sa2400 programming: Digital and Analog PHY was wrongly detected
+Fixed Analog PHY calibration procedure
+Added check/diagnostic for AP authentication failure
+Added check/diagnostic for AP association failure
+Added INSTALL file (Thanks to Rick Bronson)
+Fixed sleeping in softirq context during scan
+
+V 0.9.1
+Fix for hardlock when bringing up the interface (Thanks to Rick Bronson)
+
+V 0.9
+Updated README file
+Fixed spin_(lock/unlock)_irq(save/restore) typo (called without &) - (Thanks to Bjoern Riemer)
+Initial support for reassociation if association lost 
+Experimental skb change to see fix problem for who see hard reboot
+2.4 kernel compatibility fix (thanks to Rafael Darder Calvo)
+Fix in TX: now HI priority (and hopefully low priority) queue is working
+Management frames are sent on high priority queue
+
+V 0.8.1
+REALLY copyed ieee802_11.h from 2.6 kernel tree (because it has been removed in > 2.6.6)
+
+V 0.8
+Fix in the reset routine (From David Young)
+Minor code clean-ups
+Added more severe check for the RF chip (trivial)
+Compatibility fixes for 2.4 kernels (From Mihnea Stoenescu)
+Added module parm to choose if use HW for sequnce number (see README file)
+updated README file
+added other workarounds for compiling issues - see the firsts lines in r8180_core.c (Thanks to 'rooter2' who reported errors)..
+some initial code for managed mode & to make the nic tx beacons (not working yet!!)
+added experimental calibration of AGC by keeping high AGC_RESET on radio
+fixed bug while reading eeprom  value for energy trheshold BB reg (was masked with 3.. i'm not sure about this)
+Added initial BUGGY support for statistics in /proc/net/dev 
+Hooked in SW wep support
+fixed a bug that caused system crash while reiceving packet larger than a descriptor by less than 4 bytes
+copyed ieee802_11.h from 2.6 kernel tree (because it has been removed in > 2.6.6)
+
+V 0.7
+Added PCI id for DLINK DWL510 (From Markus Gothe)
+Some code clean-ups and compatibility fixes (From Markus Gothe)
+If-name defaulted to "wlan0" and make settable via module param (From Markus Gothe)
+Makefile clean improved (From Markus Gothe)
+Initial disassociation code
+some improvement to the hw init routine
+some code for future WEP support (not working yet)
+some improvements for baseband and sa2400 configuration
+updated README file 
+
+V 0.6
+Fixed TX to work with paket larger than a descriptor.
+Added WX for fragmentation.Now we can set fragmentation treshold
+in iwconfig you should see the bssid of the associated AP (if any)
+fix in RX (we called kmalloc with GFP_KERNEL in irq context)
+When the TX descriptors becomes full, the driver buffers the remaining TX packet and stop the net_if queue, then it wait the nic to complete a transfer and TX the buffered packet, the wake the queue again.
+I've copied a 560Mb file using my RTL8180 nic.. 8-)
+
+
+V 0.5
+Fix in the Tx routine (about fragment and descriptors)
+Increased number of TX descriptors and size of the TX buffers
+We take care of correctly unload the ieee80211 stack on rmmod, we also destroy eventually scheduled works
+Added Wireless Extension for getname
+some code clean-ups
+Fixed scannig routines (didn't release lock)
+We switched to WLAN header sw seq number handling: hw seemeed to give problems
+RX routines should handle packet bigger than a descriptor now
+Changes in the TX fragmentation code
+Fixed ieee80211 header size in the ieee80211 stack
+
+
+V 0.4
+Fix len in the association request frame builder routine
+Fix in the tx routines, now we should have the right seq number in the txed packet
+Other association logics implemented
+Basic association should work now
+README file updated
+Update ieee80211 stack. Merge of my changes whith the new ipw2100 v0.51 stack
+Added some basic IEEE802.11 header construction code to the IEEE802.11 stack
+Modified TX routine to get packet already fragmented by the IEEE802.11 stack
+Initial network support..
+Initial ping! On my system the NIC associates and is able to ping another host! ;-)
+
+
+V 0.3
+Improved scan routine: we have channel, rate, mode, etc..
+Improved scan routine: now runnig iwlist scan returns immediately, results are collected continuosly
+Improved makefile: you have to run make, mk script does not longer exist
+Some initial association logics. You may ask the NIC to associate by running iwconfig eth1 essid XXXXX. This is not functional yet, however your AP should at least answer with a failed association message
+Various fixes in rx/tx configuration code
+Some code cleanups
+added handler for network ifdown
+Fix in the TxPower EEPROM read routine
+Fix in the TX routine. Now PLCP duration should be OK
+TX should work correctly now
+fix in the set_channel wx handler (check for valid ch number)
+
+
+v 0.2
+Added some wireless extension handler and set nettype, this make kismet work
+Fix in the RX routine and in the FIFO fixing routine (set buffer lenght every time we got a frame/fix fifo)
+We remove CRC at the end of the packet
+We make the RF sleep before remove the module
+We can switch between monitor and managed mode. In managed mode we have basic/passive net scanning
+You may choose if accept bad-crc frames in monitor mode via iwpriv
+
+
+V 0.1 - First Sourceforge available. - it still should be considered a development release
+Added inital support for wireless extension. you may change channel with iwconfig
+Code cleanup
+Added README file
+Some additional check prevents the driver to load for nic that are know to don't work
+Fix in RX descriptor fixing code
+Removed some debug code
+
+
+V 0.0.9
+We use uniderectional DMA single mapping for rx buffers (not for descriptors) instead of consistent memory
+Some PCI posting fixes
+Some code celan-ups
+Sa2400 RF code rewritten
+Fix in the RX code - We shouldn't get oopses anymore!!
+
+
+V 0.0.8
+Attempt to fix hardlock on module remove
+Some code clean ups
+Fix in the buffer dump routine - if you have beacons in the air, you will se the essid in the dump!
+Initial merge with the 802.11 stack from the Intel Pro Wireless 2100 project
+Monitor Mode working on channel 11 - with ethereal you should see the raw ieee802.11 packets !! (we still have oopses!!!!!!)
+Better irq handler
+Specify the max DMA burst size for rx
+some code restructurations
+
+
+V 0.0.7
+Code clean ups - **now you have to insmod r8180.ko instead of r8180_pci_init.ko **
+Support for reading the card eeprom (tested on 93c46, but should work also on 93c56)
+Init routine now sets analog parameter reading it from the eprom - you should really see TX ok confirmations now
+Initial, experimental, support for PHILIPS sa2400 radio. (note that most probably this works only on MY card)
+Added basic RX logics and buffer handling
+Fixes to the RX descriptor allocator
+Initial *very* rough monitor mode via dmesg on ch11 (most probably frames are corrupted and data is messy. Under relatively heavy load there are oopses and some amenity)
+
+
+V 0.0.6
+We have TX descriptor and TX buffers pointer handling funcions and logics
+We have a rough initial TX funcion. this lack of certains things (mostly we set a dummy tx required time)
+Bringing down and up the interface make the drv invoke TX dma. The nic successfully TX the (dummy) frame (altought the RF part is not configured, so the frame isn't TXed in the air)
+We still don't see anything looping back..
+
+
+V 0.0.5
+Request irq earlyer
+reworked EEPROM config code
+changes in TX descriptor allocator (can allocate for all the 3 queues)
+we set correctly (at least better) the eprom mode before setting registers
+We use explicit asking to the nic to poll the descriptor queues
+DMA transfer now (try to) start!!! You can see TX and RX failure int from the NIC!
+
+
+V 0.0.4
+Write to CONFIG reg needs enabling write 
+We force the media link status to managed mode link
+Major fix in IOMAP write routines
+For now we always returns IRQ_HANDLED in the irq handler for safety reasons
+we allocate the tx descriptor ring (I forgot to do that in 0.0.3)
+we now write addresses for rx and tx rings in the right location
+fixed tx conf
+we dump the nic register map (page 0)
+
+
+V 0.0.3
+Fixed interrupt handler: now we reset properly irq condition
+some fix in rx descriptor allocation code
+contains some initial code for rough normal priority frame tx 
+set nic to MAC loopback mode
+
+
+V 0.0.2
+Added PCI ID for Belkin 8180 wlan card
+Fixed module probe fail
+Read & write MEM/IO routines fixed
+Read MAC correctly
+reset the NIC on card init
+added dummy irq handler
+contains some initial code for rough frame rx
+
+
+V 0.0.1
+Inital test release.
+Recognizes the card and read MAC nearly-correctly
+

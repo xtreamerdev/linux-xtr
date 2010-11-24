@@ -1,0 +1,49 @@
+menu "Reaktek 802.11x wireless lan devices"	
+	depends on NET_RADIO
+
+config REALTEK_PCI_RTL8185
+       	tristate "Realtek RTL8185 chipset 802.11g support (PCI)"
+	depends on NET_RADIO && INET && PCI
+	select REALTEK_IEEE80211
+	---help---
+	  Say Y if you have a PCI 802.11g device with Realtek RTL8185
+	  chipset.		 
+
+config REALTEK_USB_RTL8187
+       	tristate "Realtek RTL8187 chipset 802.11g support (USB)"
+	depends on NET_RADIO && INET && USB
+	select REALTEK_IEEE80211
+	---help---
+	  Say Y if you have a PCI 802.11g device with Realtek RTL8187
+	  chipset.		 
+
+config REALTEK_PCI_RTL8190
+       	tristate "Realtek RTL8190 chipset 802.11n support (PCI)"
+	depends on NET_RADIO && INET && PCI
+	---help---
+	  Say Y if you have a PCI 802.11n device with Realtek RTL8190
+	  chipset.
+
+#config REALTEK_USB_RTL8709
+#       	tristate "Realtek RTL8709 chipset 802.11n support (USB)"
+#       	depends on NET_RADIO && INET && USB        
+#       	---help---
+#         Say Y if you have a USB 802.11n device with Realtek RTL8709
+#         chipset.
+
+config REALTEK_USB_RTL8192
+       	tristate "Realtek RTL8192 chipset 802.11n support (USB)"
+       	depends on NET_RADIO && INET && USB        
+       	---help---
+         Say Y if you have a USB 802.11n device with Realtek RTL8192
+         chipset.
+
+config REALTEK_USB_RTL8191SU
+       	tristate "Realtek RTL8191SU chipset 802.11n support (USB)"
+       	depends on NET_RADIO && INET && USB        
+       	---help---
+         Say Y if you have a USB 802.11n device with Realtek RTL8191SU
+         chipset.
+
+endmenu
+

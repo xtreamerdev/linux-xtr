@@ -1,0 +1,48 @@
+$(shell cp -f $(PWD)/autoconf_usb8192u_linux.h include/autoconf.h)
+
+_OS_INTFS_FILES := os_intf/linux/os_intfs.o \
+			os_intf/linux/usb92u_intf.o
+
+_HAL_INTFS_FILES := hal/RTL8192U/hal_init.o \
+			hal/RTL8192U/usb_ops.o \
+			hal/RTL8192U/usb_ops_linux.o
+
+r8709-objs := cmd/rtl871x_cmd.o 
+
+r8709-objs += crypto/rtl871x_security.o 
+r8709-objs += debug/rtl871x_debug.o 
+r8709-objs += eeprom/rtl8192u_eeprom.o 
+
+r8709-objs += $(_HAL_INTFS_FILES)
+
+r8709-objs += io/rtl871x_io.o
+
+r8709-objs += ioctl/rtl871x_ioctl_query.o \
+		ioctl/rtl871x_ioctl_set.o \
+		ioctl/rtl871x_ioctl_linux.o
+
+r8709-objs += mlme/ieee80211.o \
+		mlme/rtl871x_mlme.o \
+		mlme/wlan_cmd.o  \
+		mlme/wlan_mlme.o \
+		mlme/wlan_sme.o  \
+		mlme/wlan_task.o \
+		mlme/wlan_util.o  \
+		mlme/RTL8711_RFCfg.o \
+		mlme/irp_misc.o
+
+#8711-y += mp/rtl871x_mp.o mp/rtl871x_mp_ioctl.o
+
+r8709-objs += os_dep/linux/xmit_linux.o \
+		os_dep/linux/mlme_linux.o \
+		os_dep/linux/recv_linux.o \
+
+r8709-objs += $(_OS_INTFS_FILES)
+
+r8709-objs += pwrctrl/rtl871x_pwrctrl.o
+r8709-objs += recv/rtl871x_recv.o
+r8709-objs += rf/rtl871x_rf.o 
+r8709-objs += sta_mgt/rtl871x_sta_mgt.o
+r8709-objs += xmit/rtl871x_xmit.o
+
+obj-$(CONFIG_REALTEK_USB_RTL8709)	+= r8709.o
