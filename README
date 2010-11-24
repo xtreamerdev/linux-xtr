@@ -1,15 +1,14 @@
-                    Linux Xtreamer kernel 2.6.12.6-VENUS
+            Linux Xtreamer kernel 2.6.12 - Realtek VENUS/MARS SoC
 
 This project aims at maintaining a repository of the kernel source used on the
-Xtreamer HD media players that are based on the Realtek VENUS/MARS SoC family.
+Xtreamer HD media players based on the Realtek VENUS/MARS SoC family.
 
-   This project is NOT endorsed by Xtreamer or any of its subsidiaries.
+  This project is NOT endorsed by Realtek, Xtreamer or any of their subsidiaries.
 
 This source tree has been updated from the following:
-* ver0: initial GPL kernel source release from Realtek
+* version #0: initial GPL kernel source release from Realtek
   http://download.xtreamer.net/Firmware/Xtreamer_GPL/Xtreamer_GPL.zip
-* ver3(?): first GPL kernel release from Xtreamer
+* version #3: first GPL kernel release from Xtreamer
   http://xtreamerdev.googlecode.com/files/xtr_kernel.tar.bz2
-* ver22 (Unicorn): second GPL kernel release from Xtreamer
+* version #22: second GPL kernel release from Xtreamer
   http://xtreamerdev.googlecode.com/files/linux-2.6.12.xtreamer_ver22_unicorn.tar.bz2
-* 
