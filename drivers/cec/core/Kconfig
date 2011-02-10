@@ -4,7 +4,7 @@ config CEC
 	bool "CEC Support"
 	
 config CEC_CHARDEV
-	bool "CEC device interface"
+	tristate "CEC device interface"
 	depends on CEC
 	help
 	  Say Y here to use cec-* device files, usually found in the /dev/cec/
@@ -13,11 +13,13 @@ config CEC_CHARDEV
 
 	  This support is also available as a module.  If so, the module 
 	  will be called cec-dev.
+
+	  You will also need to select one of the CEC adapters from the list below.
 	
 
 config CEC_DEBUG
 	bool "CEC Debug Mode"
-	depends on CEC
+	depends on CEC_CHARDEV
 	default n
 	help 
 	  If you want to enable cec debug message, say Y.

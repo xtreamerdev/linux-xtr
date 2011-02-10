@@ -23,7 +23,9 @@ Update List :
 ------------------------------------------------------------------------- 
     1.1     |   20081211    | Add Spinlock Protection
 -------------------------------------------------------------------------*/
+#include <linux/config.h>
 #include <linux/kernel.h>
+#include <linux/module.h>
 #include <linux/slab.h>
 #include "cm_buff.h"
 
@@ -149,7 +151,7 @@ void kfree_cmb(cm_buff* cmb)
                                         if (cmb->tail > cmb->end)  \
                                             printk(KERN_WARNING "cmb over panic:  cmb=%p cmb->tail (%p) > cmb->end (%p)\n", cmb, cmb->tail, cmb->end);  \
                                         if (cmb->data < cmb->head) \
-                                            printk(KERN_WARNING "cmb under panic: cmb=%p cmb->data (%p) < cmb->head (%p)\n", cmb, cmb->data, cmb->head);  \                                            
+                                            printk(KERN_WARNING "cmb under panic: cmb=%p cmb->data (%p) < cmb->head (%p)\n", cmb, cmb->data, cmb->head);  \
                                      }while(0)
 
 
@@ -210,3 +212,16 @@ void cmb_purge(cm_buff* cmb)
     cmb->len  = 0;    
 }
 
+/* Required by the cec_mars module if multiple modules are used for CEC */
+EXPORT_SYMBOL_GPL(alloc_cmb);
+EXPORT_SYMBOL_GPL(kfree_cmb);
+EXPORT_SYMBOL_GPL(cmb_put);
+EXPORT_SYMBOL_GPL(cmb_push);
+EXPORT_SYMBOL_GPL(cmb_pull);
+EXPORT_SYMBOL_GPL(cmb_dequeue);
+EXPORT_SYMBOL_GPL(cmb_purge);
+EXPORT_SYMBOL_GPL(cmb_reserve);
+EXPORT_SYMBOL_GPL(cmb_tailroom);
+EXPORT_SYMBOL_GPL(cmb_queue_len);
+EXPORT_SYMBOL_GPL(cmb_queue_head_init);
+EXPORT_SYMBOL_GPL(cmb_queue_tail);

@@ -1,10 +1,10 @@
+#include <linux/config.h>
 #include <linux/kernel.h>
+#include <linux/init.h>
 #include <linux/device.h>
+#include <linux/module.h>
 #include "cec.h"
-
-#ifdef CONFIG_CEC_CHARDEV
 #include "cec_dev.h"
-#endif  
 
 
 
@@ -170,9 +170,7 @@ int cec_drv_probe(struct device * dev)
         
     if (p_drv->probe(p_dev)==0)        
     {
-#ifdef CONFIG_CEC_CHARDEV
         create_cec_dev_node(p_dev);
-#endif        
         return 0;    
     }
 
@@ -201,9 +199,7 @@ int cec_drv_remove(struct device * dev)
     if (p_drv->remove) 
         p_drv->remove(p_dev);
         
-#ifdef CONFIG_CEC_CHARDEV
-    create_cec_dev_node(p_dev);
-#endif  
+    remove_cec_dev_node(p_dev);
         
     return 0;
 }
@@ -224,7 +220,7 @@ void cec_drv_shutdown(struct device * dev)
     cec_device* p_dev = to_cec_device(dev);    
     cec_driver* p_drv = to_cec_driver(dev->driver);    
     
-    printk("shotdown cec_dev '%s'\n", p_dev->name);            
+    printk("shutdown cec_dev '%s'\n", p_dev->name);            
     
     if (p_drv->enable)
         p_drv->enable(p_dev, 0);    
@@ -326,7 +322,7 @@ void unregister_cec_driver(cec_driver* driver)
  *         
  * Retn : 0 : success, others fail  
  *------------------------------------------------------------------*/
-static int __init cec_core_init(void)
+int cec_core_init(void)
 {                 
     printk("%s, register cec_bus %p\n",__FUNCTION__, &cec_bus_type);
 	    
@@ -344,12 +340,13 @@ static int __init cec_core_init(void)
  *         
  * Retn : 0 : success, others fail  
  *------------------------------------------------------------------*/
-static void __exit cec_core_exit(void)
+void cec_core_exit(void)
 {       
     bus_unregister(&cec_bus_type);        // unregister cec bus
 }
 
-
-
-module_init(cec_core_init);
-module_exit(cec_core_exit);
+/* Required by the cec_mars module if multiple modules are used for CEC */
+EXPORT_SYMBOL_GPL(register_cec_driver);
+EXPORT_SYMBOL_GPL(unregister_cec_driver);
+EXPORT_SYMBOL_GPL(register_cec_device);
+EXPORT_SYMBOL_GPL(unregister_cec_device);

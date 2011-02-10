@@ -48,6 +48,7 @@ Update List :
 #include <linux/jiffies.h>
 #include <linux/interrupt.h>
 #include <linux/wait.h>
+#include <linux/kallsyms.h>
 #include <asm/io.h>
 #include "cec_mars.h"
 #include "cec_mars_reg.h"
@@ -100,6 +101,35 @@ static unsigned char __sleepdata    mars_cec_wakeup_flag = 0;
 
 
 /*------------------------------------------------------------------
+ * Func : mars_cec_send_msg
+ *
+ * Desc : mars cec send msg
+ *
+ * Parm : pbuff : data to send
+ *        len   : data length
+ *         
+ * Retn : 0 : not wakeup, 1 : wakeup  
+ *------------------------------------------------------------------*/
+int __sleep mars_cec_send_msg(unsigned char* pbuff, int len) 
+{
+    write_reg32(MIS_CEC_TX_DATA2, 0x26);
+    write_reg32(MIS_CEC_TX0, TX_RST);
+    write_reg32(MIS_CEC_TX0, 0);
+
+    for(;len>0; len--)
+    {
+        write_reg32(MIS_CEC_TX_FIFO, *(pbuff++));
+    }
+
+    write_reg32(MIS_CEC_TX0, 0xF | TX_EN);      // write data out
+
+    while((read_reg32(MIS_CEC_TX0) & TX_EN))
+        for (len=0; len<1000; len++);
+
+    return 0;
+}
+
+/*------------------------------------------------------------------
  * Func : mars_cec_wakeup_check
  *
  * Desc : mars cec wake up condition
@@ -108,93 +138,79 @@ static unsigned char __sleepdata    mars_cec_wakeup_flag = 0;
  *         
  * Retn : 0 : not wakeup, 1 : wakeup  
  *------------------------------------------------------------------*/
-int __sleep mars_cec_wakeup_check() 
-{	    
-    int ret = 0;        
+int __sleep mars_cec_wakeup_check(void) 
+{	      
+    int ret = 0;
     
-    if (read_reg32(MIS_ISR) & (CEC_RX_INT | CEC_TX_INT))    
+#ifdef CEC_WAKEUP_DEBUG
+    unsigned char buff[16];
+    unsigned char cr0 = 0;
+    unsigned char rx0 = 0;
+    unsigned char rx1 = 0;
+#endif
+
+    write_reg32(MIS_CEC_RX1, RX_INT);               // clear rx interrupt
+    write_reg32(MIS_CEC_TX1, TX_INT);               // clear tx interrupt
+        
+    if ((read_reg32(MIS_CEC_CR0) & 0xC0)!= 0x40)    // enable CEC
     {
-        write_reg32(MIS_ISR, (CEC_RX_INT | CEC_TX_INT));        // clear interrupt
+        write_reg32(MIS_CEC_CR0, 0x4f);        // Enable CEC
+        write_reg32(MIS_CEC_RX0, RX_RST);
+        write_reg32(MIS_CEC_RX0, 0);
+        write_reg32(MIS_CEC_TX0, TX_RST);
+        write_reg32(MIS_CEC_TX0, 0);
+        write_reg32(MIS_CEC_RT1, 5);           // Retry times = 5
+        write_reg32(MIS_CEC_CR2, PRE_DIV);
+        write_reg32(MIS_CEC_RX_START0, RX_START0);
+        write_reg32(MIS_CEC_RX_START1, RX_START1);
+        write_reg32(MIS_CEC_TX_START0, TX_START0);
+        write_reg32(MIS_CEC_TX_START1, TX_START1);
+        write_reg32(MIS_CEC_TX_DATA0,  TX_DATA0);
+        write_reg32(MIS_CEC_TX_DATA1,  TX_DATA1);
+        write_reg32(MIS_CEC_TX_DATA2, 0x26);
     }
-    
-    if (mars_cec_wakeup_flag)     
-    {                
-        if ((read_reg32(MIS_CEC_CR0) & 0xC0)!= 0x40)
-        {
-            DBG_CHAR('s');
-            write_reg32(MIS_CEC_CR0, 0x44);                        
-            write_reg32(MIS_CEC_RX0, 0x40);
-            write_reg32(MIS_CEC_RX0, 0x00);        
-            write_reg32(MIS_CEC_RX0, 0x90);         
-            
-#ifdef RST_TX_HIGH
-            write_reg32(MIS_CEC_TX_DATA2, 1);     // restrt rx            
-#else            
-            write_reg32(MIS_CEC_TX_DATA2, 0x26);
+
+#ifdef CEC_WAKEUP_DEBUG
+    cr0 = read_reg32(MIS_CEC_CR0);
+    rx0 = read_reg32(MIS_CEC_RX0);
+    rx1 = read_reg32(MIS_CEC_RX1);
 #endif
-            return 0;
-        }        
-                                
-        if (((read_reg32(MIS_CEC_RX0)) & 0x80)==0)    // RX STOPED
-        {                                
-            if ((read_reg32(MIS_CEC_RX1) & 0x80))     // GOT EOM
-            {                
-                DBG_CHAR('O');
-                        
-                switch(read_reg32(MIS_CEC_RX_FIFO))
-                {
-                case CEC_MSG_IMAGE_VIEW_ON:
-                case CEC_MSG_TEXT_VIEW_ON:
-                                
-                    if ((mars_cec_wakeup_flag & CEC_WAKEUP_BY_IMAGE_VIEW_ON))
-                        ret = 3;
-                        
-                    break;
-                    
-                case CEC_MSG_SET_STREAM_PATH:
-                
-                    if ((mars_cec_wakeup_flag & CEC_MSG_SET_STREAM_PATH))
-                        ret = 4;
-                        
-                    break;
-                    
-                case CEC_MSG_PLAY:
-                
-                    if ((mars_cec_wakeup_flag & CEC_MSG_PLAY))
-                        ret = 5;                                        
-                }
-            }   
-            else
-            {                
-                DBG_CHAR('w');
-            }             
-            
-            if (!ret)
-            {
-                write_reg32(MIS_CEC_CR0, 0x44);
-                write_reg32(MIS_CEC_RX0, 0x40);
-                write_reg32(MIS_CEC_RX0, 0x00);
-                write_reg32(MIS_CEC_RX0, 0x90);
-                
-#ifdef RST_TX_HIGH
-                write_reg32(MIS_CEC_TX_DATA2, 1);
-#else            
-                write_reg32(MIS_CEC_TX_DATA2, 0x26);
-#endif
-            }
-            else
-            {                
-                write_reg32(MIS_CEC_RX0, 0x40);                
-                write_reg32(MIS_CEC_RX0, 0x00);                            
-            }
-        }
-        else
+
+    if ((read_reg32(MIS_CEC_RX0) & RX_EN)==0)
+    {
+        // rx stopped
+        if ((read_reg32(MIS_CEC_RX1) & RX_EOM))
         {
-            DBG_CHAR('.');
+            write_reg32(MIS_CEC_RX0, RX_RST);
+            write_reg32(MIS_CEC_RX0, 0);
+#ifdef CEC_WAKEUP_DEBUG
+            mars_cec_send_msg(buff, 4);
+#endif
+            write_reg32(MIS_CEC_CR0, 0);
+            ret = 0xff;
+            goto end_proc;
         }
+        
+        // restart rx
+        write_reg32(MIS_CEC_RX0, RX_RST);
+        write_reg32(MIS_CEC_RX0, 0);
+        write_reg32(MIS_CEC_RX0, RX_EN | RX_INT);
     }
-    
-	return ret;
+
+#ifdef CEC_WAKEUP_DEBUG
+    buff[0] = 0x89;
+    buff[1] = cr0;
+    buff[2] = rx0;
+    buff[3] = rx1;
+    mars_cec_send_msg(buff, 4);
+#endif
+
+end_proc:
+
+    // we should clear cec rx/tx interrupts manually if CPU is mars
+    write_reg32(MIS_ISR, (CEC_TX_INT | CEC_RX_INT));
+
+    return ret;
 }
 
 
@@ -905,7 +921,7 @@ int mars_cec_set_logical_addr(
  *         
  * Retn : 0 : for success, others : fail
  *------------------------------------------------------------------*/
-int mars_cec_xmit_message(mars_cec* p_this, cm_buff* cmb, unsigned long flags)
+int mars_cec_xmit_message(mars_cec* p_this, cm_buff* cmb, unsigned char flags)
 {    
     int ret = 0;
     
@@ -921,7 +937,9 @@ int mars_cec_xmit_message(mars_cec* p_this, cm_buff* cmb, unsigned long flags)
     
     if ((cmb->flags & NONBLOCK)==0)
     {                
-        wait_for_completion(&cmb->complete);    
+        if (wait_for_completion_interruptible(&cmb->complete)) {
+            return -1;
+        }
         switch(cmb->status)    
         {
         case XMIT_OK:
@@ -964,7 +982,8 @@ int mars_cec_xmit_message(mars_cec* p_this, cm_buff* cmb, unsigned long flags)
 static cm_buff* mars_cec_read_message(mars_cec* p_this, unsigned char flags)
 {                
     while(!(flags & NONBLOCK) && p_this->status.enable && !cmb_queue_len(&p_this->rx_queue))
-        wait_for_completion(&p_this->rcv.complete);    // wait message
+        if (wait_for_completion_interruptible(&p_this->rcv.complete))    // wait message
+            return NULL;
 
     if (p_this->status.enable)
     {
@@ -1002,10 +1021,22 @@ void mars_cec_uninit(mars_cec* p_this)
     p_this->status.init = 0;
 }    
 
-
-extern int  register_cec_wakeup_ops( int (*ops)() ) ;
-extern void unregister_cec_wakeup_ops( int (*ops)() ) ;
-
+#ifdef CONFIG_PM
+/* Hell if I know why insmod returns 'unknown symbol' on those 
+ * when these calls are definitely listed in /proc/kallsyms...
+ * Gotta leave something for Realtek to fix... :)               */
+  typedef int  (*register_cec_wakeup_ops_t)(int (*ops)(void));
+  typedef void (*unregister_cec_wakeup_ops_t)(int (*ops)(void)) ;
+  register_cec_wakeup_ops_t ks_register_cec_wakeup_ops = NULL;
+  unregister_cec_wakeup_ops_t ks_unregister_cec_wakeup_ops = NULL;
+  #define register_cec_wakeup_ops ks_register_cec_wakeup_ops
+  #define unregister_cec_wakeup_ops ks_unregister_cec_wakeup_ops
+//  extern int  register_cec_wakeup_ops( int (*ops)(void) );
+//  extern void unregister_cec_wakeup_ops( int (*ops)(void) ) ;
+#else
+  #define register_cec_wakeup_ops(x)
+  #define unregister_cec_wakeup_ops(x) 
+#endif
 
 /*------------------------------------------------------------------
  * Func : mars_cec_suspend
@@ -1019,10 +1050,39 @@ extern void unregister_cec_wakeup_ops( int (*ops)() ) ;
 int mars_cec_suspend(mars_cec* p_this)
 {
     cec_info("mars cec suspended\n");       
+
+#ifdef CONFIG_PM
+    if (register_cec_wakeup_ops == NULL) {
+        register_cec_wakeup_ops = (void*)kallsyms_lookup_name("register_cec_wakeup_ops");
+        if (register_cec_wakeup_ops == NULL) {
+            printk("cec: Unknown symbol register_cec_wakeup_ops\n");
+            return 0;
+        }
+    }
+#endif
     
     if (mars_cec_wakeup_flag)    
-        register_cec_wakeup_ops(mars_cec_wakeup_check);            
-        
+    {
+        register_cec_wakeup_ops(mars_cec_wakeup_check);
+        write_reg32(MIS_CEC_CR0, 0x4f);        // Enable CEC
+        write_reg32(MIS_CEC_RX0, RX_RST);           // RX Disable
+        write_reg32(MIS_CEC_RX0, 0);           // RX Disable 
+        write_reg32(MIS_CEC_TX0, TX_RST);           // RX Disable
+        write_reg32(MIS_CEC_TX0, 0);           // TX Disable
+        write_reg32(MIS_CEC_RT1, 5);           // Retry times = 5
+        write_reg32(MIS_CEC_CR2, PRE_DIV);
+        write_reg32(MIS_CEC_RX_START0, RX_START0);
+        write_reg32(MIS_CEC_RX_START1, RX_START1);
+        write_reg32(MIS_CEC_TX_START0, TX_START0);
+        write_reg32(MIS_CEC_TX_START1, TX_START1);
+        write_reg32(MIS_CEC_TX_DATA0,  TX_DATA0);
+        write_reg32(MIS_CEC_TX_DATA1,  TX_DATA1);
+        write_reg32(MIS_CEC_TX_DATA2, 0x26);
+        write_reg32(MIS_CEC_RX0, RX_RST);
+        write_reg32(MIS_CEC_RX0, 0);
+        write_reg32(MIS_CEC_RX0, 0x90);     // enable RX interrupt
+    }
+
     return 0;
 }
 
@@ -1040,6 +1100,16 @@ int mars_cec_resume(mars_cec* p_this)
 {
     cec_info("mars cec resume\n");       
     
+#ifdef CONFIG_PM
+    if (unregister_cec_wakeup_ops == NULL) {
+        unregister_cec_wakeup_ops = (void*)kallsyms_lookup_name("unregister_cec_wakeup_ops");
+        if (unregister_cec_wakeup_ops == NULL) {
+            printk("cec: Unknown symbol unregister_cec_wakeup_ops\n");
+            return 0;
+        }
+    }
+#endif
+
     if (mars_cec_wakeup_flag)
     {
         unregister_cec_wakeup_ops(mars_cec_wakeup_check);        
@@ -1083,8 +1153,7 @@ static int ops_set_logical_addr(cec_device* dev, unsigned char log_addr)
     return mars_cec_set_logical_addr((mars_cec*) cec_get_drvdata(dev), log_addr);       
 }    
 
-
-static int ops_xmit(cec_device* dev, cm_buff* cmb, unsigned long flags)
+static int ops_xmit(cec_device* dev, cm_buff* cmb, unsigned char flags)
 {
     return mars_cec_xmit_message((mars_cec*) cec_get_drvdata(dev), cmb, flags);        
 }
@@ -1140,8 +1209,12 @@ static cec_driver mars_cec_driver =
  *         
  * Retn : 0 : success, others fail  
  *------------------------------------------------------------------*/
+extern int cec_dev_init(void);
 static int __init mars_cec_module_init(void)
 {                        
+    if (cec_dev_init())
+        return -EFAULT;
+
     cec_info("mars cec module init\n");        
                                 
     if (register_cec_driver(&mars_cec_driver)!=0)
@@ -1163,11 +1236,16 @@ static int __init mars_cec_module_init(void)
  *         
  * Retn : 0 : success, others fail  
  *------------------------------------------------------------------*/
+extern void cec_dev_exit(void);
 static void __exit mars_cec_module_exit(void)
-{            
+{
     unregister_cec_driver(&mars_cec_driver);
+    cec_dev_exit();
 }
 
 
+/* Module information */
 module_init(mars_cec_module_init);
 module_exit(mars_cec_module_exit);
+/* required to avoid "Unknown symbol" errors on insmod */
+MODULE_LICENSE("GPL");
